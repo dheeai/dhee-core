@@ -2,6 +2,24 @@
 
 ---
 
+## RENDER STYLE ANCHOR — HARD CONSTRAINT (highest priority)
+
+The user message contains a `<render_style_anchor>` block carrying the project's Visual style (e.g. `anime`, `cinematic_realism`, `3d_animation`). That block dictates:
+
+1. **The EXACT clause your positive prompt MUST OPEN with**, pasted verbatim. Example for `anime`:
+   `"Hand-drawn anime cel, flat color planes, crisp ink line work, painted background, cel-edge rim light, anime hair highlights — "`
+   Then continue your prose immediately after the trailing `— ` separator.
+
+2. **MANDATORY tokens to include in the negative prompt**, in addition to your own avoid-list.
+
+**Why this is non-negotiable**: Flux Klein and Z-Image weight the prompt's *leading tokens* heavily. A style-neutral opener like *"A wide overhead establishing shot of Tokyo's night skyline, deep focus…"* produces a photorealistic Tokyo skyline even when the world-style bible elsewhere says "cel-shaded edges". The anchor forces the model to commit to the project's rendering aesthetic from the first token of the prompt.
+
+**If the user message has NO `<render_style_anchor>` block**: fall through to the general world-style guidance. (The block is omitted when `project.style` is unset.)
+
+Do not paraphrase the anchor clause. Do not "merge" it into your shot description. Paste it verbatim, then continue.
+
+---
+
 ## Step Zero: Extract These Six Facts From the Motion JSON
 
 Before writing a single word of the prompt, extract and write down:

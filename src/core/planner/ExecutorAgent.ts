@@ -4037,6 +4037,21 @@ Examples of common failure modes to avoid:
       }
     }
 
+    // Render-style anchor for shot_image_prompt nodes. Closes the
+    // 2026-05-19 Soft Seinen gap where project.style='anime' didn't
+    // reach the shot prompt's leading clause — character_image_guide
+    // had its own anchor, but shot_composition_guide didn't, so Flux
+    // Klein produced photorealistic shots opening on style-neutral
+    // clauses ("A wide overhead shot of Tokyo's night skyline…"). The
+    // helper produces an EXACT anchor string the LLM is told to paste
+    // verbatim at the start of every positive prompt, plus the
+    // anti-modality negative tokens. See renderStyleAnchor.ts.
+    let renderStyleAnchorBlock = '';
+    if (node.typeId === 'shot_image_prompt') {
+      const { buildRenderStyleAnchorBlock } = await import('../prompts/renderStyleAnchor.js');
+      renderStyleAnchorBlock = buildRenderStyleAnchorBlock(style ?? null);
+    }
+
     // For scene nodes: inject scene_assignment with summaries and boundaries
     let sceneAssignment = '';
     if (node.typeId === 'scene' && node.itemId && this.sceneSummaries.size > 0) {
@@ -4108,8 +4123,8 @@ Examples of common failure modes to avoid:
     const outputContractBlock = buildOutputContractBlock(node.typeId);
 
     const user = inputs.contextBlock
-      ? `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}${shotBreakdownPlanBlock}${bharataCuesBlock}\n\n${inputs.contextBlock}${outputContractBlock}`
-      : `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}${shotBreakdownPlanBlock}${bharataCuesBlock}${outputContractBlock}`;
+      ? `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}${shotBreakdownPlanBlock}${bharataCuesBlock}${renderStyleAnchorBlock}\n\n${inputs.contextBlock}${outputContractBlock}`
+      : `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}${shotBreakdownPlanBlock}${bharataCuesBlock}${renderStyleAnchorBlock}${outputContractBlock}`;
 
     return { system: systemPrompt, user, loadedSkills };
   }
