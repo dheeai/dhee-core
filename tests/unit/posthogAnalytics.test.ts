@@ -20,6 +20,7 @@ vi.mock('posthog-node', () => ({
 
 import {
   captureDesktopAppStarted,
+  configurePostHogRuntime,
   configureAnalytics,
   identifyAnalyticsUser,
   resetAnalyticsForTests,
@@ -95,6 +96,31 @@ describe('posthog analytics', () => {
         event: 'desktop_app_started',
         properties: expect.not.objectContaining({
           user_id: 'user-1',
+        }),
+      }),
+    );
+  });
+
+  it('can enable PostHog after an early disabled check', () => {
+    captureDesktopAppStarted();
+    expect(posthogMocks.constructor).not.toHaveBeenCalled();
+
+    configurePostHogRuntime({
+      apiKey: 'phc_runtime',
+      host: 'https://posthog.test',
+      analyticsSalt: 'salt-1',
+    });
+    captureDesktopAppStarted({ source: 'runtime-config' });
+
+    expect(process.env.ANALYTICS_SALT).toBe('salt-1');
+    expect(posthogMocks.constructor).toHaveBeenCalledWith('phc_runtime', {
+      host: 'https://posthog.test',
+    });
+    expect(posthogMocks.capture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'desktop_app_started',
+        properties: expect.objectContaining({
+          source: 'runtime-config',
         }),
       }),
     );
