@@ -246,7 +246,7 @@ export class LLMClient {
    * Generate a response from the LLM.
    */
   async generate(options: GenerateOptions): Promise<LLMResponse> {
-    const { messages, tools, temperature = 0.7, maxTokens, responseFormat } = options;
+    const { messages, tools, temperature = 0.7, maxTokens, responseFormat, signal } = options;
     const logger = getLLMLogger();
 
     // Log request
@@ -267,9 +267,18 @@ export class LLMClient {
       request.response_format = responseFormat;
     }
 
+    // Thread the abort signal into the OpenAI SDK call. Without this,
+    // mid-flight non-streaming requests survive cancel() — the executor
+    // and pi-agent see the abort flag but their in-flight LLM call has
+    // to either complete or hit the SDK's 200s timeout before the
+    // BackgroundTaskRunner's active task resolves. Symptom: header Stop
+    // button stuck at "Stopping…" for up to 200s after Stop is clicked.
     let response: OpenAI.ChatCompletion;
     try {
-      response = await this.client.chat.completions.create(request);
+      response = await this.client.chat.completions.create(
+        request,
+        signal ? { signal } : undefined,
+      );
     } catch (error) {
       throw this.formatOperationError('LLM generate', error);
     }
@@ -285,7 +294,11 @@ export class LLMClient {
    * Review an image using the VLM (vision) capability.
    * Sends the image + a text prompt and returns the LLM's assessment.
    */
-  async reviewImage(imagePath: string, reviewPrompt: string): Promise<{ pass: boolean; issues: string[] }> {
+  async reviewImage(
+    imagePath: string,
+    reviewPrompt: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ pass: boolean; issues: string[] }> {
     const fs = await import('fs');
     const imageBuffer = fs.readFileSync(imagePath);
     const base64 = imageBuffer.toString('base64');
@@ -336,7 +349,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       ],
       temperature: 0.1,
       max_tokens: 200,
-    });
+    }, opts?.signal ? { signal: opts.signal } : undefined);
 
     const text = response.choices[0]?.message?.content ?? '';
     try {
@@ -371,7 +384,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
   async chatText(
     userText: string,
     systemText?: string,
-    opts?: { temperature?: number; maxTokens?: number },
+    opts?: { temperature?: number; maxTokens?: number; signal?: AbortSignal },
   ): Promise<string> {
     const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
     if (systemText) messages.push({ role: 'system', content: systemText });
@@ -383,7 +396,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       messages: messages as any,
       temperature: opts?.temperature ?? 0.1,
       max_tokens: opts?.maxTokens ?? 2000,
-    });
+    }, opts?.signal ? { signal: opts.signal } : undefined);
 
     return response.choices[0]?.message?.content ?? '';
   }
@@ -401,7 +414,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
     imagePath: string,
     userText: string,
     systemText?: string,
-    opts?: { temperature?: number; maxTokens?: number },
+    opts?: { temperature?: number; maxTokens?: number; signal?: AbortSignal },
   ): Promise<string> {
     const fs = await import('fs');
     const imageBuffer = fs.readFileSync(imagePath);
@@ -435,7 +448,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       reasoning: { exclude: true } as any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    } as any, opts?.signal ? { signal: opts.signal } : undefined);
 
     return response.choices[0]?.message?.content ?? '';
   }

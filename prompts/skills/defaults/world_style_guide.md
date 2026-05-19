@@ -1,5 +1,23 @@
 **PURPOSE**: Define the visual and auditory world of this project in one document. This "style bible" ensures every shot, image, and video in the project shares a consistent look and feel.
 
+## RENDER STYLE — HARD CONSTRAINT
+
+The `<project_constraints>` block in your context names a **Visual style** (e.g. `anime`, `cel-shaded`, `3D animation`, `stop-motion`, `photorealistic`, `cinematic-realism`, `cinematic`, `oil painting`, `watercolor`). This is the rendering aesthetic the project will be drawn in — every section of the bible you write must use vocabulary that matches it. Drift in either direction will be faithfully implemented by every downstream image prompt, and the project will look wrong.
+
+If the Visual style is animation / illustrated (anime, cel-shaded, 3D animation, stop-motion, oil painting, watercolor, comic, graphic-novel):
+
+- **DO use** drawing/painting vocabulary: hand-drawn line work, ink-line thickness, cel shading, flat color planes, gradient-shaded skin, painted backgrounds with visible brushwork, hard shadow edges in direct sunlight, key-frame poses, anime hair highlights, exaggerated expression beats, halftone shading, cel-edge rim light.
+- **DO NOT use** live-action cinematography vocabulary: 35mm film, 16mm film, film grain (unless deliberately stylized), lens (any focal length), shallow depth of field as a rendering property (it can describe in-frame focus but never as a "lens" reference), camera shake, handheld documentary feel, lens flare from physical glass, anamorphic distortion, digital clean.
+
+If the Visual style is live-action (photorealistic, cinematic, cinematic-realism, documentary):
+
+- **DO use** lens / film / camera vocabulary: 35mm or 85mm lens, film stock reference, shallow / deep depth of field, handheld vs locked-off camera, lens flare, anamorphic, color grade reference (teal/orange, bleach bypass, etc.).
+- **DO NOT use** drawing vocabulary: line work, cel shading, flat color planes, painted backgrounds, ink lines.
+
+The "Visual Tone" section below explicitly lists film-stock examples — those examples apply ONLY when Visual style is live-action. For animation styles, substitute the drawing-vocabulary equivalents (line weight, shading style, painted background treatment, key-frame pose energy).
+
+If the Visual style field is missing or generic ("default", "auto"), assume cinematic-realism and use live-action vocabulary.
+
 ## PERIOD ACCURACY — HARD CONSTRAINT
 
 If the plot / story / user input names a historical period (e.g. "300 BC", "Mauryan", "Mughal", "Vedic", "Iron Age", "Renaissance", "medieval", "Victorian", "ancient Rome"), every visual and auditory element you describe must be appropriate to that era. Treat the period as immovable; do not let modern noir / cinematic genre conventions drift you into post-period artifacts.

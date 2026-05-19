@@ -7,6 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 
 // Debug logging to file instead of console to avoid polluting Ink UI
@@ -312,6 +313,31 @@ export function parameterizeZImageWorkflow(
     } else if (classType === 'SaveImage') {
       inputs['filename_prefix'] = params.filenamePrefix || 'ZImage';
     }
+  }
+
+  // [ZIMAGE_PROMPT_TRACE] Dump final positive + negative texts post-
+  // parameterization so we can diff what kshana actually submits against
+  // what disk says. Surfaces caching / wrong-prompt-substitution bugs in
+  // the character_image path (officer-as-Doraemon, 2026-05-19).
+  try {
+    let positiveText = '';
+    let negativeText = '';
+    for (const [nodeId, node] of Object.entries(workflow)) {
+      const n = node as { class_type?: string; inputs?: Record<string, unknown> };
+      if (n.class_type !== 'CLIPTextEncode') continue;
+      const t = (n.inputs?.['text'] as string) || '';
+      const tag = t.toLowerCase().includes('blurry') || t.toLowerCase().includes('ugly') || t.toLowerCase().includes('bad')
+        ? 'NEG'
+        : 'POS';
+      if (tag === 'POS') positiveText = t;
+      else negativeText = t;
+      debugLog(`[ZIMAGE_PROMPT_TRACE] node=${nodeId} class=CLIPTextEncode tag=${tag} text_first_160="${t.slice(0, 160)}" text_len=${t.length}`);
+    }
+    const posMd5 = createHash('md5').update(positiveText).digest('hex').slice(0, 12);
+    const negMd5 = createHash('md5').update(negativeText).digest('hex').slice(0, 12);
+    debugLog(`[ZIMAGE_PROMPT_TRACE] seed=${seed} filename_prefix="${params.filenamePrefix ?? 'ZImage'}" pos_md5=${posMd5} neg_md5=${negMd5}`);
+  } catch (err) {
+    debugLog(`[ZIMAGE_PROMPT_TRACE] failed: ${(err as Error).message}`);
   }
 
   return workflow;
@@ -912,6 +938,70 @@ export function parameterizeWorkflowByName(
  *
  * Used for user-uploaded workflows that have no hardcoded parameterize function.
  */
+/**
+ * Resolve a manifest `nodeId` spec to an actual API-workflow node key.
+ *
+ * Manifests can name the target node three ways:
+ *  - Literal key:                "16"                          → return "16" if present
+ *  - Wildcard by class_type:     "*KSampler"                   → first node where class_type === KSampler
+ *  - Wildcard with title tag:    "*CLIPTextEncode:positive"    → first CLIPTextEncode whose
+ *                                                                _meta.title (or inputs.text fallback)
+ *                                                                matches the tag
+ *
+ * Title tags recognized today: `positive`, `negative`.
+ *
+ * This was missing before 2026-05-19 — `parameterizeGeneric` did a literal lookup of
+ * `"*CLIPTextEncode:positive"`, never matched any node, and silently applied zero
+ * parameters. The Z-Image character_image path then ran every submission with the
+ * template's defaults (fixed seed, empty positive prompt, default "blurry ugly bad"
+ * negative) → byte-identical Doraemon output every time, regardless of officer.json.
+ *
+ * Returns null when no node matches. Callers should warn so future manifest typos
+ * don't silently degrade to template defaults.
+ */
+function resolveManifestNodeId(
+  spec: string,
+  apiWorkflow: Record<string, unknown>,
+): string | null {
+  // Literal key path
+  if (!spec.startsWith('*')) {
+    return apiWorkflow[spec] ? spec : null;
+  }
+
+  // Wildcard parse: "*ClassName" or "*ClassName:tag"
+  const rest = spec.slice(1);
+  const colonIdx = rest.indexOf(':');
+  const targetClass = colonIdx === -1 ? rest : rest.slice(0, colonIdx);
+  const tag = colonIdx === -1 ? null : rest.slice(colonIdx + 1).toLowerCase();
+
+  for (const [nodeId, raw] of Object.entries(apiWorkflow)) {
+    const node = raw as {
+      class_type?: string;
+      _meta?: { title?: string };
+      inputs?: Record<string, unknown>;
+    };
+    if (node.class_type !== targetClass) continue;
+    if (!tag) return nodeId;
+
+    const title = (node._meta?.title ?? '').toLowerCase();
+    if (title.includes(tag)) return nodeId;
+
+    // Fallback heuristic for CLIPTextEncode when titles aren't set:
+    // a node whose current text mentions "blurry/ugly/bad" is the negative.
+    if (targetClass === 'CLIPTextEncode') {
+      const currentText = ((node.inputs?.['text'] as string) ?? '').toLowerCase();
+      const looksNegative =
+        currentText.includes('blurry') ||
+        currentText.includes('ugly') ||
+        currentText.includes('bad') ||
+        currentText.includes('worst');
+      if (tag === 'negative' && looksNegative) return nodeId;
+      if (tag === 'positive' && !looksNegative) return nodeId;
+    }
+  }
+  return null;
+}
+
 export function parameterizeGeneric(
   template: WorkflowTemplate | Record<string, unknown>,
   manifest: {
@@ -934,7 +1024,12 @@ export function parameterizeGeneric(
     const value = params[mapping.input] ?? (mapping as { defaultValue?: unknown }).defaultValue;
     if (value === undefined) continue;
 
-    const node = apiWorkflow[mapping.nodeId] as { inputs?: Record<string, unknown> } | undefined;
+    const resolvedNodeId = resolveManifestNodeId(mapping.nodeId, apiWorkflow);
+    if (!resolvedNodeId) {
+      debugLog(`[parameterizeGeneric] WARN: nodeId "${mapping.nodeId}" did not match any node — input "${mapping.input}" SKIPPED`);
+      continue;
+    }
+    const node = apiWorkflow[resolvedNodeId] as { inputs?: Record<string, unknown> } | undefined;
     if (node) {
       node.inputs = node.inputs || {};
       node.inputs[mapping.field] = value;
@@ -945,8 +1040,10 @@ export function parameterizeGeneric(
   if (manifest.promptKeywords) {
     const kw = manifest.promptKeywords;
     for (const mapping of manifest.parameterMappings) {
+      const resolvedNodeId = resolveManifestNodeId(mapping.nodeId, apiWorkflow);
+      if (!resolvedNodeId) continue;
       if (mapping.input === 'prompt' || mapping.input === 'edit_prompt') {
-        const node = apiWorkflow[mapping.nodeId] as { inputs?: Record<string, unknown> } | undefined;
+        const node = apiWorkflow[resolvedNodeId] as { inputs?: Record<string, unknown> } | undefined;
         if (node?.inputs?.[mapping.field] && typeof node.inputs[mapping.field] === 'string') {
           const original = node.inputs[mapping.field] as string;
           node.inputs[mapping.field] =
@@ -956,7 +1053,7 @@ export function parameterizeGeneric(
         }
       }
       if (mapping.input === 'negative_prompt' && kw.negativeAppend) {
-        const node = apiWorkflow[mapping.nodeId] as { inputs?: Record<string, unknown> } | undefined;
+        const node = apiWorkflow[resolvedNodeId] as { inputs?: Record<string, unknown> } | undefined;
         if (node?.inputs?.[mapping.field] && typeof node.inputs[mapping.field] === 'string') {
           node.inputs[mapping.field] = (node.inputs[mapping.field] as string) + ', ' + kw.negativeAppend;
         }

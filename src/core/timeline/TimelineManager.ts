@@ -881,6 +881,48 @@ export function upsertSceneShots(
 ): UpsertSceneShotsResult {
   const existingShotSegments = getSceneShotSegments(timeline, sceneSegmentId);
   const sceneSegment = timeline.segments.find(segment => segment.id === sceneSegmentId);
+
+  // (0) Drop-all: caller is replacing the scene's plan with an empty list.
+  // Remove every `<sceneSegmentId>_shot_*` segment and reflow downstream
+  // segments by the dropped span. Bypasses the rest of the function because
+  // every later branch assumes shots.length > 0.
+  if (shots.length === 0) {
+    if (existingShotSegments.length === 0) {
+      return {
+        timeline,
+        preservedExistingShots: false,
+        mergedMetadataIntoExistingShots: false,
+      };
+    }
+    const sortedScene = [...existingShotSegments].sort((a, b) => a.startTime - b.startTime);
+    const sceneStart = sortedScene[0]!.startTime;
+    const sceneEnd = sortedScene[sortedScene.length - 1]!.endTime;
+    const droppedSpan = Math.round((sceneEnd - sceneStart) * 100) / 100;
+    const sceneIdsSet = new Set(sortedScene.map(s => s.id));
+    const survivors = timeline.segments
+      .filter(s => !sceneIdsSet.has(s.id))
+      .map(s =>
+        s.startTime >= sceneEnd
+          ? {
+              ...s,
+              startTime: Math.round((s.startTime - droppedSpan) * 100) / 100,
+              endTime: Math.round((s.endTime - droppedSpan) * 100) / 100,
+            }
+          : s,
+      );
+    const updated: Timeline = {
+      ...timeline,
+      segments: survivors,
+      totalDuration: Math.round((timeline.totalDuration - droppedSpan) * 100) / 100,
+    };
+    updated.validation = validateTimeline(updated);
+    return {
+      timeline: updated,
+      preservedExistingShots: false,
+      mergedMetadataIntoExistingShots: false,
+    };
+  }
+
   const hasFilledShots = existingShotSegments.some(segment => segment.fillStatus === 'filled');
   const canMergeIntoExistingShots =
     existingShotSegments.length === shots.length &&
@@ -913,6 +955,49 @@ export function upsertSceneShots(
       timeline: updatedTimeline,
       preservedExistingShots: true,
       mergedMetadataIntoExistingShots: true,
+    };
+  }
+
+  // (2) Plan resize — shot count changed. Rebuild segments from the new
+  // plan (via splitSegmentIntoShots, which already handles reflow), then
+  // patch fills back onto surviving shots whose shotNumber is still in
+  // scope. Without this branch, a Stage A re-plan from 8 → 4 shots leaves
+  // the old 4 trailing segments untouched on the timeline, and the FFmpeg
+  // assembler then stitches a final video of 8 shots from two different
+  // plans (the 2026-05-19 "Village" bug).
+  if (existingShotSegments.length > 0 && existingShotSegments.length !== shots.length) {
+    const oldFilledByShotNum = new Map<number, TimelineSegment>();
+    for (const seg of existingShotSegments) {
+      if (seg.fillStatus !== 'filled') continue;
+      const m = seg.id.match(/_shot_(\d+)$/);
+      if (m?.[1]) oldFilledByShotNum.set(Number(m[1]), seg);
+    }
+    const rebuilt = splitSegmentIntoShots(timeline, sceneSegmentId, shots);
+    const shotIdPrefix = `${sceneSegmentId}_shot_`;
+    const patchedSegments = rebuilt.segments.map(seg => {
+      if (!seg.id.startsWith(shotIdPrefix)) return seg;
+      const m = seg.id.match(/_shot_(\d+)$/);
+      if (!m?.[1]) return seg;
+      const oldSeg = oldFilledByShotNum.get(Number(m[1]));
+      if (!oldSeg) return seg;
+      // Carry the rendered work forward: layers + fillStatus + version
+      // history. Metadata is merged (new plan's metadata wins on key
+      // overlap because shotNumber etc. are authoritative there).
+      return {
+        ...seg,
+        layers: oldSeg.layers,
+        fillStatus: oldSeg.fillStatus,
+        ...(oldSeg.layerHistory ? { layerHistory: oldSeg.layerHistory } : {}),
+        ...(oldSeg.versionInfo ? { versionInfo: oldSeg.versionInfo } : {}),
+        metadata: { ...(oldSeg.metadata ?? {}), ...(seg.metadata ?? {}) },
+      };
+    });
+    const updated: Timeline = { ...rebuilt, segments: patchedSegments };
+    updated.validation = validateTimeline(updated);
+    return {
+      timeline: updated,
+      preservedExistingShots: oldFilledByShotNum.size > 0,
+      mergedMetadataIntoExistingShots: false,
     };
   }
 

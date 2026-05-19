@@ -22,6 +22,7 @@ import {
   setSessionProject,
 } from '../agent/pi/sessionStore.js';
 import { getBackgroundTaskRunner } from './runners/backgroundTaskRunnerSingleton.js';
+import { decideCancelActions } from './cancelDecision.js';
 import type { BackgroundTaskRunnerEvents } from './runners/BackgroundTaskRunner.js';
 import { applyProjectAnnouncement } from './projectAnnouncement.js';
 import {
@@ -1614,48 +1615,170 @@ export class ConversationManager {
    * the runner task matching THIS session's id is touched — other
    * chat windows' work is independent.
    */
-  cancelTask(sessionId: string): boolean {
+  cancelTask(
+    sessionId: string,
+    onProgress?: (step: { lane: 'agent' | 'abort' | 'comfy' | 'runner' | 'summary'; message: string }) => void,
+  ): boolean {
     const session = this.sessions.get(sessionId);
-    if (!session) {
-      return false;
-    }
 
-    // Call agent.stop() to set the aborted flag — the loop checks this each iteration
-    if (session.agent) {
-      session.agent.stop();
-    }
-
-    if (session.abortController) {
-      session.abortController.abort();
-    }
-
-    // Stop any ComfyUI prompts the executor submitted via POST /interrupt
-    // so the GPU job doesn't keep running (and billing) past the cancel.
-    // BackgroundTaskRunner.cancel() also fires this for runner-managed
-    // tasks; calling it from both paths is idempotent — interrupting an
-    // already-completed prompt is a no-op.
-    void import('../services/comfyui/activeJobs.js')
-      .catch(() => null)
-      .then((mod) => {
-        if (mod && typeof (mod as { cancelAllActiveJobs?: unknown }).cancelAllActiveJobs === 'function') {
-          (mod as { cancelAllActiveJobs: () => Promise<number> }).cancelAllActiveJobs();
+    // FM9 + user request 2026-05-19: `onProgress` lets the WebSocket /
+    // IPC layer pipe per-lane progress into the chat panel so the user
+    // sees WHAT is being cancelled instead of a stuck "Stopping…"
+    // spinner. Messages are ephemeral chat bubbles — they MUST NOT
+    // flow into the persisted JSONL chat history (the LLM shouldn't
+    // see internal cancellation chatter as conversation context). The
+    // default route is `session.activeEvents.onNotification`, which is
+    // already wired to the renderer's chat panel via the notification
+    // event channel; notifications are NOT persisted by the agent's
+    // event recorder. Explicit `onProgress` overrides for tests or
+    // server-mode callers that want raw lane info.
+    const emit = (lane: 'agent' | 'abort' | 'comfy' | 'runner' | 'summary', message: string) => {
+      console.log(`[cancelTask] ${lane}: ${message}`);
+      try {
+        if (onProgress) {
+          onProgress({ lane, message });
+        } else {
+          session?.activeEvents?.onNotification?.(sessionId, {
+            level: 'info',
+            message: `🛑 ${message}`,
+          });
         }
-      });
+      } catch (err) {
+        console.log(`[cancelTask] emit threw: ${(err as Error).message}`);
+      }
+    };
 
-    let backgroundCancelled = false;
+    // Inspect runner state ONCE up front so the decision helper sees a
+    // consistent snapshot. Wrapped in try/catch because the runner is
+    // initialized lazily and accessing it during early boot throws.
+    let runnerActiveTaskId: string | null = null;
     try {
       const runner = getBackgroundTaskRunner();
       const active = runner.getActive();
-      if (active && active.spec.sessionId === sessionId) {
-        backgroundCancelled = runner.cancel(active.id);
-      }
+      // FM1 fix (2026-05-19): no sessionId match here. Single-session
+      // model — if the runner is busy, it's THIS user's work, period.
+      // The old gate `active.spec.sessionId === sessionId` silently
+      // dropped cancels after a session-rename (clearChatHistory mints
+      // a fresh id on new-project create), leaving the runner ploughing
+      // through shots while the chat's "Stopping..." spinner ran forever.
+      if (active) runnerActiveTaskId = active.id;
     } catch {
-      // Runner uninitialized in this process — nothing to cancel.
+      // Runner uninitialized — leave as null.
+    }
+
+    const plan = decideCancelActions({
+      sessionExists: !!session,
+      hasAgent: !!session?.agent,
+      hasAbortController: !!session?.abortController,
+      runnerActiveTaskId,
+    });
+
+    console.log(
+      `[cancelTask] sessionId=${sessionId} outcome=${plan.outcome} ` +
+        `plan: agent=${plan.signalAgent} abort=${plan.fireAbortController} ` +
+        `comfy=${plan.interruptComfy} runnerTask=${plan.cancelRunnerTaskId ?? '-'}`,
+    );
+
+    if (!session) {
+      emit('summary', `No active session to cancel (sessionId=${sessionId} not found).`);
+      // FM8: when the sessionId doesn't match anything we know, return
+      // false honestly rather than silently report "false" alongside
+      // potentially-fired side-effects.
+      return false;
+    }
+
+    emit('summary', 'Cancelling — waiting for active operations to wind down…');
+
+    let agentSignaled = false;
+    if (plan.signalAgent && session.agent) {
+      try {
+        session.agent.stop();
+        agentSignaled = true;
+        emit('agent', 'Stopping chat agent loop (will halt after the current step).');
+      } catch (err) {
+        emit('agent', `Chat agent stop failed: ${(err as Error).message}`);
+      }
+    }
+
+    let abortFired = false;
+    if (plan.fireAbortController && session.abortController) {
+      try {
+        session.abortController.abort();
+        abortFired = true;
+        emit('abort', 'Aborting in-flight LLM streams.');
+      } catch (err) {
+        emit('abort', `Abort signal failed: ${(err as Error).message}`);
+      }
+    }
+
+    if (plan.interruptComfy) {
+      // Fire-and-forget by design: interrupt is a best-effort GPU
+      // release. Emit a chat update when the call resolves so the
+      // user sees the count of jobs interrupted.
+      emit('comfy', 'Interrupting ComfyUI prompts (releasing GPU)…');
+      void import('../services/comfyui/activeJobs.js')
+        .catch((err) => {
+          emit('comfy', `ComfyUI interrupt failed to load: ${(err as Error).message}`);
+          return null;
+        })
+        .then((mod) => {
+          if (
+            mod &&
+            typeof (mod as { cancelAllActiveJobs?: unknown }).cancelAllActiveJobs ===
+              'function'
+          ) {
+            (mod as { cancelAllActiveJobs: () => Promise<number> })
+              .cancelAllActiveJobs()
+              .then((n) =>
+                emit(
+                  'comfy',
+                  n > 0
+                    ? `ComfyUI interrupt sent for ${n} active job(s).`
+                    : 'ComfyUI had no active prompts to interrupt.',
+                ),
+              )
+              .catch((err) =>
+                emit('comfy', `ComfyUI interrupt threw: ${(err as Error).message}`),
+              );
+          }
+        });
+    }
+
+    let runnerCancelled = false;
+    if (plan.cancelRunnerTaskId) {
+      try {
+        const runner = getBackgroundTaskRunner();
+        runnerCancelled = runner.cancel(plan.cancelRunnerTaskId);
+        emit(
+          'runner',
+          runnerCancelled
+            ? `Background task ${plan.cancelRunnerTaskId} cancellation requested. In-flight work may take a few seconds to wind down.`
+            : `Background task ${plan.cancelRunnerTaskId} was already idle — nothing to cancel.`,
+        );
+      } catch (err) {
+        emit('runner', `Background task cancel threw: ${(err as Error).message}`);
+      }
     }
 
     session.state.status = 'idle';
     session.state.lastActivity = Date.now();
-    return !!(session.agent || session.abortController || backgroundCancelled);
+
+    const anythingHappenedHere =
+      agentSignaled || abortFired || runnerCancelled || plan.interruptComfy;
+    emit(
+      'summary',
+      anythingHappenedHere
+        ? 'Cancel signals dispatched. The runner will mark the task cancelled once in-flight ops settle.'
+        : 'Nothing was running to cancel.',
+    );
+
+    // FM8: the legacy `return !!(agent || abortController || backgroundCancelled)`
+    // counted the OLD pre-cancel state, not what actually fired. Now we
+    // return true only when at least one downstream signal actually
+    // dispatched (or got skipped because nothing was running, which the
+    // helper's outcome flag captures).
+    const anythingHappened = agentSignaled || abortFired || runnerCancelled;
+    return anythingHappened || plan.outcome === 'no_active_work';
   }
 
   /**

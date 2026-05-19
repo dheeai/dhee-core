@@ -520,6 +520,30 @@ export async function submitImageGeneration(params: ImageGenerationParams): Prom
       });
     };
 
+    // [SUBMIT_PROMPT_TRACE] Capture the exact prompt going into the provider.
+    // Paired with [ZIMAGE_PROMPT_TRACE] (in WorkflowLoader.ts) so we can
+    // diff the upstream prompt against the downstream workflow JSON.
+    // Use this to isolate caching / wrong-prompt-substitution bugs that
+    // produce byte-identical PNGs across runs (officer-as-Doraemon, 2026-05-19).
+    {
+      const { createHash } = await import('crypto');
+      const posMd5 = createHash('md5')
+        .update(enhancedPrompt)
+        .digest('hex')
+        .slice(0, 12);
+      const negMd5 = createHash('md5')
+        .update(enhancedNegativePrompt)
+        .digest('hex')
+        .slice(0, 12);
+      debugLog(
+        `[SUBMIT_PROMPT_TRACE] image_type=${image_type} character_name=${character_name ?? '-'} setting_name=${setting_name ?? '-'} ` +
+          `seed=${seed} pos_md5=${posMd5} neg_md5=${negMd5} ` +
+          `pos_first_160="${enhancedPrompt.slice(0, 160)}" ` +
+          `pos_len=${enhancedPrompt.length} neg_len=${enhancedNegativePrompt.length} ` +
+          `filenamePrefix="${filenamePrefix}"`,
+      );
+    }
+
     let result;
     try {
       result = await provider.generateImage!(

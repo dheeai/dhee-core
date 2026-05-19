@@ -1662,8 +1662,21 @@ export class ExecutorAgent extends TypedEventEmitter {
       }
 
       const actualTimelineSegmentIds = this.getSceneTimelineSegmentIds(sceneId);
+      // Post-condition: timeline shot segments for this scene must be the
+      // EXACT set the new plan expects — not a superset. The original
+      // check only required every expected ID to be present, which let
+      // orphan segments from a prior larger plan survive (the 2026-05-19
+      // bug: Stage A re-planned 8 → 4, timeline kept all 8, final video
+      // stitched the orphans). Asserting exact-set match catches any
+      // future drift at the source instead of in the final assembly.
+      const expectedSet = new Set(parsed.expectedTimelineSegmentIds);
+      const orphanSegmentIds = actualTimelineSegmentIds.filter(id => !expectedSet.has(id));
+      const missingSegmentIds = parsed.expectedTimelineSegmentIds.filter(
+        id => !actualTimelineSegmentIds.includes(id),
+      );
       const timelineSatisfied =
-        parsed.expectedTimelineSegmentIds.every(id => actualTimelineSegmentIds.includes(id))
+        missingSegmentIds.length === 0
+        && orphanSegmentIds.length === 0
         && !actualTimelineSegmentIds.includes(sceneId);
       return {
         sceneId,
@@ -1675,7 +1688,9 @@ export class ExecutorAgent extends TypedEventEmitter {
         timelineSatisfied,
         success: graphSatisfied && timelineSatisfied,
         failureReason: graphSatisfied
-          ? (timelineSatisfied ? undefined : `timeline_postcondition_failed:${parsed.expectedTimelineSegmentIds.filter(id => !actualTimelineSegmentIds.includes(id)).join(',') || sceneId}`)
+          ? (timelineSatisfied
+              ? undefined
+              : `timeline_postcondition_failed:missing=${missingSegmentIds.join(',') || '-'} orphans=${orphanSegmentIds.join(',') || '-'}`)
           : 'graph_postcondition_failed',
         outputPath: parsed.outputPath,
       };

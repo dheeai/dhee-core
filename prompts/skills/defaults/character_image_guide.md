@@ -35,6 +35,30 @@ Common failure modes to actively avoid:
 
 ---
 
+## RENDER STYLE ANCHOR — HARD CONSTRAINT
+
+The `<project_constraints>` block names a **Visual style** (e.g. `cinematic_realism`, `photorealistic`, `cinematic`, `anime`, `cel-shaded`, `3D animation`, `stop-motion`, `oil painting`, `watercolor`). The text-to-image model that consumes your prompt is **fast and low-CFG** — at cfg=1.0 with 9 sampling steps it leans on its training prior more than on your text. Without an explicit render-style anchor at the very start of the prompt, the model will silently wander into whatever mode the seed lands on — most often the highest-density mode in its training data, which is **cartoon/anime mascot output**. We have actually seen a "police officer in his 40s" prompt produce Doraemon in production.
+
+You MUST:
+
+1. **Open the positive prompt with a render-style anchor** that matches the project's Visual style. This anchor is the FIRST clause, before the era tag and before the character description. Examples:
+   - `cinematic_realism` / `photorealistic` / `cinematic` → `"Photorealistic studio photograph, 85mm lens, sharp focus, natural skin texture and pores — <era tag>, <character description>"`
+   - `anime` / `cel-shaded` → `"Hand-drawn anime cel, flat color planes, crisp ink line work, painted background — <era tag>, …"`
+   - `3D animation` → `"Stylized 3D animated character render, smooth subsurface shading, soft rim light, Pixar-grade fidelity — <era tag>, …"`
+   - `oil painting` → `"Oil painting on canvas, visible brushwork, layered glazes, painterly skin tones — <era tag>, …"`
+   - `watercolor` → `"Watercolor illustration on cold-press paper, soft bleed, granulating pigment — <era tag>, …"`
+
+2. **Append the matching anti-modality tokens to the Negative Prompt** so the model is pushed AWAY from the wrong mode:
+   - For live-action styles (`cinematic_realism`, `photorealistic`, `cinematic`): append **`cartoon, anime, illustration, mascot, anthropomorphic animal, cel-shaded, sticker art, 3D render, video game, cgi, plastic skin, doll-like, chibi`** to the negative.
+   - For animation styles (`anime`, `cel-shaded`, `3D animation`, etc.): append **`photorealistic, photograph, film grain, 35mm, lens flare, real human, live-action`** to the negative.
+   - For painting styles: append the *other* style's tokens (e.g., for oil painting: `photorealistic photograph, 3D render, anime cel`).
+
+If `Visual style` is missing or generic ("default", "auto"), assume `cinematic_realism` and use the photorealistic anchor + anti-cartoon negative.
+
+This is not optional. Without these two changes a single unlucky seed will produce nonsense (mascot characters, cartoon avatars, anime tropes) that downstream image-edit / video stages cannot recover from — the broken character ref is the base canvas for every shot the character appears in.
+
+---
+
 **STEP 1 — EXTRACT CHARACTER DETAILS FROM THE PROFILE**
 
 Read the character profile FIRST. Include ALL of the following in the prompt, sourced from the profile:
@@ -127,10 +151,10 @@ If no world style bible is provided, use neutral color choices appropriate to th
 **OUTPUT FORMAT:**
 ```
 **Image Prompt:**
-[One paragraph, 80–250 words, flowing prose. Begin with the era context (if any) and the ethnicity/age/build straight from the profile, then weave all profile-sourced details naturally (hair, face, clothing category, props, prosthetics, distinguishing features — each traced back to a line in the profile). Color *tones* harmonize with the world style palette; garment *categories* come from the profile. Must include shot type, plain neutral studio background, soft even studio lighting, one subject only.]
+[One paragraph, 80–250 words, flowing prose. MUST begin with the RENDER STYLE ANCHOR matching the project's Visual style (see top of guide — e.g., "Photorealistic studio photograph, 85mm lens, sharp focus, natural skin texture…" for cinematic_realism). Then era context (if any) and the ethnicity/age/build straight from the profile, then weave all profile-sourced details naturally (hair, face, clothing category, props, prosthetics, distinguishing features — each traced back to a line in the profile). Color *tones* harmonize with the world style palette; garment *categories* come from the profile. Must include shot type, plain neutral studio background, soft even studio lighting, one subject only.]
 
 **Negative Prompt:**
-background scene, environment, landscape, buildings, furniture, multiple people, busy background, motion blur, cropped face, text, watermarks, [add ALL "Avoid" items from the world style bible here — e.g., modern clothing, bright saturated colors, contemporary accessories, neon lighting]
+background scene, environment, landscape, buildings, furniture, multiple people, busy background, motion blur, cropped face, text, watermarks, [MANDATORY: append the anti-modality tokens matching the project's Visual style — see RENDER STYLE ANCHOR section. For live-action: cartoon, anime, illustration, mascot, anthropomorphic animal, cel-shaded, sticker art, 3D render, video game, cgi, plastic skin, doll-like, chibi. For animation: photorealistic, photograph, film grain, 35mm, lens flare, real human, live-action.], [add ALL "Avoid" items from the world style bible here — e.g., modern clothing, bright saturated colors, contemporary accessories, neon lighting]
 
 **Aspect Ratio:**
 1:1
