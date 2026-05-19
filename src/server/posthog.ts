@@ -66,6 +66,12 @@ export interface AnalyticsCaptureOptions {
   component?: string;
 }
 
+export interface PostHogRuntimeConfig {
+  apiKey?: string;
+  host?: string;
+  analyticsSalt?: string;
+}
+
 let commonProperties: CommonProperties = {
   app_version: '0.0.0',
   platform: 'server',
@@ -156,6 +162,26 @@ function getPostHogApiKey(): string | undefined {
 function getPostHogHost(): string {
   const host = process.env['POSTHOG_HOST']?.trim();
   return host && host.length > 0 ? host : DEFAULT_POSTHOG_HOST;
+}
+
+export function configurePostHogRuntime(config: PostHogRuntimeConfig): void {
+  const apiKey = config.apiKey?.trim();
+  const host = config.host?.trim();
+  const analyticsSalt = config.analyticsSalt?.trim();
+
+  if (apiKey && !process.env['POSTHOG_API_KEY']) {
+    process.env['POSTHOG_API_KEY'] = apiKey;
+  }
+  if (host && !process.env['POSTHOG_HOST']) {
+    process.env['POSTHOG_HOST'] = host;
+  }
+  if (analyticsSalt && !process.env['ANALYTICS_SALT']) {
+    process.env['ANALYTICS_SALT'] = analyticsSalt;
+  }
+
+  if (posthogClient === null && getPostHogApiKey()) {
+    posthogClient = undefined;
+  }
 }
 
 function isPostHogFlushNoise(args: unknown[]): boolean {

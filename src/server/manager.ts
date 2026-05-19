@@ -33,6 +33,7 @@ export { loadDevEnv } from './loadDevEnv.js';
 export type { LoadDevEnvResult } from './loadDevEnv.js';
 export {
   captureAnalyticsEvent,
+  configurePostHogRuntime,
   captureDesktopAppFirstStarted,
   captureDesktopAppStarted,
   captureDesktopHeartbeat,
