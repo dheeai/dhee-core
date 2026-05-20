@@ -32,6 +32,13 @@ export interface CanonicalRefsShot {
     background?: string[] | null;
     lurking?: string | null;
   } | null;
+  /** The canonical scene setting refId (e.g. "city_bus_station"). When set
+   *  the enforcer guarantees this setting appears in the references list
+   *  even when the LLM forgot to list it — the 2026-05-20 Ruby V3 s1s1
+   *  incident, where the prose says "a city bus" but references contained
+   *  only the Ruby character. Without a setting slot, Flux Klein has
+   *  nothing to anchor the location to and drifts. */
+  canonicalSceneSetting?: string | null;
 }
 
 export interface ShotImagePromptRefMinimal {
@@ -77,8 +84,11 @@ export function enforceShotCanonicalRefs(
   if (!shot) return { references: out, addedRefIds };
 
   // The canonical refIds the SVP named for this shot. Order matters
-  // only for "which one gets the lowest imageNumber" — primary first.
+  // only for "which one gets the lowest imageNumber" — settings first
+  // so the base canvas (slot 1) is the scene setting, then characters
+  // by narrative weight (perspective > primary > lurking > background).
   const canonicalIds: string[] = [];
+  if (shot.canonicalSceneSetting) canonicalIds.push(shot.canonicalSceneSetting);
   if (shot.perspectiveOf) canonicalIds.push(shot.perspectiveOf);
   if (shot.focus?.primary) canonicalIds.push(shot.focus.primary);
   if (shot.focus?.lurking) canonicalIds.push(shot.focus.lurking);

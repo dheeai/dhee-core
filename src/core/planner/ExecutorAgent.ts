@@ -5555,6 +5555,7 @@ Examples of common failure modes to avoid:
                     background: ctx0.focusBackground ?? [],
                     lurking: ctx0.focusLurking ?? null,
                   },
+                  canonicalSceneSetting: ctx0.canonicalSceneSetting ?? null,
                 },
                 ff0.references,
                 availableRefs,

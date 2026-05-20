@@ -220,6 +220,54 @@ describe('enforceShotCanonicalRefs', () => {
     expect(addedRefIds).toEqual([]);
   });
 
+  it('FM11: canonicalSceneSetting alone → setting appended', () => {
+    // 2026-05-20 Ruby V3 s1s1 case: shot prose names a bus station, but
+    // the LLM emitted references with only the Ruby character. The SVP's
+    // canonicalSceneSetting carries the scene setting refId; the enforcer
+    // must add it so Flux Klein has a base canvas to anchor the location.
+    const shot: CanonicalRefsShot = { canonicalSceneSetting: 'broadcast_booth' };
+    const { references, addedRefIds } = enforceShotCanonicalRefs(shot, [], AVAILABLE);
+    expect(addedRefIds).toEqual(['setting_image:broadcast_booth']);
+    expect(references).toHaveLength(1);
+    expect(references[0]!.refId).toBe('setting_image:broadcast_booth');
+    expect(references[0]!.type).toBe('setting');
+  });
+
+  it('FM11b: setting already present in references → not duplicated', () => {
+    const existing: ShotImagePromptRefMinimal[] = [
+      { imageNumber: 1, type: 'setting', refId: 'setting_image:broadcast_booth' },
+    ];
+    const shot: CanonicalRefsShot = { canonicalSceneSetting: 'broadcast_booth' };
+    const { references, addedRefIds } = enforceShotCanonicalRefs(shot, existing, AVAILABLE);
+    expect(addedRefIds).toEqual([]);
+    expect(references).toEqual(existing);
+  });
+
+  it('FM11c: setting + characters → setting gets the lowest imageNumber', () => {
+    // Setting goes first in canonicalIds so the base canvas (slot 1) is
+    // the location, then characters layer on top in narrative order.
+    const shot: CanonicalRefsShot = {
+      canonicalSceneSetting: 'broadcast_booth',
+      focus: { primary: 'protagonist' },
+    };
+    const { references, addedRefIds } = enforceShotCanonicalRefs(shot, [], AVAILABLE);
+    expect(addedRefIds).toEqual([
+      'setting_image:broadcast_booth',
+      'character_image:protagonist',
+    ]);
+    expect(references[0]!.refId).toBe('setting_image:broadcast_booth');
+    expect(references[0]!.imageNumber).toBe(1);
+    expect(references[1]!.refId).toBe('character_image:protagonist');
+    expect(references[1]!.imageNumber).toBe(2);
+  });
+
+  it('FM11d: canonicalSceneSetting names a setting not in availableRefs → silently skipped', () => {
+    const shot: CanonicalRefsShot = { canonicalSceneSetting: 'mars_colony' };
+    const { references, addedRefIds } = enforceShotCanonicalRefs(shot, [], AVAILABLE);
+    expect(addedRefIds).toEqual([]);
+    expect(references).toEqual([]);
+  });
+
   it('order: perspectiveOf is added BEFORE focus.primary (when both differ)', () => {
     const shot: CanonicalRefsShot = {
       perspectiveOf: 'antagonist',
