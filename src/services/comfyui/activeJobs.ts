@@ -34,6 +34,22 @@ export interface CancellableComfyJob {
   /** Calls POST /interrupt for the right server URL. */
   interrupt: () => Promise<void>;
   /**
+   * Calls POST /queue with {"clear": true} for the right server URL.
+   * `/interrupt` ONLY stops the prompt currently executing on the GPU
+   * — pending prompts in the queue keep running one after another.
+   * `clearQueue()` drains that pending queue. Cancel paths call both:
+   * interrupt to stop what's running NOW, clearQueue to make sure
+   * nothing else starts.
+   */
+  clearQueue: () => Promise<void>;
+  /**
+   * Stable key for the Comfy server this job lives on (e.g. base
+   * URL). Used by `cancelAllActiveJobs` to deduplicate `clearQueue`
+   * calls — many jobs from the same batch share one Comfy server,
+   * and clearing the queue once per server is correct + fast.
+   */
+  serverKey: string;
+  /**
    * Wakes any wait-for-completion loop (poll OR websocket) that's
    * watching this job — set by the registrant; signalled by
    * `cancelAllActiveJobs`. Without this, the cancel path could fire
@@ -72,6 +88,10 @@ export function unregisterActiveJob(job: CancellableComfyJob): void {
 export async function cancelAllActiveJobs(): Promise<number> {
   const snapshot = Array.from(activeJobs);
   activeJobs.clear();
+  // STEP 1 (synchronous, no awaits): abort every wait loop's controller.
+  // This is what actually makes the cancel instantaneous — once these
+  // signals fire, the executor's awaits unblock and the runner can
+  // wind down without waiting for any HTTP round-trip.
   for (const job of snapshot) {
     try {
       job.abortController.abort();
@@ -79,7 +99,36 @@ export async function cancelAllActiveJobs(): Promise<number> {
       // Already aborted, etc. — swallow.
     }
   }
-  await Promise.allSettled(snapshot.map((job) => job.interrupt()));
+  // STEP 2 (HTTP cleanup against Comfy):
+  //   - `interrupt()`  → POST /interrupt, stops the prompt currently
+  //                       executing on the GPU.
+  //   - `clearQueue()` → POST /queue {clear:true}, drains every PENDING
+  //                       prompt this server still has queued. CLOUD MODE
+  //                       no-ops this — the queue is shared with other
+  //                       tenants, see ComfyUIClient.clearQueue() for
+  //                       why.
+  // Both are best-effort cleanup against the GPU. The cancel ALREADY
+  // completed (step 1) — these HTTP calls just release cloud credits /
+  // free up local GPU for the next run, they don't gate the cancel.
+  //
+  // FIRE-AND-FORGET (kicked off, NOT awaited): the user explicitly
+  // wants cancels to be instant in cloud mode where the /interrupt
+  // round-trip can take a few seconds. Awaiting it here made
+  // `cancel()` callers (BackgroundTaskRunner, ChatPanelEmbedded
+  // Stop, agent's kshana_task_cancel) wait for cloud HTTP to settle
+  // before reporting cancellation — and during that window the UI
+  // is in limbo. Now: signal flips instantly, GPU cleanup happens
+  // in the background.
+  const uniqueServers = new Map<string, () => Promise<void>>();
+  for (const job of snapshot) {
+    if (!uniqueServers.has(job.serverKey)) {
+      uniqueServers.set(job.serverKey, job.clearQueue);
+    }
+  }
+  void Promise.allSettled([
+    ...snapshot.map((job) => job.interrupt()),
+    ...Array.from(uniqueServers.values()).map((fn) => fn()),
+  ]);
   return snapshot.length;
 }
 

@@ -41,6 +41,53 @@ describe('ComfyUIClient cloud detection', () => {
   });
 });
 
+describe('ComfyUIClient.clearQueue cloud-safety', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env['COMFY_CLOUD_API_KEY'];
+  });
+
+  it('LOCAL mode: clearQueue() POSTs /queue {clear:true} — single-tenant queue is safe to drain', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    global.fetch = fetchMock as typeof fetch;
+    const client = new ComfyUIClient({
+      baseUrl: 'http://localhost:8188',
+      outputDir: '/tmp',
+      timeout: 300,
+      apiKey: undefined,
+      isCloud: false,
+    });
+
+    await client.clearQueue();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:8188/queue');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ clear: true });
+  });
+
+  it('CLOUD mode: clearQueue() is a no-op — the shared queue belongs to other tenants too', async () => {
+    process.env['COMFY_CLOUD_API_KEY'] = 'cloud-key';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    global.fetch = fetchMock as typeof fetch;
+    const client = new ComfyUIClient({
+      baseUrl: 'https://cloud.comfy.org',
+      outputDir: '/tmp',
+      timeout: 300,
+      apiKey: 'cloud-key',
+    });
+
+    await client.clearQueue();
+
+    // Critical: NO fetch should fire. Wiping the cloud queue would
+    // delete pending prompts that belong to other users of the same
+    // Comfy Cloud instance.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('ComfyUIClient request behavior', () => {
   const originalFetch = global.fetch;
 

@@ -28,10 +28,16 @@ import {
   type CancellableComfyJob,
 } from '../../src/services/comfyui/activeJobs.js';
 
-function makeJob(promptId: string, interruptImpl?: () => Promise<void>): CancellableComfyJob {
+function makeJob(
+  promptId: string,
+  interruptImpl?: () => Promise<void>,
+  options?: { clearQueueImpl?: () => Promise<void>; serverKey?: string },
+): CancellableComfyJob {
   return {
     promptId,
     interrupt: interruptImpl ?? (async () => undefined),
+    clearQueue: options?.clearQueueImpl ?? (async () => undefined),
+    serverKey: options?.serverKey ?? 'http://test-comfy',
     abortController: new AbortController(),
   };
 }
@@ -63,6 +69,8 @@ describe('activeJobs registry', () => {
     const job: CancellableComfyJob = {
       promptId: 'p1',
       abortController: new AbortController(),
+      serverKey: 'http://test-comfy',
+      clearQueue: async () => undefined,
       interrupt: async () => {
         order.push('interrupt');
       },
@@ -162,5 +170,46 @@ describe('activeJobs registry', () => {
     registerActiveJob(job);
     registerActiveJob(job);
     expect(getActiveJobCount()).toBe(1);
+  });
+
+  it('FM9: clearQueue() fires on cancel — so pending prompts get drained, not just the running one', async () => {
+    // The "ten more images kept rendering after cancel" bug: /interrupt
+    // alone only stops what's running on the GPU. Pending prompts in
+    // the queue keep auto-starting. cancelAllActiveJobs must also
+    // POST /queue {clear:true} or equivalent. Verify clearQueue runs.
+    const clearQ = vi.fn(async () => undefined);
+    registerActiveJob(makeJob('p1', undefined, { clearQueueImpl: clearQ }));
+    registerActiveJob(makeJob('p2', undefined, { clearQueueImpl: clearQ }));
+    await cancelAllActiveJobs();
+    // Both jobs share the default serverKey 'http://test-comfy' so
+    // clearQueue should fire EXACTLY ONCE (deduped by server).
+    expect(clearQ).toHaveBeenCalledTimes(1);
+  });
+
+  it('FM10: clearQueue() is deduplicated by serverKey across many jobs', async () => {
+    const clearA = vi.fn(async () => undefined);
+    const clearB = vi.fn(async () => undefined);
+    // 3 jobs on serverA, 2 on serverB → exactly 2 clearQueue() calls.
+    registerActiveJob(makeJob('p1', undefined, { clearQueueImpl: clearA, serverKey: 'http://a' }));
+    registerActiveJob(makeJob('p2', undefined, { clearQueueImpl: clearA, serverKey: 'http://a' }));
+    registerActiveJob(makeJob('p3', undefined, { clearQueueImpl: clearA, serverKey: 'http://a' }));
+    registerActiveJob(makeJob('p4', undefined, { clearQueueImpl: clearB, serverKey: 'http://b' }));
+    registerActiveJob(makeJob('p5', undefined, { clearQueueImpl: clearB, serverKey: 'http://b' }));
+    await cancelAllActiveJobs();
+    expect(clearA).toHaveBeenCalledTimes(1);
+    expect(clearB).toHaveBeenCalledTimes(1);
+  });
+
+  it('FM11: a clearQueue() that throws does not prevent interrupt() from running', async () => {
+    const goodInterrupt = vi.fn(async () => undefined);
+    const badClear = vi.fn(async () => {
+      throw new Error('server unreachable');
+    });
+    registerActiveJob(
+      makeJob('p1', goodInterrupt, { clearQueueImpl: badClear }),
+    );
+    await expect(cancelAllActiveJobs()).resolves.toBe(1);
+    expect(goodInterrupt).toHaveBeenCalledTimes(1);
+    expect(badClear).toHaveBeenCalledTimes(1);
   });
 });

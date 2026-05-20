@@ -307,6 +307,51 @@ export class ComfyUIClient {
   }
 
   /**
+   * Drain every PENDING prompt from this Comfy server's queue. `/interrupt`
+   * only stops what's currently executing on the GPU — Comfy can have many
+   * prompts queued (the executor batches Klein image edits and LTX video
+   * renders aggressively). Without clearing the queue, a cancel
+   * "stops" what's running but the next prompt immediately starts
+   * executing, and so on, until the queue drains naturally. That's the
+   * "cancel didn't stop anything; ten more images kept rendering" bug.
+   *
+   * CRITICAL: Cloud-mode no-op. On cloud.comfy.org the queue is SHARED
+   * across users. POST /queue {"clear": true} would wipe other tenants'
+   * pending prompts — catastrophic. We rely on /interrupt alone in
+   * cloud mode (which only kills the prompt currently running on OUR
+   * client's session) and let cloud-side scheduling drain our other
+   * pending jobs naturally. In local mode the queue is single-tenant
+   * (user's own GPU) so clearing it is safe.
+   *
+   * Sends POST /queue with `{"clear": true}` per the ComfyUI server
+   * source: a present-and-truthy "clear" flag drops the pending queue.
+   * Best-effort — errors swallowed.
+   */
+  async clearQueue(): Promise<void> {
+    if (this.isCloud) {
+      // Don't touch the shared queue. /interrupt already fired on this
+      // client's currently-running prompt; pending prompts we submitted
+      // will run, but at least we're not deleting other users' work.
+      return;
+    }
+    try {
+      await fetch(this.buildUrl('/queue'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.buildHeaders() },
+        body: JSON.stringify({ clear: true }),
+      });
+    } catch {
+      // Best effort — ComfyUI may not be reachable
+    }
+  }
+
+  /** Stable key for de-duplicating cancel calls across many jobs that
+   *  share one Comfy server. Used by `cancelAllActiveJobs`. */
+  get serverKey(): string {
+    return this.baseUrl;
+  }
+
+  /**
    * Upload an image to ComfyUI input directory.
    */
   async uploadImage(
@@ -438,6 +483,8 @@ export class ComfyUIClient {
     const cancelHandle: CancellableComfyJob = {
       promptId,
       interrupt: () => this.interrupt(),
+      clearQueue: () => this.clearQueue(),
+      serverKey: this.serverKey,
       abortController,
     };
     registerActiveJob(cancelHandle);
@@ -865,6 +912,8 @@ export class ComfyUIClient {
     const cancelHandle: CancellableComfyJob = {
       promptId,
       interrupt: () => this.interrupt(),
+      clearQueue: () => this.clearQueue(),
+      serverKey: this.serverKey,
       abortController,
     };
     registerActiveJob(cancelHandle);
