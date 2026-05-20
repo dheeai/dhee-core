@@ -110,6 +110,13 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Serve favicon and other root-level static files
+    app.get('/favicon.png', async (_request: FastifyRequest, reply: FastifyReply) => {
+      const faviconPath = join(reactDistDir, 'favicon.png');
+      if (existsSync(faviconPath)) {
+        return reply.type('image/png').send(readFileSync(faviconPath));
+      }
+      return reply.status(404).send();
+    });
     app.get('/favicon.svg', async (_request: FastifyRequest, reply: FastifyReply) => {
       const faviconPath = join(reactDistDir, 'favicon.svg');
       if (existsSync(faviconPath)) {
