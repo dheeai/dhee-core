@@ -85,7 +85,7 @@ export interface ShotImagePromptJson {
  * Setting refs get a "(setting)" suffix on their label so the LLM-rendered
  * image generator knows slot 1 is the base canvas.
  */
-function buildSlotManifestLine(references: Reference[]): string {
+export function buildSlotManifestLine(references: Reference[]): string {
   if (!references || references.length === 0) return '';
   const labelFor = (r: Reference) => {
     const after = r.refId.includes(':') ? r.refId.split(':')[1] : r.refId;
@@ -110,7 +110,7 @@ function buildSlotManifestLine(references: Reference[]): string {
  * unrelated "image" mentions (e.g. "she stares at the image of her
  * mother") untouched.
  */
-function stripInlineFromImageTokens(prose: string): string {
+export function stripInlineFromImageTokens(prose: string): string {
   return prose.replace(/\s+from image \d+/gi, '').replace(/\s{2,}/g, ' ').trim();
 }
 

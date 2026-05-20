@@ -58,6 +58,7 @@ import {
 } from './shotImagePromptNormalizer.js';
 import { enforceShotCanonicalRefs } from './enforceShotCanonicalRefs.js';
 import { buildEmptyContentFailureReason, checkEmptyContent } from './checkEmptyContent.js';
+import { buildSlotManifestLine, stripInlineFromImageTokens } from './shotImagePipeline.js';
 import { extractCollectionItems } from './collectionExtractor.js';
 import { listCollectionItemsFromDisk } from './collectionResumeFromDisk.js';
 import { extractStoryEssence, type StoryEssence } from './storyEssenceExtractor.js';
@@ -5642,6 +5643,22 @@ Examples of common failure modes to avoid:
         const refCheck = validateRefMentions(parsed, availableRefs.map(r => r.refId));
         if (!refCheck.valid) {
           return { valid: false, error: refCheck.error ?? 'ref-mention check failed' };
+        }
+
+        // (6) Pin the slot manifest at the TOP of every frame's
+        // imagePrompt, and strip inline `from image N` tokens from the
+        // prose body. Slot binding is authoritative via the manifest;
+        // inline markers from the LLM are noise that can mis-number a
+        // ref or refer to a slot that doesn't exist. Without this, the
+        // 2026-05-20 Ruby V3 s1s1 frame had "Ruby from image 1" buried
+        // mid-paragraph and no manifest at the top — Flux Klein had no
+        // deterministic top-of-prompt anchor to bind the character slot.
+        for (const frameKey of Object.keys(parsed.frames)) {
+          const f = parsed.frames[frameKey];
+          if (!f || typeof f !== 'object' || typeof f.imagePrompt !== 'string' || !Array.isArray(f.references)) continue;
+          const manifestLine = buildSlotManifestLine(f.references);
+          const strippedProse = stripInlineFromImageTokens(f.imagePrompt);
+          f.imagePrompt = manifestLine ? `${manifestLine}\n\n${strippedProse}` : strippedProse;
         }
 
         mutated = true;
