@@ -193,10 +193,10 @@ The `audio` field captures **everything heard** in a shot — dialogue, ambient 
 
 Every shot MUST have a `transition` field. No exceptions.
 
-Each shot specifies how it transitions FROM the previous shot. The first shot of a scene uses `cut` or `fade` (use `fade` if opening from black).
+Each shot specifies how it transitions FROM the previous shot. **The scene-boundary transition lives on the FIRST shot of the new scene** — that shot's `transition` field describes the cut from the previous scene's last shot into this scene.
 
 **Transition types:**
-- **`cut`** — hard cut. Default for most shot-to-shot cuts within a continuous action
+- **`cut`** — hard cut. Default for within-scene shot-to-shot under continuous action
 - **`crossfade`** — smooth dissolve. Use for time passing, dreamlike moments, parallel action
 - **`fade`** — fade through black. Use for scene openings, significant time jumps, finality
 - **`dip_to_black`** — fade out > brief black hold > fade in. Trailer "breather" beat. Use between scenes or to punctuate dramatic moments
@@ -205,11 +205,13 @@ Each shot specifies how it transitions FROM the previous shot. The first shot of
 - **`circle_open`** — expanding circle reveal. Use to open a new location or reveal a surprise
 - **`wipe_left`** / **`wipe_right`** — directional wipe. Use for location changes, parallel storylines, comic/graphic style
 
-**Guidelines:**
-- Most cuts within a scene should be `cut` — transitions are seasoning, not the main course
-- Use `dip_to_black` between scenes or for trailer-style dramatic pauses
-- Match transition to emotional beat: `flash_to_white` for shock, `crossfade` for tenderness, `circle_close` for introspection
-- First shot of scene 1: `fade`. Last shot's transition to the next scene: `dip_to_black` or `fade`
+**Rules (highest priority first):**
+
+1. **Scene-boundary rule** — when this shot's `continuityRole` is `entry`, the transition MUST be a SOFT transition: `fade`, `dip_to_black`, `crossfade`, or `circle_open`. NEVER `cut`. The post-LLM normalizer auto-corrects `entry` + `cut` to `fade`, so picking `cut` here just produces a less-considered version of the right thing.
+2. **First shot of scene 1** — use `fade` (opening from black).
+3. **Within-scene default** — most shots are `cut`. Transitions are seasoning, not the main course.
+4. **Add variety where it earns it** — across a scene, at least one or two transitions should NOT be `cut` if any of the following apply: a clear time-passing beat (`crossfade`), an emotional spike (`flash_to_white` for shock; `dip_to_black` for a held dramatic pause), an introspective shift (`circle_close`), or a location reveal mid-scene (`circle_open`, `wipe_left`/`wipe_right`). A scene where every single shot is `cut` is acceptable for a relentless action sequence, but rare in practice — re-read the scene and ask whether any beat would breathe better with a softer transition.
+5. **Match transition to emotional beat** — `flash_to_white` for shock, `crossfade` for tenderness, `circle_close` for introspection.
 
 ---
 
@@ -230,7 +232,7 @@ Before returning JSON:
 2. **`description` is 1–2 sentences**, expands the plan's `oneLineSummary`
 3. **`cameraWork` starts with framing**, then angle/movement
 4. **`audio` is non-empty**; if it contains `NAME:` or `(V.O.):`, only ONE speaker
-5. **`transition` is set** — `fade` for first shot of scene 1, otherwise typically `cut`
+5. **`transition` is set** — `fade` for first shot of scene 1; SOFT transition (`fade` / `dip_to_black` / `crossfade` / `circle_open`) whenever `continuityRole='entry'`; otherwise typically `cut` (but consider variety per Transitions Rule 4)
 6. **If `purpose` is `show_action` or `meet_character`**, `perspective` is set
 7. **For non-establishing shots**, `focus.primary` is set
 8. **Every refId** (`perspectiveOf`, `focus.primary`, `focus.background[]`, `focus.lurking`) appears verbatim in `<available_refs>`

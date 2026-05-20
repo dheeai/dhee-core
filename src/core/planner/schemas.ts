@@ -8,6 +8,7 @@
  */
 
 import { z } from 'zod';
+import { enforceSceneBoundaryTransition } from './enforceSceneBoundaryTransition.js';
 
 // ── Frame description (shared by firstFrame / lastFrame / midFrame) ──────────
 
@@ -601,6 +602,14 @@ export function normalizeSceneVideoPrompt(parsed: z.infer<typeof sceneVideoPromp
     // Note: generationStrategy is now determined by shot_image_prompt, not scene_video_prompt.
     // Don't default to flfv here — let the downstream reader check shot_image_prompt output.
   }
+  // Deterministic scene-boundary fix: when the LLM marks a shot with
+  // continuityRole='entry' (the canonical signal for "this shot crosses
+  // a meaningful visual boundary") but defaults its transition to
+  // `cut`, force the transition to `fade`. See
+  // enforceSceneBoundaryTransition.ts header for the Soft Seinen
+  // 2026-05-19 case and downstream rationale (shotAnchorComputer would
+  // otherwise chain frames across a hard setting change).
+  enforceSceneBoundaryTransition(parsed.shots as Parameters<typeof enforceSceneBoundaryTransition>[0]);
 }
 
 /**

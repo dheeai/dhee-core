@@ -1823,6 +1823,7 @@ export class ConversationManager {
   async invalidateNodes(
     sessionId: string,
     nodeIds: string[],
+    source?: string,
   ): Promise<{ invalidated: string[]; notFound: string[] }> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -1880,7 +1881,20 @@ export class ConversationManager {
     // `session.state.status === 'running'` check (we don't talk over
     // an active turn — the prompt-side "always re-check on resume"
     // rule covers the case where this event was dropped).
-    if (result.seeds.length > 0) {
+    //
+    // SKIP entirely when source === 'redo_from_menu': the desktop's
+    // "Redo from…" UI is about to send a runTask immediately as the
+    // user's resume command. If we also emit the user_invalidate
+    // event, pi-agent receives TWO instructions in the same turn —
+    // (1) "DO NOT auto-dispatch from this event" and (2) the user
+    // task "Continue running the pipeline". Pi-agent resolves the
+    // conflict by acking the system rule and ignoring the user task
+    // (observed 2026-05-19 on Soft Seinen: 138 nodes invalidated,
+    // pi-agent replied "I'm paused and ready", runner never
+    // started). The runTask alone is the unambiguous user intent;
+    // no supervisor narration needed.
+    const skipSupervisor = source === 'redo_from_menu';
+    if (result.seeds.length > 0 && !skipSupervisor) {
       this.scheduleSupervisorInvocation(
         'user_invalidate',
         {
@@ -1894,7 +1908,7 @@ export class ConversationManager {
             projectName: session.focusedProject ?? '(ambient)',
           },
         } as never,
-        { seeds: result.seeds },
+        { seeds: result.seeds, ...(source ? { source } : {}) },
       );
     }
 

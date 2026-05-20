@@ -56,6 +56,8 @@ import {
   scanOTSWithSingleChar,
   type AvailableRefMinimal,
 } from './shotImagePromptNormalizer.js';
+import { enforceShotCanonicalRefs } from './enforceShotCanonicalRefs.js';
+import { buildEmptyContentFailureReason, checkEmptyContent } from './checkEmptyContent.js';
 import { extractCollectionItems } from './collectionExtractor.js';
 import { listCollectionItemsFromDisk } from './collectionResumeFromDisk.js';
 import { extractStoryEssence, type StoryEssence } from './storyEssenceExtractor.js';
@@ -3132,6 +3134,41 @@ export class ExecutorAgent extends TypedEventEmitter {
                 }
               }
 
+              // Empty-content guard. The JSON validator above only
+              // fires for nodes in `jsonValidatedTypes`; plain-text
+              // nodes (shot_motion_directive, world_style, story,
+              // etc.) had no post-LLM guard at all. Pre-fix, an empty
+              // LLM response sailed straight through `writeOutput`,
+              // wrote 0 bytes, and got marked `completed` — the
+              // 2026-05-19 Soft Seinen scene_2_shot_2 incident, where
+              // the motion-directive LLM returned nothing, the file
+              // was 0 bytes, the downstream `shot_video` reader's
+              // JSON.parse silently fell back to empty string, and
+              // LTX-V produced a 5-second video with no motion
+              // directive. Fail fast so the next dispatch (or a
+              // Redo-from-menu cycle) cleanly regenerates instead of
+              // shipping a broken shot.
+              const empty = checkEmptyContent(content);
+              if (empty.isEmpty) {
+                const reason = buildEmptyContentFailureReason(node.id, empty);
+                this.log(`  [empty-content-guard] ${reason}`);
+                this.emit({
+                  type: 'notification',
+                  level: 'error',
+                  message: `Empty LLM output for ${node.displayName} — node marked failed (not writing 0-byte file).`,
+                });
+                this.emit({
+                  type: 'tool_result',
+                  toolCallId,
+                  toolName,
+                  result: { status: 'failed', error: reason },
+                  agentName,
+                });
+                this.executor.markFailed(node.id, reason);
+                this.emitTodoUpdate();
+                return;
+              }
+
               // Write prompt/content to disk
               let outputPath = writeOutput(
                 node, content, this.config.projectDir, this.config.template,
@@ -5491,8 +5528,45 @@ Examples of common failure modes to avoid:
         const availableRefs = this.buildAvailableRefsForShot(node);
         const allInjected: Array<{ frame: string; label: string; imageNumber: number; kind: string }> = [];
 
-        // (1) first_frame normalization.
+        // (0) Enforce the canonical reference set from scene_video_prompt's
+        // focus / perspectiveOf fields on first_frame. The LLM frequently
+        // forgets to list a character it named in prose by its narrative
+        // name (e.g. wrote "Kaito Nakamura sits at the news anchor desk"
+        // but emitted references: []). The SVP's focus.primary /
+        // perspectiveOf / focus.lurking name characters by refId — the
+        // authoritative identity slug — so this pass MERGES any missing
+        // canonical refs into first_frame.references. alignFramesToFirstFrame
+        // then propagates them to every other frame in step (2). Pure
+        // post-LLM enforcement; project-agnostic.
         const ffKey = 'first_frame';
+        const ff0 = parsed.frames[ffKey];
+        if (ff0 && typeof ff0 === 'object' && Array.isArray(ff0.references) && node.itemId) {
+          const sceneId0 = node.itemId.match(/^(scene_\d+)/)?.[1];
+          const shotNum0 = parseInt(node.itemId.match(/shot_(\d+)/)?.[1] ?? '0', 10);
+          if (sceneId0 && shotNum0 > 0) {
+            const ctx0 = readShotContextFromSvp(this.config.projectDir, sceneId0, shotNum0);
+            if (ctx0) {
+              const enforceResult = enforceShotCanonicalRefs(
+                {
+                  perspectiveOf: ctx0.perspectiveOf ?? null,
+                  focus: {
+                    primary: ctx0.focusPrimary ?? null,
+                    background: ctx0.focusBackground ?? [],
+                    lurking: ctx0.focusLurking ?? null,
+                  },
+                },
+                ff0.references,
+                availableRefs,
+              );
+              if (enforceResult.addedRefIds.length > 0) {
+                ff0.references = enforceResult.references;
+                this.log(`  [canonical-refs] ${node.id}: enforced ${enforceResult.addedRefIds.length} missing canonical ref(s) on first_frame from SVP focus/perspectiveOf: ${enforceResult.addedRefIds.join(', ')}`);
+              }
+            }
+          }
+        }
+
+        // (1) first_frame normalization.
         const ff = parsed.frames[ffKey];
         if (ff && typeof ff === 'object' && typeof ff.imagePrompt === 'string' && Array.isArray(ff.references)) {
           const result = normalizeShotImagePromptWithRefs(ff, availableRefs);

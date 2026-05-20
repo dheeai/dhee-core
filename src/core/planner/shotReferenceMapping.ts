@@ -352,6 +352,11 @@ export interface ShotContext {
   perspective?: string;
   /** Shot's `continuityRole` field: 'none' | 'entry' | 'exit' | 'bridge'. */
   continuityRole?: string;
+  /** Shot's `perspectiveOf` refId — the character whose POV the shot
+   *  follows when perspective is "main_subject" / "secondary_subject".
+   *  Used by enforceShotCanonicalRefs to guarantee the POV character
+   *  appears in the references list. */
+  perspectiveOf?: string | null;
   /** Scene-level `entry` string — declared on the scene_video_prompt to
    *  signal a visual handoff from the previous scene's last frame. */
   sceneEntry?: string | null;
@@ -446,6 +451,7 @@ export function readShotContextFromSvp(
     purpose: shot.purpose ?? '',
     perspective: shot.perspective ?? '',
     continuityRole: shot.continuityRole ?? 'none',
+    perspectiveOf: typeof shot.perspectiveOf === 'string' ? shot.perspectiveOf : null,
     sceneEntry: typeof parsed?.entry === 'string' ? parsed.entry : null,
     canonicalSceneSetting: canonicalSetting,
   };

@@ -755,6 +755,16 @@ async function waitForComfyUIJob(
       });
     }
 
+    if (completionResult.status === 'cancelled') {
+      // User-initiated cancel via the activeJobs registry. Mark the
+      // job cancelled (not failed) so the runner / executor can
+      // distinguish "user said stop" from "ComfyUI exploded" — the
+      // 2026-05-19 stuck-Stopping fix.
+      job.status = 'failed';
+      job.error = 'Cancelled by user';
+      job.updatedAt = Date.now();
+      return { status: 'failed', error: 'Cancelled by user' };
+    }
     if (
       completionResult.status !== 'completed' &&
       completionResult.status !== 'completed_with_timeout'
