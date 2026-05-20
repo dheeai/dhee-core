@@ -29,10 +29,167 @@ export interface Reference {
   imageNumber: number;
   type: 'character' | 'setting' | 'object';
   refId: string;
+  /**
+   * Over-the-shoulder framing marker (Phase A). When present:
+   *   A = in-frame subject (face visible, the one being looked at)
+   *   B = OTS silhouette (back of head / shoulder in foreground)
+   * Omitted for non-OTS shots. Set by the turn-2 ref-extraction LLM
+   * pass after it has seen the prose's framing, NOT by the upstream
+   * scene_video_prompt that authored the shot brief.
+   */
+  side?: 'A' | 'B';
+  /**
+   * Lazy-creation marker (Phase B). 'existing' means the refId matches
+   * a `character_image` / `setting_image` node already in the project;
+   * 'new' means the LLM is requesting the executor expand the
+   * corresponding collection to create this ref before the shot proceeds.
+   * Omitted (treated as 'existing') in legacy single-pass output.
+   */
+  status?: 'existing' | 'new';
+  /**
+   * Phase B. Required when status === 'new'. A 1-2 sentence visual
+   * description suitable for downstream image generation (clothing,
+   * build, hair, distinguishing marks for characters; lighting, time
+   * of day, key elements for settings).
+   */
+  newRefDescription?: string;
 }
 
 export interface AvailableRef extends Reference {
   label: string;
+}
+
+// ── Turn-2 reference extraction (multi-turn pipeline) ───────────────────────
+
+/**
+ * Menu item for turn 2's user message. The LLM picks refIds from this
+ * menu (status='existing') or proposes new ones (status='new'). Built
+ * from the project's current `character_image` and `setting_image`
+ * nodes via `buildReferenceMenu`.
+ */
+export interface ReferenceMenuItem {
+  refId: string;
+  type: 'character' | 'setting' | 'object';
+  label: string;
+  description: string;
+}
+
+/**
+ * Format a list of existing project refs as a menu for the turn-2
+ * ref-extraction LLM call.
+ *
+ * Source: project.json's executorState. Look for `character_image:*`,
+ * `setting_image:*`, `object_image:*` nodes with status === 'completed'
+ * (lazy uncompleted nodes don't count — they'd be circular).
+ *
+ * `descFor` is injected because the description for a character lives
+ * on its `character:*` collection item, not the `character_image` node
+ * itself. Caller passes a resolver from the project's character/setting
+ * collections.
+ */
+export function buildReferenceMenu(
+  imageNodes: Array<{ id: string; typeId: string; itemId?: string; status?: string }>,
+  descFor: (typeId: 'character' | 'setting' | 'object', itemId: string) => { label: string; description: string },
+): ReferenceMenuItem[] {
+  const menu: ReferenceMenuItem[] = [];
+  for (const n of imageNodes) {
+    if (!n.itemId) continue;
+    if (n.status && n.status !== 'completed') continue;
+    let type: 'character' | 'setting' | 'object';
+    if (n.typeId === 'character_image') type = 'character';
+    else if (n.typeId === 'setting_image') type = 'setting';
+    else if (n.typeId === 'object_image') type = 'object';
+    else continue;
+    const meta = descFor(type, n.itemId);
+    menu.push({
+      refId: n.id, // canonical: `character_image:ruby`
+      type,
+      label: meta.label,
+      description: meta.description,
+    });
+  }
+  return menu;
+}
+
+/**
+ * Build the turn-2 user message. The LLM has the shot brief + prose in
+ * its context already (from turn 1's user message + assistant response).
+ * This message hands it the existing ref menu and asks for a structured
+ * references[] back.
+ */
+export function buildTurn2UserMessage(
+  menu: ReferenceMenuItem[],
+  options?: { otsHint?: boolean },
+): string {
+  const menuJson = JSON.stringify(menu, null, 2);
+  const otsNote = options?.otsHint
+    ? `\n\nThis shot's brief suggests over-the-shoulder / dialogue framing — mark the in-frame subject as side='A' and the OTS silhouette as side='B' in your output.`
+    : '';
+  return [
+    `Now extract the reference image list this shot needs to render.`,
+    ``,
+    `**Read your own prose from the previous turn carefully.** For every`,
+    `character, setting, or object named in the prose, output one`,
+    `references[] entry. Prefer existing refs from the menu below;`,
+    `propose a new one only if no menu entry matches.`,
+    ``,
+    `**Existing reference menu:**`,
+    `\`\`\`json`,
+    menuJson,
+    `\`\`\``,
+    `${otsNote}`,
+    ``,
+    `Output JSON only, wrapped in \`{ "references": [...] }\`. Each entry:`,
+    `  - \`refId\`: snake-case canonical key (e.g. \`character_image:ruby\`)`,
+    `  - \`type\`: 'character' | 'setting' | 'object'`,
+    `  - \`imageNumber\`: 1 for setting/canvas, 2..4 for characters/objects in prominence order`,
+    `  - \`status\`: 'existing' (refId from menu) or 'new' (propose to create)`,
+    `  - \`side\`: 'A' or 'B' for OTS framing (omit otherwise)`,
+    `  - \`newRefDescription\`: required when status='new', 1-2 sentence visual description`,
+    ``,
+    `Hard rules: ≤ 4 total refs; exactly one setting at imageNumber 1; no duplicate refIds; no duplicate imageNumbers.`,
+  ].join('\n');
+}
+
+/**
+ * Parse turn 2's LLM output into a Reference[]. Forgiving: accepts
+ * either `{ "references": [...] }` or a bare array. Falls back to []
+ * on parse failure (caller treats this as "no refs — keep whatever
+ * turn 1 emitted").
+ */
+export function parseTurn2RefsJson(rawText: string): Reference[] {
+  try {
+    // Strip markdown fences in case the LLM wrapped despite instructions.
+    const cleaned = rawText.trim().replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+    const parsed = JSON.parse(cleaned) as unknown;
+    const arr = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { references?: unknown[] })?.references;
+    if (!Array.isArray(arr)) return [];
+    const out: Reference[] = [];
+    const seenSlot = new Set<number>();
+    const seenRef = new Set<string>();
+    for (const item of arr) {
+      if (!item || typeof item !== 'object') continue;
+      const r = item as Record<string, unknown>;
+      const refId = typeof r['refId'] === 'string' ? r['refId'] : null;
+      const type = r['type'];
+      const imageNumber = typeof r['imageNumber'] === 'number' ? r['imageNumber'] : null;
+      if (!refId || !imageNumber) continue;
+      if (type !== 'character' && type !== 'setting' && type !== 'object') continue;
+      if (seenSlot.has(imageNumber) || seenRef.has(refId)) continue;
+      seenSlot.add(imageNumber);
+      seenRef.add(refId);
+      const ref: Reference = { refId, type, imageNumber };
+      if (r['side'] === 'A' || r['side'] === 'B') ref.side = r['side'];
+      if (r['status'] === 'existing' || r['status'] === 'new') ref.status = r['status'];
+      if (typeof r['newRefDescription'] === 'string') ref.newRefDescription = r['newRefDescription'];
+      out.push(ref);
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 export interface ModeDecision {
@@ -364,28 +521,20 @@ export interface FirstFrameInput {
   worldStyle?: string;
 }
 
-const MODE_GUIDE_MAP: Record<string, string> = {
-  edit_previous_shot: 'shot_first_frame_edit_previous_guide',
-  image_text_to_image: 'shot_first_frame_fresh_guide',
-  text_to_image: 'shot_first_frame_text_guide',
-};
-
-function loadModeInstructions(mode: string): string {
-  const guideName = MODE_GUIDE_MAP[mode] ?? MODE_GUIDE_MAP['image_text_to_image']!;
-  return loadGuide(guideName);
-}
-
 /**
  * Build system + user prompts for Call 2: First Frame Prompt.
+ *
+ * Loads the single merged `shot_image_prompt_guide.md` which contains
+ * SCALIST common rules + per-mode output sections (image_text_to_image,
+ * edit_previous_shot, text_to_image) + the last-frame section. The
+ * user message tells the LLM the mode + frame target so it follows
+ * the matching section. Replaces the prior 4-file split (one default
+ * with `{{MODE_INSTRUCTIONS}}` substitution + three mode-specific
+ * files) which had drifted into contradiction over time.
  */
 export function buildFirstFramePrompt(input: FirstFrameInput): { system: string; user: string } {
-  let guide = loadGuide('shot_first_frame_guide');
-
-  // Inject mode-specific instructions from separate guide file
-  const modeInstructions = loadModeInstructions(input.mode);
-  guide = guide.replace('{{MODE_INSTRUCTIONS}}', modeInstructions);
-
-  const system = `You write a single image prompt paragraph. Output ONLY the paragraph — no JSON, no labels.\n\n${guide}`;
+  const guide = loadGuide('shot_image_prompt_guide');
+  const system = `You write a single image prompt paragraph. Output ONLY the paragraph — no JSON, no labels.\n\n${guide}\n\n---\n\nThis call is for the FIRST FRAME in mode "${input.mode}". Follow the matching first-frame section above.`;
 
   const refList = input.references.length > 0
     ? `References available:\n${input.references.map(r => `- image ${r.imageNumber}: ${r.type} (ref_id: "${r.refId}")`).join('\n')}`
@@ -418,10 +567,14 @@ export interface LastFrameInput {
 
 /**
  * Build system + user prompts for Call 3: Last Frame Prompt.
+ *
+ * Loads the same merged `shot_image_prompt_guide.md` as the first
+ * frame call; the user message tells the LLM this is the last-frame
+ * call so it follows the "Last frame — END STATE delta" section.
  */
 export function buildLastFramePrompt(input: LastFrameInput): { system: string; user: string } {
-  const guide = loadGuide('shot_last_frame_guide');
-  const system = `You write a last frame description showing the END STATE of a shot. Output ONLY the paragraph — no JSON, no labels.\n\n${guide}`;
+  const guide = loadGuide('shot_image_prompt_guide');
+  const system = `You write a last frame description showing the END STATE of a shot. Output ONLY the paragraph — no JSON, no labels.\n\n${guide}\n\n---\n\nThis call is for the LAST FRAME. Follow the "Last frame — END STATE delta" section above.`;
 
   let user = `First frame prompt:
 ${input.firstFramePrompt}

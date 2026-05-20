@@ -401,7 +401,7 @@ describe('shotImagePipeline: buildFirstFramePrompt', () => {
     expect(user).toContain('character_image:the_girl');
   });
 
-  it('injects edit_previous_shot mode instructions for edit mode', async () => {
+  it('tells the LLM the mode for edit_previous_shot calls', async () => {
     const { buildFirstFramePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
     const { system } = buildFirstFramePrompt({
       shotDescription: 'Camera pushes in to close-up',
@@ -410,10 +410,16 @@ describe('shotImagePipeline: buildFirstFramePrompt', () => {
       references: [],
       sceneStateContext: '',
     });
-    expect(system).toContain('DELTA');
+    // System prompt now loads the merged guide (all modes) and tells
+    // the LLM which mode + frame target this call is for. The
+    // edit_previous_shot section's "delta-only" content is present
+    // as part of the unified guide.
+    expect(system).toContain('edit_previous_shot');
+    expect(system).toContain('FIRST FRAME');
+    expect(system).toContain('delta');
   });
 
-  it('injects image_text_to_image mode instructions for fresh mode', async () => {
+  it('tells the LLM the mode for image_text_to_image (fresh) calls', async () => {
     const { buildFirstFramePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
     const { system } = buildFirstFramePrompt({
       shotDescription: 'A wide establishing shot',
@@ -422,7 +428,15 @@ describe('shotImagePipeline: buildFirstFramePrompt', () => {
       references: [{ imageNumber: 1, type: 'setting' as const, refId: 'setting_image:city' }],
       sceneStateContext: '',
     });
-    expect(system).toContain('from image N');
+    expect(system).toContain('image_text_to_image');
+    expect(system).toContain('FIRST FRAME');
+    // Fresh mode's section + the common SCALIST framework must both
+    // be present (single merged guide carries all sections).
+    expect(system).toContain('SCALIST');
+    // Negative pattern: the merged guide must NOT teach the LLM
+    // about the "from image N" slot-token concept that we used to
+    // forbid via a DO NOT instruction.
+    expect(system).not.toContain('from image N');
   });
 });
 
@@ -447,5 +461,123 @@ describe('shotImagePipeline: buildLastFramePrompt', () => {
       shotDescription: 'test shot',
     });
     expect(system).toContain('END STATE');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Turn-2 ref-extraction helpers (Phase A / B of multi-turn pipeline)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('shotImagePipeline: buildReferenceMenu', () => {
+  it('builds menu entries for character_image / setting_image nodes', async () => {
+    const { buildReferenceMenu } = await import('../../src/core/planner/shotImagePipeline.js');
+    const menu = buildReferenceMenu(
+      [
+        { id: 'character_image:ruby', typeId: 'character_image', itemId: 'ruby', status: 'completed' },
+        { id: 'setting_image:bus_station', typeId: 'setting_image', itemId: 'bus_station', status: 'completed' },
+        { id: 'shot_image:scene_1_shot_1', typeId: 'shot_image', itemId: 'scene_1_shot_1', status: 'completed' },
+      ],
+      (_type, itemId) => ({ label: itemId.toUpperCase(), description: `desc for ${itemId}` }),
+    );
+    expect(menu).toHaveLength(2);
+    expect(menu[0]?.refId).toBe('character_image:ruby');
+    expect(menu[0]?.type).toBe('character');
+    expect(menu[1]?.refId).toBe('setting_image:bus_station');
+    expect(menu[1]?.type).toBe('setting');
+  });
+
+  it('skips uncompleted nodes (lazy refs not visible until rendered)', async () => {
+    const { buildReferenceMenu } = await import('../../src/core/planner/shotImagePipeline.js');
+    const menu = buildReferenceMenu(
+      [
+        { id: 'character_image:ruby', typeId: 'character_image', itemId: 'ruby', status: 'pending' },
+        { id: 'character_image:angel', typeId: 'character_image', itemId: 'angel', status: 'completed' },
+      ],
+      (_type, itemId) => ({ label: itemId, description: '' }),
+    );
+    expect(menu).toHaveLength(1);
+    expect(menu[0]?.refId).toBe('character_image:angel');
+  });
+});
+
+describe('shotImagePipeline: buildTurn2UserMessage', () => {
+  it('embeds the menu as JSON in the user message', async () => {
+    const { buildTurn2UserMessage } = await import('../../src/core/planner/shotImagePipeline.js');
+    const msg = buildTurn2UserMessage([
+      { refId: 'character_image:ruby', type: 'character', label: 'Ruby', description: '' },
+    ]);
+    expect(msg).toContain('character_image:ruby');
+    expect(msg).toContain('reference image list');
+    expect(msg).toContain('1 for setting');
+    expect(msg).not.toContain('over-the-shoulder');
+  });
+
+  it('adds OTS hint when otsHint=true', async () => {
+    const { buildTurn2UserMessage } = await import('../../src/core/planner/shotImagePipeline.js');
+    const msg = buildTurn2UserMessage([], { otsHint: true });
+    expect(msg).toContain('over-the-shoulder');
+    expect(msg).toContain("side='A'");
+    expect(msg).toContain("side='B'");
+  });
+});
+
+describe('shotImagePipeline: parseTurn2RefsJson', () => {
+  it('parses a well-formed references envelope', async () => {
+    const { parseTurn2RefsJson } = await import('../../src/core/planner/shotImagePipeline.js');
+    const raw = JSON.stringify({
+      references: [
+        { refId: 'setting_image:bus_station', type: 'setting', imageNumber: 1, status: 'existing' },
+        { refId: 'character_image:ruby', type: 'character', imageNumber: 2, status: 'existing', side: 'A' },
+        { refId: 'character_image:pawn_broker', type: 'character', imageNumber: 3, status: 'new',
+          newRefDescription: 'Heavyset, late 50s', side: 'B' },
+      ],
+    });
+    const refs = parseTurn2RefsJson(raw);
+    expect(refs).toHaveLength(3);
+    expect(refs[1]?.side).toBe('A');
+    expect(refs[2]?.status).toBe('new');
+    expect(refs[2]?.newRefDescription).toBe('Heavyset, late 50s');
+  });
+
+  it('strips markdown fences if the LLM wraps despite instructions', async () => {
+    const { parseTurn2RefsJson } = await import('../../src/core/planner/shotImagePipeline.js');
+    const raw = '```json\n' + JSON.stringify({ references: [{ refId: 'setting_image:x', type: 'setting', imageNumber: 1 }] }) + '\n```';
+    const refs = parseTurn2RefsJson(raw);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.refId).toBe('setting_image:x');
+  });
+
+  it('drops dups by refId and imageNumber, keeping first', async () => {
+    const { parseTurn2RefsJson } = await import('../../src/core/planner/shotImagePipeline.js');
+    const refs = parseTurn2RefsJson(JSON.stringify({
+      references: [
+        { refId: 'character_image:ruby', type: 'character', imageNumber: 2 },
+        { refId: 'character_image:ruby', type: 'character', imageNumber: 3 }, // dup refId
+        { refId: 'character_image:angel', type: 'character', imageNumber: 2 }, // dup slot
+      ],
+    }));
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.refId).toBe('character_image:ruby');
+  });
+
+  it('skips malformed entries (missing refId / imageNumber / bad type)', async () => {
+    const { parseTurn2RefsJson } = await import('../../src/core/planner/shotImagePipeline.js');
+    const refs = parseTurn2RefsJson(JSON.stringify({
+      references: [
+        { type: 'character', imageNumber: 2 },                              // no refId
+        { refId: 'character_image:x', type: 'character' },                  // no imageNumber
+        { refId: 'character_image:y', type: 'wrong', imageNumber: 3 },       // bad type
+        { refId: 'character_image:good', type: 'character', imageNumber: 2 },
+      ],
+    }));
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.refId).toBe('character_image:good');
+  });
+
+  it('returns [] on unparseable input (turn-2 keeps turn-1 refs)', async () => {
+    const { parseTurn2RefsJson } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(parseTurn2RefsJson('not json at all')).toEqual([]);
+    expect(parseTurn2RefsJson('')).toEqual([]);
+    expect(parseTurn2RefsJson('{"references": "not an array"}')).toEqual([]);
   });
 });

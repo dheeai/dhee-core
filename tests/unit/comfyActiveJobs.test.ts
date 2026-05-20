@@ -29,6 +29,15 @@ function makeJob(promptId: string): {
     interrupt: async () => {
       count += 1;
     },
+    // Bug B fix (2026-05-20): cancelAllActiveJobs now drains the
+    // Comfy queue (POST /queue {clear:true}) in local mode in
+    // addition to per-prompt /interrupt. New fields are required on
+    // the handle; this helper supplies stub defaults so the older
+    // tests below still construct valid handles. The richer
+    // dedup/cloud-safety coverage lives in tests/unit/activeJobs.test.ts.
+    clearQueue: async () => undefined,
+    serverKey: 'http://test-comfy',
+    abortController: new AbortController(),
   };
   return { job, interruptCallCount: () => count };
 }
@@ -81,6 +90,9 @@ describe('cancelAllActiveJobs', () => {
       interrupt: async () => {
         throw new Error('comfy unreachable');
       },
+      clearQueue: async () => undefined,
+      serverKey: 'http://test-comfy',
+      abortController: new AbortController(),
     };
     const ok = makeJob('p2');
     registerActiveJob(failJob);

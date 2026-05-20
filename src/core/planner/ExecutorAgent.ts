@@ -58,7 +58,15 @@ import {
 } from './shotImagePromptNormalizer.js';
 import { enforceShotCanonicalRefs } from './enforceShotCanonicalRefs.js';
 import { buildEmptyContentFailureReason, checkEmptyContent } from './checkEmptyContent.js';
-import { buildSlotManifestLine, stripInlineFromImageTokens } from './shotImagePipeline.js';
+import {
+  buildSlotManifestLine,
+  stripInlineFromImageTokens,
+  buildReferenceMenu,
+  buildTurn2UserMessage,
+  parseTurn2RefsJson,
+  type Reference,
+  type ReferenceMenuItem,
+} from './shotImagePipeline.js';
 import { extractCollectionItems } from './collectionExtractor.js';
 import { listCollectionItemsFromDisk } from './collectionResumeFromDisk.js';
 import { extractStoryEssence, StoryEssenceParseError, type StoryEssence } from './storyEssenceExtractor.js';
@@ -3283,6 +3291,71 @@ export class ExecutorAgent extends TypedEventEmitter {
                 return;
               }
 
+              // shot_motion_directive uses the LTX-V official prompt-
+              // enhancer style guide, which yields plain text starting
+              // with "Style: realistic - …". The on-disk contract is a
+              // JSON object `{ "motionDirective": "<text>" }` — the
+              // PromptsView panel parses motion files as JSON and the
+              // downstream readers at ExecutorAgent.ts:5901/7594/7956
+              // expect `motionDirective` as a string field. Wrap once
+              // here so the writer-side contract is deterministic
+              // regardless of what the LLM produced. If the LLM already
+              // emitted valid JSON with a motionDirective field, we
+              // re-canonicalize the indentation but otherwise pass it
+              // through.
+              if (node.typeId === 'shot_motion_directive') {
+                const trimmed = content.trim();
+                let directive = trimmed;
+                if (trimmed.startsWith('{')) {
+                  try {
+                    const parsed = JSON.parse(trimmed) as { motionDirective?: unknown };
+                    if (typeof parsed?.motionDirective === 'string') {
+                      directive = parsed.motionDirective;
+                    }
+                  } catch {
+                    // LLM returned text starting with '{' but not valid
+                    // JSON — treat as raw text and let the wrap fix it.
+                  }
+                }
+                content = JSON.stringify({ motionDirective: directive }, null, 2);
+              }
+
+              // shot_image_prompt — turn 2 ref-extraction refinement.
+              //
+              // Turn 1 (the generateForNode call above) produces the JSON
+              // including an LLM-emitted `references[]` array. That array
+              // is unreliable: the LLM commits to refs before it has
+              // authored the prose, so OTS / dialogue shots end up with
+              // wrong Side A/B assignments and identical backgrounds.
+              //
+              // Turn 2 takes the prose the LLM just wrote, hands it the
+              // current existing-refs menu, and asks for a structured
+              // refined `references[]`. This is a SECOND USER TURN on
+              // the SAME conversation — turn 1's response stays in the
+              // messages array as `assistant` so the LLM has its own
+              // prose in context when extracting refs.
+              //
+              // Side A/B falls out naturally: the LLM sees its own
+              // framing language ("from over Ruby's shoulder…") and
+              // assigns Ruby='B', Angel='A' for that shot. The reverse
+              // shot's prose gets the mirrored assignment.
+              //
+              // Failure mode: any error in turn 2 falls back to keeping
+              // turn 1's refs as-is. The pipeline never blocks on the
+              // refinement.
+              if (node.typeId === 'shot_image_prompt') {
+                try {
+                  const refined = await this.refineShotImageRefs(
+                    node, system, user, content, toolCallId, toolName,
+                  );
+                  if (refined) content = refined;
+                } catch (err) {
+                  this.log(
+                    `  [shot_image_prompt turn-2] refinement skipped: ${(err as Error).message}`,
+                  );
+                }
+              }
+
               // Write prompt/content to disk
               let outputPath = writeOutput(
                 node, content, this.config.projectDir, this.config.template,
@@ -3291,10 +3364,6 @@ export class ExecutorAgent extends TypedEventEmitter {
               // Clean up any stale .failed sidecar from a prior failed
               // run of this same node. Idempotent — no-op when none exists.
               clearFailedAttempt(node, this.config.projectDir, this.config.template);
-
-              // Clean up any prior `.failed` / `.failed.error` sidecars
-              // from a previous broken-output run. Idempotent.
-              clearFailedAttempt(this.config.projectDir, outputPath);
 
               // Record the prompt path in project.json for media nodes so a
               // later run can legitimately skip LLM regeneration (crash
@@ -6133,6 +6202,209 @@ Examples of common failure modes to avoid:
   // ===========================================================================
 
   /**
+   * Turn 2 of the shot_image_prompt pipeline. Continues the same
+   * conversation as turn 1 (the LLM's prose-emitting call) with a
+   * new user message that hands the LLM the current existing-refs
+   * menu and asks for a refined `references[]` per frame.
+   *
+   * Returns the same JSON string the caller already has, but with
+   * each frame's `references` replaced by turn-2's authoritative
+   * extraction. Returns null on any error (caller falls back to
+   * turn-1's refs).
+   *
+   * Side A/B assignments emerge naturally because the LLM sees its
+   * own prose in `turn1Content` as the assistant turn — OTS framing
+   * language in the prose drives the side flag.
+   */
+  private async refineShotImageRefs(
+    node: ExecutionNode,
+    system: string,
+    user: string,
+    turn1Content: string,
+    toolCallId: string | undefined,
+    toolName: string,
+  ): Promise<string | null> {
+    // Parse turn-1 JSON. If it's not the expected shape, bail —
+    // turn-1 content stays as-is.
+    let turn1Parsed: {
+      frames?: {
+        first_frame?: { references?: unknown };
+        last_frame?: { references?: unknown };
+      };
+    };
+    try {
+      turn1Parsed = JSON.parse(turn1Content);
+    } catch {
+      return null;
+    }
+    if (!turn1Parsed?.frames?.first_frame) return null;
+
+    // Build the existing-refs menu from the project's
+    // character_image / setting_image / object_image nodes that
+    // have already been generated (status === 'completed'). Lazy
+    // refs that haven't been rendered yet are excluded — they'd
+    // create a chicken-and-egg cycle.
+    const allNodes = this.executor.getAllNodes();
+    const imageNodes = allNodes
+      .filter(n =>
+        n.itemId !== undefined &&
+        (n.typeId === 'character_image' ||
+          n.typeId === 'setting_image' ||
+          n.typeId === 'object_image'),
+      )
+      .map(n => ({
+        id: n.id,
+        typeId: n.typeId,
+        itemId: n.itemId,
+        status: n.status,
+      }));
+    const descFor = (
+      _type: 'character' | 'setting' | 'object',
+      itemId: string,
+    ): { label: string; description: string } => {
+      // Label = humanized itemId. Description left empty in Phase A;
+      // future work resolves from the corresponding `character` /
+      // `setting` collection item's content file.
+      const label = itemId
+        .split('_')
+        .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+        .join(' ');
+      return { label, description: '' };
+    };
+    const menu: ReferenceMenuItem[] = buildReferenceMenu(imageNodes, descFor);
+    if (menu.length === 0) {
+      // Cold start: no existing refs yet. Without a menu the LLM has
+      // nothing to anchor on — let turn-1's refs stand.
+      return null;
+    }
+
+    // Build turn-2 user message. Pull an OTS hint from the shot
+    // brief if it has perspective='ots' or framing keywords.
+    const otsHint = this.shotBriefSuggestsOts(node);
+    const turn2User = buildTurn2UserMessage(menu, { otsHint });
+
+    // Run the LLM with [system, user, assistant(turn1), user(turn2)].
+    // Non-streaming generate() — output is small.
+    const purpose = this.purposeForNode(node);
+    const client = this.llmFor(purpose);
+    const messages: Message[] = [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+      { role: 'assistant', content: turn1Content },
+      { role: 'user', content: turn2User },
+    ];
+    const result = await client.generate({
+      messages,
+      temperature: 0.2,
+      maxTokens: 2000,
+      responseFormat: { type: 'json_object' },
+      signal: this.runAbortController.signal,
+    });
+    const turn2Raw = result.content ?? '';
+    if (!turn2Raw.trim()) return null;
+
+    // Surface turn-2 in the tool stream so it's visible in the chat.
+    if (toolCallId) {
+      this.emit({
+        type: 'tool_streaming',
+        toolCallId,
+        chunk: `\n[ref-extraction turn 2]\n${turn2Raw}\n`,
+        done: false,
+        agentName: this.config.name ?? 'dhee-executor',
+        toolName,
+      });
+    }
+
+    const refinedRefs: Reference[] = parseTurn2RefsJson(turn2Raw);
+    if (refinedRefs.length === 0) {
+      this.log(`  [shot_image_prompt turn-2] no refs parsed — keeping turn-1's array`);
+      return null;
+    }
+
+    // Phase B: walk new refs and request collection expansion so the
+    // executor creates corresponding character_image / setting_image
+    // nodes before this shot's downstream shot_image runs.
+    for (const ref of refinedRefs) {
+      if (ref.status !== 'new') continue;
+      const collectionTypeId =
+        ref.type === 'character' ? 'character' :
+        ref.type === 'setting' ? 'setting' :
+        'object';
+      const itemId = ref.refId.includes(':') ? ref.refId.split(':')[1]! : ref.refId;
+      const label = itemId
+        .split('_')
+        .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+        .join(' ');
+      try {
+        this.executor.expandCollection(collectionTypeId, [
+          {
+            itemId,
+            name: label,
+            ...(ref.newRefDescription ? { description: ref.newRefDescription } : {}),
+          },
+        ]);
+        this.log(
+          `  [shot_image_prompt turn-2] expanded ${collectionTypeId} with new item '${itemId}'`,
+        );
+      } catch (err) {
+        // Already exists or expansion not applicable — non-fatal.
+        this.log(
+          `  [shot_image_prompt turn-2] expandCollection for ${collectionTypeId}:${itemId} skipped: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // Stitch the refined refs into the JSON. Both frames share the
+    // same refs — the existing assembler at shotImagePipeline.ts
+    // already collapses last_frame.references to [] in the final
+    // canonical shape; here we keep turn-1's per-frame structure but
+    // overwrite first_frame.references and let last_frame.references
+    // mirror it (the deterministic slot manifest uses first_frame's
+    // refs for both frames).
+    if (turn1Parsed.frames) {
+      if (turn1Parsed.frames.first_frame) {
+        (turn1Parsed.frames.first_frame as { references: Reference[] }).references = refinedRefs;
+      }
+      if (turn1Parsed.frames.last_frame) {
+        (turn1Parsed.frames.last_frame as { references: Reference[] }).references = refinedRefs;
+      }
+    }
+    return JSON.stringify(turn1Parsed, null, 2);
+  }
+
+  /**
+   * Heuristic check: does this shot's brief look like an OTS /
+   * reverse-shot framing? Used to inject a hint into the turn-2
+   * ref-extraction user message so Side A/B gets assigned even
+   * when the prose's framing language is subtle.
+   *
+   * Reads the shot brief file on disk if present. False is the
+   * safe default — turn-2 still works without an OTS hint, just
+   * less aggressively flagged.
+   */
+  private shotBriefSuggestsOts(node: ExecutionNode): boolean {
+    if (!node.itemId) return false;
+    const match = node.itemId.match(/^scene_(\d+)_shot_(\d+)$/);
+    if (!match) return false;
+    const briefPath = join(
+      this.config.projectDir,
+      `prompts/videos/scenes/scene_${match[1]}.shots/${match[2]}.json`,
+    );
+    try {
+      if (!existsSync(briefPath)) return false;
+      const brief = JSON.parse(readFileSync(briefPath, 'utf-8')) as {
+        perspective?: string;
+        cameraWork?: string;
+      };
+      if (brief.perspective === 'ots') return true;
+      const camera = (brief.cameraWork ?? '').toLowerCase();
+      return /\b(over.the.shoulder|ots|reverse shot)\b/.test(camera);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Call the LLM to generate content for a node.
    * Pure completion — no tools, no agent loop.
    */
@@ -8400,12 +8672,12 @@ Examples of common failure modes to avoid:
       // inspect what was stitched (often the post-validators flag a
       // continuity / dialogue-fit issue and the user wants to see
       // exactly which shot tripped which rule).
-      const outRel = getOutputPath(node, this.config.projectDir, this.config.template);
       const sidecar = writeFailedAttempt(
-        this.config.projectDir,
-        outRel,
+        node,
         content,
         validation.error ?? 'unknown validation error',
+        this.config.projectDir,
+        this.config.template,
       );
       const hint = sidecar.contentPath
         ? ` Assembled output saved to ${sidecar.contentPath} (.failed).`
@@ -8421,7 +8693,7 @@ Examples of common failure modes to avoid:
     // 5. Write to disk and emit completion.
     const outputRel = writeOutput(node, finalContent, this.config.projectDir, this.config.template);
     // Clean up any prior .failed sidecars from a previous broken run.
-    clearFailedAttempt(this.config.projectDir, outputRel);
+    clearFailedAttempt(node, this.config.projectDir, this.config.template);
     this.log(`  scene_video_prompt assembled: ${outputRel} (${shots.length} shots)`);
     this.emit({
       type: 'tool_result',
