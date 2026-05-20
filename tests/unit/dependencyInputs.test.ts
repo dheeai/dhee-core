@@ -25,7 +25,7 @@ let executor: DependencyGraphExecutor;
  * Build a fully expanded executor with all nodes completed and output files on disk.
  */
 beforeAll(() => {
-  projectDir = join(tmpdir(), `kshana-dep-test-${Date.now()}`);
+  projectDir = join(tmpdir(), `dhee-dep-test-${Date.now()}`);
   mkdirSync(projectDir, { recursive: true });
 
   // Create the executor from a proper backward plan

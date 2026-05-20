@@ -23,14 +23,14 @@ describe("synthesizeNodesFromScenes", () => {
     ]);
     const node = nodes["shot_image:scene_1_shot_1"];
     expect(node).toBeDefined();
-    expect(node!.typeId).toBe("shot_image");
-    expect(node!.itemId).toBe("scene_1_shot_1");
-    expect(node!.outputPaths).toEqual({
+    expect(node.typeId).toBe("shot_image");
+    expect(node.itemId).toBe("scene_1_shot_1");
+    expect(node.outputPaths).toEqual({
       first_frame: "f.png",
       last_frame: "l.png",
       mid_frame: "m.png",
     });
-    expect(node!.status).toBe("completed");
+    expect(node.status).toBe("completed");
   });
 
   it("emits a separate shot_video node when video is set", () => {
@@ -46,7 +46,7 @@ describe("synthesizeNodesFromScenes", () => {
       },
     ]);
     expect(nodes["shot_video:scene_2_shot_3"]).toBeDefined();
-    expect(nodes["shot_video:scene_2_shot_3"]!.outputPath).toBe("v.mp4");
+    expect(nodes["shot_video:scene_2_shot_3"].outputPath).toBe("v.mp4");
   });
 
   it("skips shots that have no first/last/mid/video set (nothing to render)", () => {
@@ -67,7 +67,7 @@ describe("synthesizeNodesFromScenes", () => {
       },
     ]);
     expect(nodes["shot_image:scene_1_shot_1"]).toBeDefined();
-    expect(nodes["shot_image:scene_1_shot_1"]!.outputPaths).toEqual({ first_frame: "f.png" });
+    expect(nodes["shot_image:scene_1_shot_1"].outputPaths).toEqual({ first_frame: "f.png" });
   });
 
   it("groups multiple scenes and shots correctly", () => {

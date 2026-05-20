@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
 
-test.describe('Kshana App', () => {
+test.describe('dhee App', () => {
   test('loads and shows header with brand', async ({ page }) => {
     await page.goto('/')
-    await expect(page.locator('text=Kshana')).toBeVisible()
+    await expect(page.locator('text=dhee')).toBeVisible()
   })
 
   test('shows connection status indicator', async ({ page }) => {

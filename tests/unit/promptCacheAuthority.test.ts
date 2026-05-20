@@ -28,7 +28,7 @@ describe('reset clears promptPath so orphan files cannot override intent', () =>
   it('Phase 4 of the reset script clears node.promptPath (not just outputPath)', async () => {
     // Build a minimal project.json simulating a completed media node, then
     // run the reset script logic against it and assert promptPath is gone.
-    const dir = join(tmpdir(), `kshana-reset-cache-${Date.now()}.kshana`);
+    const dir = join(tmpdir(), `dhee-reset-cache-${Date.now()}.dhee`);
     mkdirSync(dir, { recursive: true });
 
     const projectJson = {

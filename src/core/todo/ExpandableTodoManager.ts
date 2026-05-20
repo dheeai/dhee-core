@@ -1,6 +1,6 @@
 /**
  * Expandable Todo Manager with hierarchical task support.
- * Ported from Python kshana GenericAgent.
+ * Ported from Python dhee GenericAgent.
  */
 import type { ExpandableTodoItem, TodoManagerResult, TodoStatus } from './ExpandableTodoItem.js';
 import { createTodoItem } from './ExpandableTodoItem.js';

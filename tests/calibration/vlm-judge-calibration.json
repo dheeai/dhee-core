@@ -4,31 +4,31 @@
   "cases": [
     {
       "id": "scene_2_shot_5_strong",
-      "imagePath": "lazarus_drive.kshana/assets/images/Ou_jFAID_c501236d62e0b6d1d12d484503ed0dbcc9bcb8966467e0f45854d30ca3e07ca1.png",
+      "imagePath": "lazarus_drive.dhee/assets/images/Ou_jFAID_c501236d62e0b6d1d12d484503ed0dbcc9bcb8966467e0f45854d30ca3e07ca1.png",
       "prompt": "Wide medium shot of Johnathan O'Hare — a tall, lean Irish-American man in his 30s with chrome cybernetic forearms, slicked-back dark hair, dark trench coat — standing unfazed at the fog-shrouded docks at night, sodium-orange lamp light, sparks and chrome flecks erupting from his coat as bullets strike around him. Two armed guards in tactical gear silhouetted in the misty background. Cinematic noir atmosphere, dramatic action moment.",
       "notes": "Strong case. Image faithfully shows Johnathan central, chrome arms visible, trench coat, sparks erupting, fog atmosphere, silhouetted guards."
     },
     {
       "id": "scene_3_shot_4_strong",
-      "imagePath": "lazarus_drive.kshana/assets/images/0B5LV4UO_63c7a83eca78c05d7e8ebb930641b0e32d047094afa8089deaf9c64c2769fd46.png",
+      "imagePath": "lazarus_drive.dhee/assets/images/0B5LV4UO_63c7a83eca78c05d7e8ebb930641b0e32d047094afa8089deaf9c64c2769fd46.png",
       "prompt": "Close-up shot in a dim cyberpunk apartment at night, rain on the windows. Glitch — a sleek synthetic cat with subtle chrome circuit veins running through dark fur — perched on the lap of Johnathan O'Hare (a man in a black trench coat, only his lap and chrome hand visible holding a small device). Moody blue-grey lighting, atmospheric.",
       "notes": "Strong case (close-up). Image shows a cat on a lap with chrome details visible, dim apartment with rain."
     },
     {
       "id": "scene_1_shot_3_weak_andy_clone",
-      "imagePath": "lazarus_drive.kshana/assets/images/_WLlF8-5_3c0639e2130225f56a173d10539b199cb1e2fd6afb6400c7860876c02404a339.png",
+      "imagePath": "lazarus_drive.dhee/assets/images/_WLlF8-5_3c0639e2130225f56a173d10539b199cb1e2fd6afb6400c7860876c02404a339.png",
       "prompt": "Medium shot inside Andy's Bar at night. Andy — a stocky 50s grizzled Latino bartender with balding grey hair tied back, grease-stained apron over a holographic band tee, ONE chrome right arm — leaning forward over the bar to address Johnathan O'Hare (a tall lean man in his 30s with a black trench coat) seated across from him. Dim neon lighting through rain-streaked windows. Two characters only.",
       "notes": "Weak case. Image shows two Johnathan-clones (both slicked dark hair, chrome arms — Andy rendered wrong) plus a cat on the bar that the prompt did not call for."
     },
     {
       "id": "scene_1_shot_1_atmospheric",
-      "imagePath": "lazarus_drive.kshana/assets/images/CVm00hE0_dae114afae815d1c8ab7b243d166f0e64bc86f664d13b9e46e0b2a005e21a7ef.png",
+      "imagePath": "lazarus_drive.dhee/assets/images/CVm00hE0_dae114afae815d1c8ab7b243d166f0e64bc86f664d13b9e46e0b2a005e21a7ef.png",
       "prompt": "Atmospheric establishing shot — heavy rain streaking down a window pane at night, with neon signs in pink, blue, and red blurred and glowing on the wet glass. Cyberpunk noir mood. No characters.",
       "notes": "Strong atmospheric case. Rain on window, neon bokeh, no characters."
     },
     {
       "id": "scene_3_shot_1_apartment_setting",
-      "imagePath": "lazarus_drive.kshana/assets/images/uucNJ_2X_958bd600a1700d5b4e825a190eb8971d12816433cef682ecac354db6534d4b1a.png",
+      "imagePath": "lazarus_drive.dhee/assets/images/uucNJ_2X_958bd600a1700d5b4e825a190eb8971d12816433cef682ecac354db6534d4b1a.png",
       "prompt": "Wide establishing shot of an upscale apartment at night, large floor-to-ceiling windows with rain streaks looking out onto a glowing neon city skyline. Inside the apartment, a tortoiseshell cat (Glitch) perched on the windowsill in silhouette. Cool blue-grey lighting, moody cyberpunk atmosphere.",
       "notes": "Mixed case. Apartment windows, neon skyline outside, a cat on the sill with tortoiseshell markings, moody lighting."
     }

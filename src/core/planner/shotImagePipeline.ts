@@ -470,7 +470,7 @@ export async function generateShotImagePromptPipeline(
   emit?: (event: any) => void,
   agentName?: string,
 ): Promise<string> {
-  const agent = agentName ?? 'kshana-executor';
+  const agent = agentName ?? 'dhee-executor';
 
   // Deterministic mode override for the image-anchored shot chain.
   // A mid-scene shot whose purpose doesn't force a fresh reset AND has a

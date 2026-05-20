@@ -7,7 +7,7 @@ import { getProjectsDir } from "../paths.js";
 import { resolveProjectDir, ProjectDirNotFoundError } from "./resolveProjectDir.js";
 
 const Params = Type.Object({
-  project: Type.String({ description: "Project name (folder is <project>.kshana)" }),
+  project: Type.String({ description: "Project name (folder is <project>.dhee)" }),
 });
 
 export interface StatusDetails {
@@ -43,11 +43,11 @@ function formatSummary(s: StatusSummary): string {
   return lines.join("\n");
 }
 
-export const kshanaStatus = defineTool({
-  name: "kshana_status",
-  label: "kshana status",
+export const dheeStatus = defineTool({
+  name: "dhee_status",
+  label: "dhee status",
   description:
-    "Quick snapshot of a kshana project: which stages are done, in progress, or failed. Use this when the user asks 'where is project X at?' — do NOT run the pipeline.",
+    "Quick snapshot of a dhee project: which stages are done, in progress, or failed. Use this when the user asks 'where is project X at?' — do NOT run the pipeline.",
   parameters: Params,
   async execute(_id, params: Static<typeof Params>) {
     let projectDir: string;

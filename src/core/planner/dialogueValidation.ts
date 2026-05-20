@@ -158,7 +158,7 @@ export function scanAmbiguousSpeakerTag(
   AMBIGUOUS_SUBJECT.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = AMBIGUOUS_SUBJECT.exec(motionDirective)) !== null) {
-    const full = m[0]!.trim();
+    const full = m[0].trim();
     // One of groups 1 (pronoun) or 2 (class noun) fires per alternation branch.
     const subject = m[1] ?? m[2] ?? '';
     const quoted = m[3] ?? '';

@@ -81,7 +81,7 @@ export function TaskInput({ onSend, placeholder: customPlaceholder }: TaskInputP
         type ApiProject = { dirName: string; title?: string; currentPhase?: string }
         setProjects(
           (data.projects as ApiProject[]).map((p) => ({
-            name: p.dirName.replace(/\.kshana$/, ''),
+            name: p.dirName.replace(/\.dhee$/, ''),
             description: [p.title, p.currentPhase].filter(Boolean).join(' · '),
           })),
         )

@@ -1,8 +1,8 @@
 /**
- * `setUserWorkflowsDir()` lets the embedding host (kshana-desktop)
+ * `setUserWorkflowsDir()` lets the embedding host (dhee-desktop)
  * point the WorkflowModeRegistry at a writable directory it controls
  * (typically `userData/workflows/user/`) without losing access to the
- * built-in / cloud workflows that ship with kshana-core.
+ * built-in / cloud workflows that ship with dhee-core.
  *
  * Init order requirement: the host must call `setUserWorkflowsDir()`
  * BEFORE the first `getWorkflowModeRegistry()` call. We assert and
@@ -45,13 +45,13 @@ describe('setUserWorkflowsDir — host-supplied user workflow directory', () => 
   beforeEach(() => {
     resetUserWorkflowsDirForTesting();
 
-    // Fake kshana-core layout: only built-in, no user/ subdir.
-    coreRoot = mkdtempSync(join(tmpdir(), 'kshana-core-'));
+    // Fake dhee-core layout: only built-in, no user/ subdir.
+    coreRoot = mkdtempSync(join(tmpdir(), 'dhee-core-'));
     const builtInDir = join(coreRoot, 'workflows', 'built-in');
     mkdirSync(builtInDir, { recursive: true });
 
     // Separate, host-owned user workflows dir (e.g. userData/workflows/user/).
-    userDir = mkdtempSync(join(tmpdir(), 'kshana-userwf-'));
+    userDir = mkdtempSync(join(tmpdir(), 'dhee-userwf-'));
     writeFileSync(
       join(userDir, 'my_custom_workflow.manifest.json'),
       JSON.stringify(STUB_USER_MANIFEST),
@@ -87,7 +87,7 @@ describe('setUserWorkflowsDir — host-supplied user workflow directory', () => 
     expect(mode?.builtIn).toBe(false);
   });
 
-  it('the user directory is scanned in addition to the kshana-core workflow dirs (not replacing them)', () => {
+  it('the user directory is scanned in addition to the dhee-core workflow dirs (not replacing them)', () => {
     // Add a built-in manifest under coreRoot so we can verify both
     // are discovered when setUserWorkflowsDir is set.
     const builtInDir = join(coreRoot, 'workflows', 'built-in');

@@ -12,7 +12,7 @@ import { ComfyUIClient } from '../src/services/comfyui/ComfyUIClient.js';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
 
-const OUT_DIR = '/Users/ganaraj/Projects/kshana-core/noir_detective_story_setup-3.kshana/assets/videos/compare_grok_vs_klein';
+const OUT_DIR = '/Users/ganaraj/Projects/dhee-core/noir_detective_story_setup-3.dhee/assets/videos/compare_grok_vs_klein';
 mkdirSync(OUT_DIR, { recursive: true });
 
 const FILES = [

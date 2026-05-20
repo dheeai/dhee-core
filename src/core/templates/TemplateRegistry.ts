@@ -186,7 +186,7 @@ export class TemplateRegistry {
 
     // Validate artifact types
     const artifactTypeIds = new Set<string>();
-    for (const [typeId, artifactType] of Object.entries(template.artifactTypes || {}) as [string, ArtifactTypeDefinition][]) {
+    for (const [typeId, artifactType] of Object.entries(template.artifactTypes || {})) {
       if (typeId !== artifactType.id) {
         errors.push({
           type: 'error',
@@ -204,7 +204,7 @@ export class TemplateRegistry {
     }
 
     // Validate dependencies reference existing artifact types
-    for (const [typeId, artifactType] of Object.entries(template.artifactTypes || {}) as [string, ArtifactTypeDefinition][]) {
+    for (const [typeId, artifactType] of Object.entries(template.artifactTypes || {})) {
       for (const dep of artifactType.dependencies || []) {
         if (!artifactTypeIds.has(dep.artifactTypeId)) {
           errors.push({
@@ -393,7 +393,7 @@ export class TemplateRegistry {
     const phaseIds = new Set<string>();
     const assignedArtifacts = new Set<string>();
 
-    for (const phase of phases as PhaseDefinition[]) {
+    for (const phase of phases) {
       const path = `phases.${phase.id}`;
 
       if (!phase.id) {
@@ -408,7 +408,7 @@ export class TemplateRegistry {
 
       // Validate artifact types in phase exist
       for (const artifactTypeId of phase.artifactTypes || []) {
-        if (!artifactTypeIds.has(artifactTypeId as string)) {
+        if (!artifactTypeIds.has(artifactTypeId)) {
           errors.push({
             type: 'error',
             path: `${path}.artifactTypes`,
@@ -416,14 +416,14 @@ export class TemplateRegistry {
           });
         }
 
-        if (assignedArtifacts.has(artifactTypeId as string)) {
+        if (assignedArtifacts.has(artifactTypeId)) {
           errors.push({
             type: 'error',
             path: `${path}.artifactTypes`,
             message: `Artifact type '${artifactTypeId}' is assigned to multiple phases`,
           });
         }
-        assignedArtifacts.add(artifactTypeId as string);
+        assignedArtifacts.add(artifactTypeId);
       }
     }
 
@@ -558,7 +558,7 @@ export class TemplateRegistry {
     const inputTypes = template.inputTypes || [];
     let bestMatch: { id: string; score: number } | null = null;
 
-    for (const inputType of inputTypes as InputTypeConfig[]) {
+    for (const inputType of inputTypes) {
       let score = 0;
 
       for (const pattern of inputType.detectionPatterns || []) {

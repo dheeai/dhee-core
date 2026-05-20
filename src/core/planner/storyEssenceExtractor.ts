@@ -115,18 +115,35 @@ Pick narration.mode:
 When mode is not "none", voice MUST be specific and non-empty — it tells downstream prose generation whose voice to write. When mode is "none", voice should be the empty string.`;
 }
 
+/**
+ * Thrown when the LLM's response can't be parsed / validated. Carries
+ * the `rawContent` so the executor can persist it to a .failed sidecar
+ * for the user to inspect / hand-repair.
+ */
+export class StoryEssenceParseError extends Error {
+  rawContent: string;
+  constructor(message: string, rawContent: string) {
+    super(message);
+    this.name = 'StoryEssenceParseError';
+    this.rawContent = rawContent;
+  }
+}
+
 function parseEssenceResponse(raw: string): StoryEssence {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`story-essence extractor returned invalid JSON: ${(err as Error).message}`);
+    throw new StoryEssenceParseError(
+      `story-essence extractor returned invalid JSON: ${(err as Error).message}`,
+      raw,
+    );
   }
   const obj = parsed as Record<string, unknown>;
   const stringFields: (keyof StoryEssence)[] = ['genre', 'throughline', 'tonalNotes', 'dramaticEmphasis'];
   for (const f of stringFields) {
-    if (typeof obj[f] !== 'string' || (obj[f] as string).trim().length === 0) {
-      throw new Error(`story-essence response missing required field: ${f}`);
+    if (typeof obj[f] !== 'string' || (obj[f]).trim().length === 0) {
+      throw new StoryEssenceParseError(`story-essence response missing required field: ${f}`, raw);
     }
   }
   // Narration is required in fresh extractions (the LLM must think about
@@ -134,19 +151,19 @@ function parseEssenceResponse(raw: string): StoryEssence {
   // it to mode='none' before passing to this parser.
   const rawNarration = obj['narration'];
   if (!rawNarration || typeof rawNarration !== 'object') {
-    throw new Error('story-essence response missing required field: narration');
+    throw new StoryEssenceParseError('story-essence response missing required field: narration', raw);
   }
   const nObj = rawNarration as Record<string, unknown>;
   const mode = nObj['mode'];
   const voice = nObj['voice'];
   if (typeof mode !== 'string' || !(NARRATION_MODES as readonly string[]).includes(mode)) {
-    throw new Error(`story-essence narration.mode must be one of ${NARRATION_MODES.join('/')}, got: ${String(mode)}`);
+    throw new StoryEssenceParseError(`story-essence narration.mode must be one of ${NARRATION_MODES.join('/')}, got: ${String(mode)}`, raw);
   }
   if (typeof voice !== 'string') {
-    throw new Error('story-essence narration.voice must be a string');
+    throw new StoryEssenceParseError('story-essence narration.voice must be a string', raw);
   }
   if (mode !== 'none' && voice.trim().length === 0) {
-    throw new Error(`story-essence narration.voice must be non-empty when narration.mode is "${mode}"`);
+    throw new StoryEssenceParseError(`story-essence narration.voice must be non-empty when narration.mode is "${mode}"`, raw);
   }
   return {
     genre: (obj['genre'] as string).trim(),

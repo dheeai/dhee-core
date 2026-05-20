@@ -2,7 +2,7 @@
 
 ## Goal
 
-As shots are generated, each timeline slot in the kshana-desktop
+As shots are generated, each timeline slot in the dhee-desktop
 Timeline panel should progressively display the best available content
 for that shot — automatically upgrading as higher-tier assets land on
 disk.
@@ -21,7 +21,7 @@ Today every shot slot is a placeholder strip showing only the label
 7. nothing
 
 The watcher already debounces `timeline.json` reloads at 250ms, so a
-strip will auto-upgrade tier the moment kshana-core writes a new path
+strip will auto-upgrade tier the moment dhee-core writes a new path
 in.
 
 ## Two-repo work
@@ -29,7 +29,7 @@ in.
 This is **not** doable in either repo alone — `timeline.json` doesn't
 expose the fields the renderer needs.
 
-### kshana-core — extend `timeline.json` writer
+### dhee-core — extend `timeline.json` writer
 
 Today each timeline item carries a single `prompt` and a `videoPath` /
 `imagePath`. Need to add per-shot:
@@ -47,7 +47,7 @@ isn't surfacing them. Producer lives near `TimelineManager` /
 Existing projects: re-emit `timeline.json` on next executor run so
 they pick up the new fields. No on-disk migration needed.
 
-### kshana-desktop
+### dhee-desktop
 
 - Extend `TimelineItem` interface in
   `src/renderer/hooks/useTimelineData.ts` (~lines 22–57) with the new

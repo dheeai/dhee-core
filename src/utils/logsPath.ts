@@ -3,16 +3,16 @@
  *
  * Each logger (LLMLogger, phaseLogger, ToolAnalytics, uiLogger,
  * ComfyUIClient.debugLog, ExecutorAgent's project-local file) used to
- * compute its own path against `process.cwd()` or `findKshanaCoreRoot`.
- * That worked from a checkout but broke when kshana-core ran inside a
+ * compute its own path against `process.cwd()` or `finddheeCoreRoot`.
+ * That worked from a checkout but broke when dhee-core ran inside a
  * packaged Electron app (cwd = .app bundle, read-only on macOS) — every
  * append silently failed and end-users had no logs to send back.
  *
  * Resolution order (highest priority first):
  *   1. value set via `setLogsDir(absPath)` at runtime
- *   2. `KSHANA_LOGS_DIR` env var (the desktop sets this before importing
- *      kshana-core; tests/CI use it directly)
- *   3. `<kshana-core repo root>/logs` for dev — preserves today's
+ *   2. `dhee_LOGS_DIR` env var (the desktop sets this before importing
+ *      dhee-core; tests/CI use it directly)
+ *   3. `<dhee-core repo root>/logs` for dev — preserves today's
  *      behavior when running from a checkout
  *   4. `<cwd>/logs` as the ultimate fallback
  *
@@ -35,8 +35,8 @@ function expandTilde(p: string): string {
 }
 
 /**
- * Walk up from this file's location to find kshana-core's package.json.
- * Mirrors `findKshanaCoreRoot` in `agent/pi/paths.ts` but inlined here
+ * Walk up from this file's location to find dhee-core's package.json.
+ * Mirrors `finddheeCoreRoot` in `agent/pi/paths.ts` but inlined here
  * to avoid importing that module just for the side-effect of evaluating
  * `REPO_ROOT` at load time (paths.ts blows up at import time when run
  * from outside a checkout, and we want logsPath to be safer than that).
@@ -49,7 +49,7 @@ function findRepoRootSafe(): string | undefined {
       if (existsSync(pkg)) {
         // We don't bother reading + parsing — for our purposes any
         // package.json the file lives under is "the project". The strict
-        // `name === "kshana-core"` check is unnecessary here because we
+        // `name === "dhee-core"` check is unnecessary here because we
         // only use this for a dev fallback, never for production logs.
         return dir;
       }
@@ -76,7 +76,7 @@ function ensureDir(p: string): string {
 
 function compute(): string {
   if (runtimeOverride) return runtimeOverride;
-  const fromEnv = process.env['KSHANA_LOGS_DIR'];
+  const fromEnv = process.env['dhee_LOGS_DIR'];
   if (fromEnv && fromEnv.trim()) {
     return resolve(expandTilde(fromEnv.trim()));
   }
@@ -98,8 +98,8 @@ export function getLogsDir(): string {
 }
 
 /**
- * Override the logs dir at runtime. Wins over `KSHANA_LOGS_DIR`. Used by
- * kshana-desktop (main process) before initializing core to redirect logs
+ * Override the logs dir at runtime. Wins over `dhee_LOGS_DIR`. Used by
+ * dhee-desktop (main process) before initializing core to redirect logs
  * to `app.getPath('userData')/logs`.
  */
 export function setLogsDir(absPath: string): void {

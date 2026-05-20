@@ -1,5 +1,5 @@
 /**
- * Shared types and helpers for working with a kshana project's
+ * Shared types and helpers for working with a dhee project's
  * `project.json` and its executor graph. Originally defined in
  * `scripts/cli-helpers.ts`; moved under `src/` so server code can
  * import without violating `rootDir`. The CLI helper module
@@ -46,7 +46,7 @@ export interface ProjectFile {
 }
 
 export function projectDirFor(name: string, basePath: string = defaultBasePath()): string {
-  const folder = name.endsWith('.kshana') ? name : `${name}.kshana`;
+  const folder = name.endsWith('.dhee') ? name : `${name}.dhee`;
   return join(basePath, folder);
 }
 

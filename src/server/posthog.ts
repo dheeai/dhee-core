@@ -9,7 +9,7 @@ const MAX_ERROR_MESSAGE_LENGTH = 500;
 const MAX_PROPERTY_STRING_LENGTH = 1000;
 const MAX_ARRAY_ITEMS = 25;
 const MAX_OBJECT_DEPTH = 4;
-const DEVICE_ID_DIR = '.kshana';
+const DEVICE_ID_DIR = '.dhee';
 const DEVICE_ID_FILE = 'device-id';
 const SENSITIVE_PROPERTY_PATTERN =
   /(api[_-]?key|token|secret|password|authorization|credential|bearer)/i;
@@ -18,6 +18,18 @@ let posthogClient: PostHog | null | undefined;
 let shutdownHandlersRegistered = false;
 let cachedDeviceId: string | undefined;
 const posthogSessionIds = new Map<string, string>();
+
+// posthog-node's @posthog/core hardcodes `console.error('Error while flushing PostHog', err)`
+// in its background flush path with no opt-out. When us.i.posthog.com is unreachable
+// (firewall, captive portal, flaky network) this floods stdout with multi-frame stack traces
+// every flush interval. We install a one-shot console.error filter that drops only those
+// PostHog flush messages and emits at most one throttled summary line per minute.
+const POSTHOG_FLUSH_LOG_PREFIX = 'Error while flushing PostHog';
+const POSTHOG_NETWORK_ERROR_NAME = 'PostHogFetchNetworkError';
+const POSTHOG_QUIET_SUMMARY_INTERVAL_MS = 60_000;
+let originalConsoleError: typeof console.error | null = null;
+let suppressedFlushErrorCount = 0;
+let lastFlushErrorSummaryAt = 0;
 
 export type AnalyticsEventName =
   | 'desktop_app_first_started'
@@ -52,6 +64,12 @@ export interface AnalyticsCaptureOptions {
   timestamp?: string | Date;
   identity?: AnalyticsIdentity;
   component?: string;
+}
+
+export interface PostHogRuntimeConfig {
+  apiKey?: string;
+  host?: string;
+  analyticsSalt?: string;
 }
 
 let commonProperties: CommonProperties = {
@@ -146,6 +164,85 @@ function getPostHogHost(): string {
   return host && host.length > 0 ? host : DEFAULT_POSTHOG_HOST;
 }
 
+export function configurePostHogRuntime(config: PostHogRuntimeConfig): void {
+  const apiKey = config.apiKey?.trim();
+  const host = config.host?.trim();
+  const analyticsSalt = config.analyticsSalt?.trim();
+
+  if (apiKey && !process.env['POSTHOG_API_KEY']) {
+    process.env['POSTHOG_API_KEY'] = apiKey;
+  }
+  if (host && !process.env['POSTHOG_HOST']) {
+    process.env['POSTHOG_HOST'] = host;
+  }
+  if (analyticsSalt && !process.env['ANALYTICS_SALT']) {
+    process.env['ANALYTICS_SALT'] = analyticsSalt;
+  }
+
+  if (posthogClient === null && getPostHogApiKey()) {
+    posthogClient = undefined;
+  }
+}
+
+function isPostHogFlushNoise(args: unknown[]): boolean {
+  for (const arg of args) {
+    if (typeof arg === 'string' && arg.startsWith(POSTHOG_FLUSH_LOG_PREFIX)) {
+      return true;
+    }
+    if (arg && typeof arg === 'object') {
+      const name = (arg as { name?: unknown }).name;
+      if (typeof name === 'string' && name === POSTHOG_NETWORK_ERROR_NAME) {
+        return true;
+      }
+      const message = (arg as { message?: unknown }).message;
+      if (
+        typeof message === 'string' &&
+        (message.includes('Network error while fetching PostHog') ||
+          message.startsWith(POSTHOG_FLUSH_LOG_PREFIX))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function installPostHogConsoleFilter(): void {
+  if (originalConsoleError) {
+    return;
+  }
+  const original = console.error.bind(console);
+  originalConsoleError = original;
+  console.error = (...args: unknown[]) => {
+    if (isPostHogFlushNoise(args)) {
+      suppressedFlushErrorCount += 1;
+      const now = Date.now();
+      if (now - lastFlushErrorSummaryAt >= POSTHOG_QUIET_SUMMARY_INTERVAL_MS) {
+        lastFlushErrorSummaryAt = now;
+        const count = suppressedFlushErrorCount;
+        suppressedFlushErrorCount = 0;
+        console.warn(
+          `[PostHog] suppressed ${count} flush error log${count === 1 ? '' : 's'} ` +
+            `in the last ${Math.round(POSTHOG_QUIET_SUMMARY_INTERVAL_MS / 1000)}s ` +
+            `(host=${getPostHogHost()}). Telemetry will retry automatically.`,
+        );
+      }
+      return;
+    }
+    original(...(args as Parameters<typeof console.error>));
+  };
+}
+
+function uninstallPostHogConsoleFilter(): void {
+  if (!originalConsoleError) {
+    return;
+  }
+  console.error = originalConsoleError;
+  originalConsoleError = null;
+  suppressedFlushErrorCount = 0;
+  lastFlushErrorSummaryAt = 0;
+}
+
 function getPostHogClient(): PostHog | null {
   if (posthogClient !== undefined) {
     return posthogClient;
@@ -156,6 +253,8 @@ function getPostHogClient(): PostHog | null {
     posthogClient = null;
     return posthogClient;
   }
+
+  installPostHogConsoleFilter();
 
   posthogClient = new PostHog(apiKey, {
     host: getPostHogHost(),
@@ -457,7 +556,7 @@ export function captureAnalyticsEvent(
       properties: sanitizeAnalyticsProperties({
         ...commonProperties,
         ...extraCommonProperties,
-        app_component: options.component ?? 'kshana-core',
+        app_component: options.component ?? 'dhee-core',
         install_id: identity.installId,
         user_id: identity.userId,
         ...(posthogSessionId ? { '$session_id': posthogSessionId } : {}),
@@ -485,28 +584,28 @@ export function captureAppStarted(platform: CommonProperties['platform']): void 
   captureAnalyticsEvent('app_started', {
     platform,
   }, {
-    component: platform === 'desktop' ? 'kshana-desktop' : 'kshana-core',
+    component: platform === 'desktop' ? 'dhee-desktop' : 'dhee-core',
   });
 }
 
 export function captureDesktopAppFirstStarted(): void {
-  captureAnalyticsEvent('desktop_app_first_started', {}, { component: 'kshana-desktop' });
+  captureAnalyticsEvent('desktop_app_first_started', {}, { component: 'dhee-desktop' });
 }
 
 export function captureDesktopAppStarted(properties: Record<string, unknown> = {}): void {
-  captureAnalyticsEvent('desktop_app_started', properties, { component: 'kshana-desktop' });
+  captureAnalyticsEvent('desktop_app_started', properties, { component: 'dhee-desktop' });
 }
 
 export function captureDesktopHeartbeat(properties: Record<string, unknown> = {}): void {
-  captureAnalyticsEvent('desktop_heartbeat', properties, { component: 'kshana-desktop' });
+  captureAnalyticsEvent('desktop_heartbeat', properties, { component: 'dhee-desktop' });
 }
 
 export function captureDesktopAppQuit(properties: Record<string, unknown> = {}): void {
-  captureAnalyticsEvent('desktop_app_quit', properties, { component: 'kshana-desktop' });
+  captureAnalyticsEvent('desktop_app_quit', properties, { component: 'dhee-desktop' });
 }
 
 export function captureDesktopAuthStarted(properties: Record<string, unknown> = {}): void {
-  captureAnalyticsEvent('desktop_auth_started', properties, { component: 'kshana-desktop' });
+  captureAnalyticsEvent('desktop_auth_started', properties, { component: 'dhee-desktop' });
 }
 
 export function captureSessionStarted(sessionId: string, startedAt?: string): void {
@@ -691,4 +790,5 @@ export function resetAnalyticsForTests(): void {
     platform: 'server',
     os: normalizeOs(os.platform()),
   };
+  uninstallPostHogConsoleFilter();
 }

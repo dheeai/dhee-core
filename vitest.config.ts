@@ -5,7 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    // Run test files sequentially to avoid race conditions with shared state (e.g., .kshana directory)
+    // Run test files sequentially to avoid race conditions with shared state (e.g., .dhee directory)
     fileParallelism: false,
     coverage: {
       provider: 'v8',

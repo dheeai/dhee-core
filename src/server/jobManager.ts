@@ -2,7 +2,7 @@
  * In-memory tracker for run-to executions kicked off via the HTTP
  * agent-control endpoints.
  *
- * Why in-memory: each kshana-core process is a single Node runtime,
+ * Why in-memory: each dhee-core process is a single Node runtime,
  * and the desktop only spawns one. JobManager exists to:
  *   1) serialize one run-to per project (return 409 on a second
  *      concurrent request — same-project double-execution is the

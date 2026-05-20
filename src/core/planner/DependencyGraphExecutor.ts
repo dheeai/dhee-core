@@ -885,6 +885,15 @@ export class DependencyGraphExecutor {
 
     if (progress.failed > 0) {
       lines.push(`Failed: ${progress.failed} node(s)`);
+      // Surface each failure's displayName + error so the user sees
+      // what actually went wrong, not just "Blocked". Without this
+      // the user is left to dig through executor.log to discover a
+      // 402 / timeout / API key mismatch — a silent-failure UX.
+      const failed = this.getAllNodes().filter(n => n.status === 'failed');
+      for (const n of failed) {
+        const err = n.error?.trim();
+        lines.push(err ? `  - ${n.displayName}: ${err}` : `  - ${n.displayName}`);
+      }
     }
 
     const ready = this.getNextReady();

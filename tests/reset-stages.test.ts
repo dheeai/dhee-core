@@ -120,7 +120,7 @@ describe('reset preserves files on disk', () => {
 
   function createTempProject(): string {
     const name = `reset-test-${Date.now()}`;
-    const dir = join(process.cwd(), `${name}.kshana`);
+    const dir = join(process.cwd(), `${name}.dhee`);
     mkdirSync(join(dir, 'assets', 'videos', 'shots'), { recursive: true });
     mkdirSync(join(dir, 'assets', 'videos', 'final'), { recursive: true });
     mkdirSync(join(dir, 'assets', 'images'), { recursive: true });
@@ -170,7 +170,7 @@ describe('reset preserves files on disk', () => {
 
   it('reset final_video preserves video files on disk', () => {
     const name = createTempProject();
-    const dir = join(process.cwd(), `${name}.kshana`);
+    const dir = join(process.cwd(), `${name}.dhee`);
 
     try {
       const tsxPath = join(process.cwd(), 'node_modules', '.bin', 'tsx');
@@ -194,7 +194,7 @@ describe('reset preserves files on disk', () => {
 
   it('reset shot_video preserves shot video files and images on disk', () => {
     const name = createTempProject();
-    const dir = join(process.cwd(), `${name}.kshana`);
+    const dir = join(process.cwd(), `${name}.dhee`);
 
     try {
       const tsxPath = join(process.cwd(), 'node_modules', '.bin', 'tsx');

@@ -4,7 +4,7 @@
 
 The dependency graph executor (`feature/dep-graph` branch) bypasses the timeline system entirely. The `executeFinalAssembly` method builds resolved segments directly from shot video nodes without creating or updating `timeline.json`. The agentic flow (in `backward-flow` / `master` branch) maintained a proper timeline with segments, layers, transitions, and compositing metadata.
 
-The Kshana desktop app depends on `timeline.json` as the interface between the generation backend and the visual editor. Without it, the desktop app has no structured data to display or edit.
+The dhee desktop app depends on `timeline.json` as the interface between the generation backend and the visual editor. Without it, the desktop app has no structured data to display or edit.
 
 ## What Was Lost
 

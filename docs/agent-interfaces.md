@@ -1,6 +1,6 @@
-# Driving kshana-core from external agents
+# Driving dhee-core from external agents
 
-If you're building an agent that needs to talk to kshana-core (Open Claw,
+If you're building an agent that needs to talk to dhee-core (Open Claw,
 a custom Claude Code plugin, a CI script, your own automation), pick
 the surface that matches your runtime and friction tolerance. Today
 there are three live interfaces, with a fourth (MCP) on the roadmap.
@@ -8,13 +8,13 @@ there are three live interfaces, with a fourth (MCP) on the roadmap.
 | Interface | Best for | Ergonomics | Runtime requirements |
 |---|---|---|---|
 | [CLI scripts](#cli-scripts) | Shell scripts, CI, ad-hoc work, agents that already shell out | Lowest setup, text I/O | Repo + Node + pnpm + tsx |
-| [HTTP REST](#http-rest-api) | Cross-process, cross-language, hosted kshana-core, anything not running on the same Node | JSON in/out, stable schema | Just an HTTP client |
-| [Library import](#library-import) | Tightly coupled hosts (kshana-desktop is the prototype) | Typed, zero overhead, zero serialization | Node + npm install |
+| [HTTP REST](#http-rest-api) | Cross-process, cross-language, hosted dhee-core, anything not running on the same Node | JSON in/out, stable schema | Just an HTTP client |
+| [Library import](#library-import) | Tightly coupled hosts (dhee-desktop is the prototype) | Typed, zero overhead, zero serialization | Node + npm install |
 | [MCP server](#mcp-future) — *roadmap* | Agent-first integrations (Claude Code, Cursor, future MCP-aware agents) | Plug-and-play, no bespoke client code | TBD; see `todos/mcp-server.md` |
 
 All four surfaces share the same in-process implementation under the
 hood (`src/server/runners/*.ts`). Choosing a different interface
-doesn't change *what* kshana-core does — only how you talk to it.
+doesn't change *what* dhee-core does — only how you talk to it.
 
 ---
 
@@ -46,11 +46,11 @@ pnpm backfill-schema <project>
 ```
 
 **When to use:** simplest possible integration. If your agent is
-already happy shelling out and you have the kshana-core repo on the
+already happy shelling out and you have the dhee-core repo on the
 same machine, CLI is the lowest-friction option. Output is text
 (usually structured logs you can grep); exit code 0 = success.
 
-**When NOT to use:** you don't have the repo. The packaged kshana
+**When NOT to use:** you don't have the repo. The packaged dhee
 desktop binary doesn't include `scripts/`, so CLI scripts only work
 in the dev/repo context.
 
@@ -94,7 +94,7 @@ The HTTP API itself is request/response. For event streams (`tool_call`,
 `tool_result`, `media_generated`, `notification`, etc.) connect to the
 WebSocket endpoint registered by `WebSocketHandler` in
 `src/server/WebSocketHandler.ts`. Same wire shape as
-`KshanaEventName` in `kshana-desktop/src/shared/kshanaIpc.ts`.
+`dheeEventName` in `dhee-desktop/src/shared/dheeIpc.ts`.
 
 ### Example: run a project to completion
 
@@ -118,7 +118,7 @@ For richer streaming, open a WebSocket alongside and listen for
 the run progresses.
 
 **When to use:** any time the agent isn't on the same Node process as
-kshana-core. Cross-machine, cross-language, hosted kshana-core, batch
+dhee-core. Cross-machine, cross-language, hosted dhee-core, batch
 automation that doesn't want to install dev deps.
 
 ---
@@ -126,7 +126,7 @@ automation that doesn't want to install dev deps.
 ## Library import
 
 If your agent IS in Node and you want zero overhead + full TypeScript
-types, link kshana-core as a dependency and import the runners
+types, link dhee-core as a dependency and import the runners
 directly:
 
 ```ts
@@ -134,24 +134,24 @@ import {
   runExecutor,
   type RunExecutorOpts,
   type RunExecutorResult,
-} from 'kshana-core/server/runners';
+} from 'dhee-core/server/runners';
 
 import {
   resetProjectStage,
   type ResetProjectStageOpts,
   type ResetProjectStageResult,
   ResetProjectError,
-} from 'kshana-core/server/runners/resetProjectStage';
+} from 'dhee-core/server/runners/resetProjectStage';
 
 import {
   createProjectInProcess,
   resolveStyle,
   CreateProjectError,
-} from 'kshana-core/server/runners/createProjectInProcess';
+} from 'dhee-core/server/runners/createProjectInProcess';
 
 import {
   ConversationManager,
-} from 'kshana-core/server/manager';
+} from 'dhee-core/server/manager';
 ```
 
 Live entry points (the embed barrels — Fastify-free, safe to bundle
@@ -163,11 +163,11 @@ into Electron / a worker / etc.):
 - `src/server/runners/createProjectInProcess.ts` — `createProjectInProcess`
 - `src/agent/pi/index.ts` — pi-agent extension factory
 
-The kshana-desktop app is the canonical example consumer
-(`kshana-core: file:../kshana-core` in its package.json).
+The dhee-desktop app is the canonical example consumer
+(`dhee-core: file:../dhee-core` in its package.json).
 
 **When to use:** Node-native agents that want maximum performance and
-typed APIs. Tightly coupled hosts where shipping kshana-core in the
+typed APIs. Tightly coupled hosts where shipping dhee-core in the
 same bundle makes sense.
 
 ---
@@ -176,7 +176,7 @@ same bundle makes sense.
 
 The roadmap is to expose the same operations as a Model Context
 Protocol server so any MCP-aware agent (Claude Code, Cursor, future
-agents) can drive kshana-core without writing client code.
+agents) can drive dhee-core without writing client code.
 
 See `todos/mcp-server.md` for the scope, open questions, and
 estimated effort.
@@ -185,7 +185,7 @@ estimated effort.
 
 ## Which interface should pi-agent use?
 
-The pi-agent (the chat panel inside kshana-desktop) uses **library
+The pi-agent (the chat panel inside dhee-desktop) uses **library
 import** — it imports `runExecutor`, `resetProjectStage`,
 `createProjectInProcess` directly because it ships in the same Node
 process as the embedded ConversationManager. See

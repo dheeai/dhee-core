@@ -13,7 +13,7 @@
  * cross-reference both files.
  *
  * Used by:
- *   - pi-agent `kshana_reset` tool (replaces runScript shell-out)
+ *   - pi-agent `dhee_reset` tool (replaces runScript shell-out)
  *   - scripts/reset-project.ts (delegates to this so dev + prod share
  *     a single source of truth)
  */
@@ -51,7 +51,7 @@ interface ExecutionNode {
 export interface ResetProjectStageOpts {
   /** Where projects live (`getProjectsDir()` for the host). */
   basePath: string;
-  /** Project name (folder is `<name>.kshana`). */
+  /** Project name (folder is `<name>.dhee`). */
   projectName: string;
   /** Stage alias from STAGE_ALIASES (e.g. `shot_image`, `scene_video_prompt`). */
   stage: string;
@@ -96,7 +96,7 @@ function computeResetTypes(startType: string): string[] {
   for (const [type, deps] of Object.entries(TEMPLATE_DEPS)) {
     for (const dep of deps) {
       if (!dependents[dep]) dependents[dep] = [];
-      dependents[dep]!.push(type);
+      dependents[dep].push(type);
     }
   }
   const result = new Set<string>([startType]);
@@ -175,7 +175,7 @@ export function resetProjectStage(
   );
 
   // ── Locate project ───────────────────────────────────────────────
-  const projectDir = join(opts.basePath, `${opts.projectName}.kshana`);
+  const projectDir = join(opts.basePath, `${opts.projectName}.dhee`);
   const projectPath = join(projectDir, 'project.json');
   if (!existsSync(projectPath)) {
     throw new ResetProjectError(`Project not found: ${projectPath}`);
@@ -317,8 +317,8 @@ export function resetProjectStage(
         nodes[itemNodeId] = newNode;
 
         for (const depId of wireDeps) {
-          if (nodes[depId] && !nodes[depId]!.dependents.includes(itemNodeId)) {
-            nodes[depId]!.dependents.push(itemNodeId);
+          if (nodes[depId] && !nodes[depId].dependents.includes(itemNodeId)) {
+            nodes[depId].dependents.push(itemNodeId);
           }
         }
         resetCount++;

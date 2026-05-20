@@ -4,7 +4,7 @@ import { join } from 'path';
 import { execSync } from 'child_process';
 import { LLMClient } from '../src/core/llm/index.js';
 
-const PROJECT_DIR = 'noir_detective_story_setup-3.kshana';
+const PROJECT_DIR = 'noir_detective_story_setup-3.dhee';
 const GUIDE_PATH = 'prompts/skills/defaults/scene_guide.md';
 const OUTPUT_DIR = 'test-output/autoresearch-scene-noir';
 

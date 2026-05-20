@@ -96,8 +96,8 @@ let sourceDir: string;
 
 beforeEach(() => {
   resetUserWorkflowsDirForTesting();
-  userDir = mkdtempSync(join(tmpdir(), 'kshana-userwf-'));
-  sourceDir = mkdtempSync(join(tmpdir(), 'kshana-src-'));
+  userDir = mkdtempSync(join(tmpdir(), 'dhee-userwf-'));
+  sourceDir = mkdtempSync(join(tmpdir(), 'dhee-src-'));
   setUserWorkflowsDir(userDir);
 });
 

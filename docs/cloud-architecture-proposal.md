@@ -1,4 +1,4 @@
-# Kshana Cloud Architecture: Proxy-Based Metering
+# dhee Cloud Architecture: Proxy-Based Metering
 
 **Status:** Proposal
 **Author:** Ganaraj
@@ -8,7 +8,7 @@
 
 ## TL;DR
 
-Today, "cloud mode" runs the entire Kshana core on our servers. The only real reason for that is so we can track usage of paid upstream APIs (ComfyUI Cloud, OpenRouter) and bill users for credits.
+Today, "cloud mode" runs the entire dhee core on our servers. The only real reason for that is so we can track usage of paid upstream APIs (ComfyUI Cloud, OpenRouter) and bill users for credits.
 
 This proposal: **stop running the core in the cloud.** Always run the core on the user's desktop. Put a thin **authenticated proxy** in front of the two paid upstream services. Meter and bill at the proxy. The desktop app authenticates with a per-user JWT/API key, and every paid call routes through the proxy where we deduct credits.
 
@@ -23,14 +23,14 @@ The proxy is the only piece of cloud infrastructure we need to operate. The core
    │    Local Mode       │                                │      Cloud Mode          │
    │                     │                                │                          │
    │  ┌──────────────┐   │                                │   ┌──────────────────┐   │
-   │  │ Kshana       │   │                                │   │ Kshana Desktop   │   │
+   │  │ dhee       │   │                                │   │ dhee Desktop   │   │
    │  │ Desktop      │   │                                │   │  (thin client)   │   │
    │  └──────┬───────┘   │                                │   └────────┬─────────┘   │
    │         │           │                                │            │             │
    │         │ runs      │                                │            │ remote      │
    │         ▼           │                                │            ▼             │
    │  ┌──────────────┐   │                                │   ┌──────────────────┐   │
-   │  │ Kshana Core  │   │                                │   │  Kshana Core     │   │
+   │  │ dhee Core  │   │                                │   │  dhee Core     │   │
    │  │ (local)      │   │                                │   │  (our servers)   │   │
    │  └──────┬───────┘   │                                │   └────────┬─────────┘   │
    │         │           │                                │            │             │
@@ -60,7 +60,7 @@ The proxy is the only piece of cloud infrastructure we need to operate. The core
                       │           User's Desktop (always)          │
                       │                                            │
                       │   ┌──────────────────────────────────────┐ │
-                      │   │       Kshana Desktop + Core         │ │
+                      │   │       dhee Desktop + Core         │ │
                       │   │   (single codebase, local files)    │ │
                       │   └────────────────┬─────────────────────┘ │
                       └────────────────────┼───────────────────────┘
@@ -69,7 +69,7 @@ The proxy is the only piece of cloud infrastructure we need to operate. The core
                                            │  Authorization: Bearer <user-JWT>
                                            ▼
                       ┌────────────────────────────────────────────┐
-                      │      Kshana Cloud Proxy (our infra)        │
+                      │      dhee Cloud Proxy (our infra)        │
                       │                                            │
                       │   • Verifies JWT / API key                 │
                       │   • Looks up user's credit balance         │
@@ -89,9 +89,9 @@ The proxy is the only piece of cloud infrastructure we need to operate. The core
 
 1. **User signs in** to the desktop app. The app receives a JWT (short-lived) or a long-lived API key — either is fine; JWT with refresh is cleaner.
 2. **The desktop app runs the core locally**, exactly like it does in local mode today. No special "cloud mode" code path.
-3. **The core's outbound HTTP destinations are configurable.** When the user is signed in to Kshana Cloud, we point the two upstream base URLs at our proxy:
-   - `COMFYUI_BASE_URL` → `https://proxy.kshana.cloud/comfy`
-   - `OPENROUTER_BASE_URL` → `https://proxy.kshana.cloud/openrouter`
+3. **The core's outbound HTTP destinations are configurable.** When the user is signed in to dhee Cloud, we point the two upstream base URLs at our proxy:
+   - `COMFYUI_BASE_URL` → `https://proxy.dhee.cloud/comfy`
+   - `OPENROUTER_BASE_URL` → `https://proxy.dhee.cloud/openrouter`
 4. **Every request includes the user's bearer token.** The proxy authenticates and authorizes before forwarding.
 5. **The proxy meters usage and deducts credits.** For LLM calls it reads token counts from the response. For ComfyUI calls it records job duration / GPU minutes / a fixed cost per workflow type.
 6. **If credits are exhausted**, the proxy returns 402 Payment Required and the desktop app surfaces the upgrade flow.
@@ -105,7 +105,7 @@ It is **not**:
 - an orchestration engine
 - a file store
 - a cache for user project data
-- a wrapper that understands kshana-specific concepts like "scenes" or "shots"
+- a wrapper that understands dhee-specific concepts like "scenes" or "shots"
 
 The proxy speaks ComfyUI's protocol and OpenRouter's protocol, byte-for-byte, with two additions: an auth header it consumes and a usage row it writes per request.
 
@@ -153,7 +153,7 @@ Before forwarding, the proxy checks the user has *some* credit headroom (don't n
 
 ### Error handling
 
-- Proxy down → desktop app surfaces "Kshana Cloud is unavailable, retry or switch to BYO-keys mode." Optionally, allow the user to fall back to direct calls with their own ComfyUI/OpenRouter keys if they have them.
+- Proxy down → desktop app surfaces "dhee Cloud is unavailable, retry or switch to BYO-keys mode." Optionally, allow the user to fall back to direct calls with their own ComfyUI/OpenRouter keys if they have them.
 - Upstream down → proxy returns the upstream error verbatim. Don't charge for failed calls.
 - Partial failures (call succeeded upstream, ledger write failed) → write to a durable retry queue; never double-charge, never under-charge silently.
 
@@ -170,16 +170,16 @@ The proxy is **not** a cache for user content. Any caching is incidental (e.g., 
 
 ### Per-environment config in the core
 
-In `kshana-core`, the upstream URLs are already configurable (see `COMFY_MODE` / `COMFYUI_BASE_URL` precedence in memory). We need:
-- A `KSHANA_CLOUD=true` mode that sets both base URLs to the proxy and injects the bearer token on every request.
+In `dhee-core`, the upstream URLs are already configurable (see `COMFY_MODE` / `COMFYUI_BASE_URL` precedence in memory). We need:
+- A `dhee_CLOUD=true` mode that sets both base URLs to the proxy and injects the bearer token on every request.
 - An auth client in the desktop app that handles login, token refresh, and surfaces 402 / 401 from the proxy as user-facing flows.
 
 ---
 
 ## Migration
 
-1. **Phase 1 — Build proxy.** Stand up `proxy.kshana.cloud` with auth, ledger, and pass-through for both upstreams. Test against a single dev account.
-2. **Phase 2 — Desktop integration.** Add login flow, token storage, and `KSHANA_CLOUD` mode to the desktop app. Internal dogfooding.
+1. **Phase 1 — Build proxy.** Stand up `proxy.dhee.cloud` with auth, ledger, and pass-through for both upstreams. Test against a single dev account.
+2. **Phase 2 — Desktop integration.** Add login flow, token storage, and `dhee_CLOUD` mode to the desktop app. Internal dogfooding.
 3. **Phase 3 — Sunset cloud-core.** Once the proxy path is healthy, deprecate the hosted core. Existing cloud-mode users get migrated to "logged-in desktop" mode.
 4. **Phase 4 — Plans and billing UI.** Subscription tiers, top-ups, usage dashboard. None of this needs the hosted core; it's all proxy-side.
 

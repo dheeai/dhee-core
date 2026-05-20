@@ -1,10 +1,10 @@
 /**
  * Embed-friendly barrel for the in-process ConversationManager.
  *
- * Used by hosts that want to drive kshana-core without booting the
+ * Used by hosts that want to drive dhee-core without booting the
  * Fastify HTTP/WebSocket server — e.g. the Electron desktop app
  * imports `ConversationManager` and `ConversationEvents` from
- * `kshana-core/manager` directly and wires the events into IPC.
+ * `dhee-core/manager` directly and wires the events into IPC.
  *
  * IMPORTANT: this barrel must not import anything from `./index.ts`,
  * `./routes.ts`, `./WebSocketHandler.ts`, or any `fastify` /
@@ -33,6 +33,7 @@ export { loadDevEnv } from './loadDevEnv.js';
 export type { LoadDevEnvResult } from './loadDevEnv.js';
 export {
   captureAnalyticsEvent,
+  configurePostHogRuntime,
   captureDesktopAppFirstStarted,
   captureDesktopAppStarted,
   captureDesktopHeartbeat,
@@ -56,7 +57,7 @@ export type {
 } from './posthog.js';
 
 // Custom ComfyUI workflow integration — exposed for hosts (e.g.
-// kshana-desktop) that drive workflow CRUD via in-process IPC
+// dhee-desktop) that drive workflow CRUD via in-process IPC
 // instead of HTTP. The host calls `setUserWorkflowsDir()` at
 // startup, then routes its renderer's CRUD requests to these
 // helpers. Pi-agent tools call the same helpers, so the chat path

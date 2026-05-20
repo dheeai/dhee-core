@@ -1,5 +1,5 @@
 /**
- * kshana_show_shot — single tool that surfaces a shot's full media set
+ * dhee_show_shot — single tool that surfaces a shot's full media set
  * (first frame + last frame + video) so "show me s1 shot 1" returns
  * everything in one call. Each piece appears as its own media chat
  * card via the existing onMedia → media_generated WS event path.
@@ -14,10 +14,10 @@ let projectsDir: string;
 let originalProjectsDir: string | undefined;
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), "kshana-show-shot-"));
-  originalProjectsDir = process.env["KSHANA_PROJECTS_DIR"];
-  process.env["KSHANA_PROJECTS_DIR"] = projectsDir;
-  const proj = join(projectsDir, "demo.kshana");
+  projectsDir = mkdtempSync(join(tmpdir(), "dhee-show-shot-"));
+  originalProjectsDir = process.env["dhee_PROJECTS_DIR"];
+  process.env["dhee_PROJECTS_DIR"] = projectsDir;
+  const proj = join(projectsDir, "demo.dhee");
   mkdirSync(join(proj, "assets"), { recursive: true });
   writeFileSync(
     join(proj, "project.json"),
@@ -49,8 +49,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (originalProjectsDir === undefined) delete process.env["KSHANA_PROJECTS_DIR"];
-  else process.env["KSHANA_PROJECTS_DIR"] = originalProjectsDir;
+  if (originalProjectsDir === undefined) delete process.env["dhee_PROJECTS_DIR"];
+  else process.env["dhee_PROJECTS_DIR"] = originalProjectsDir;
   rmSync(projectsDir, { recursive: true, force: true });
 });
 
@@ -72,7 +72,7 @@ describe("createShowShotTool", () => {
     ]);
     for (const e of events) {
       expect(e.project).toBe("demo");
-      expect(e.source).toBe("kshana_show_shot");
+      expect(e.source).toBe("dhee_show_shot");
     }
   });
 

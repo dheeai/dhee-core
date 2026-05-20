@@ -51,7 +51,7 @@ export function ProjectSelector({ onSendWs, onNewProject, refreshToken = 0 }: Pr
   }, [open])
 
   const handleSelectNow = useCallback(async (dirName: string) => {
-    const projectName = dirName.replace('.kshana', '')
+    const projectName = dirName.replace('.dhee', '')
     // Use the shared selectProjectByName so dropdown and /project slash
     // command share one hydration path. selectProjectByName prefers
     // project.scenes (pi-era) over executorState (legacy) over manifest.
@@ -84,7 +84,7 @@ export function ProjectSelector({ onSendWs, onNewProject, refreshToken = 0 }: Pr
     handleSelectNow(dirName)
   }
 
-  const selectedTitle = projects.find(p => p.dirName.replace('.kshana', '') === selectedProject)?.title
+  const selectedTitle = projects.find(p => p.dirName.replace('.dhee', '') === selectedProject)?.title
 
   return (
     <>
@@ -118,7 +118,7 @@ export function ProjectSelector({ onSendWs, onNewProject, refreshToken = 0 }: Pr
               </div>
             ) : (
               projects.map((p) => {
-                const isSelected = p.dirName.replace('.kshana', '') === selectedProject
+                const isSelected = p.dirName.replace('.dhee', '') === selectedProject
                 return (
                   <button
                     key={p.dirName}
@@ -131,7 +131,7 @@ export function ProjectSelector({ onSendWs, onNewProject, refreshToken = 0 }: Pr
                       <div className="flex items-center gap-2">
                         {isSelected && <span className="text-cyan text-xs">●</span>}
                         <span className={`text-sm truncate ${isSelected ? 'text-cyan' : 'text-foreground'}`}>
-                          {p.title || p.dirName.replace('.kshana', '')}
+                          {p.title || p.dirName.replace('.dhee', '')}
                         </span>
                       </div>
                       {p.currentPhase && p.currentPhase !== 'unknown' && (

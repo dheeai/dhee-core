@@ -1,15 +1,15 @@
 ---
 name: comfyui-workflow-integration
-description: Help the user add a custom ComfyUI workflow to kshana. Triggered when the user attaches a JSON file and asks to add/import/install a workflow, or asks to manage (edit/delete/list) existing custom workflows. Walks through validation → LLM analysis → variable mapping confirmation → save. Conversational — discover what variables to expose, propose defaults, refine with the user, then commit. Never save without explicit confirmation.
+description: Help the user add a custom ComfyUI workflow to dhee. Triggered when the user attaches a JSON file and asks to add/import/install a workflow, or asks to manage (edit/delete/list) existing custom workflows. Walks through validation → LLM analysis → variable mapping confirmation → save. Conversational — discover what variables to expose, propose defaults, refine with the user, then commit. Never save without explicit confirmation.
 ---
 
 # Custom ComfyUI workflow integration
 
-Use this skill when the user wants to bring their own ComfyUI workflow into kshana. The integration flow is conversational: you propose, the user refines, you commit only after explicit approval.
+Use this skill when the user wants to bring their own ComfyUI workflow into dhee. The integration flow is conversational: you propose, the user refines, you commit only after explicit approval.
 
 ## When to engage
 
-- User attaches a `.json` file via the chat **and** the message context is about workflows ("add this", "import", "install", "use this in kshana", "make this available", or just attaching with no context — ask).
+- User attaches a `.json` file via the chat **and** the message context is about workflows ("add this", "import", "install", "use this in dhee", "make this available", or just attaching with no context — ask).
 - User asks to list, edit defaults, change the active workflow, or delete a custom workflow they previously installed.
 - User asks "how do I add my own workflow?" — explain the flow, then offer to start when they attach a file.
 
@@ -17,19 +17,19 @@ If the user attaches a JSON file with no context, ask what they want to do with 
 
 ## Tools at your disposal
 
-- `kshana_validate_comfy_workflow(path)` — fast structural sniff. Returns parsed node count, detected pipeline, input nodes, LoRA count. **Always run first.**
-- `kshana_analyze_comfy_workflow(path)` — LLM analysis. Returns suggested display name, pipeline, variable mappings, LoRA keywords. May return `llmFailed: true` if no LLM is available — fall back to manual mapping in that case.
-- `kshana_save_comfy_workflow({source_path, manifest, on_conflict?})` — persist after user confirms. Default `on_conflict: 'fail'`. If the requested id already exists, the user picks `overwrite` or `rename`.
-- `kshana_list_comfy_workflows({user_only?})` — list installed workflows.
-- `kshana_update_comfy_workflow({id, patch})` — patch displayName / defaults / mappings / `isOverride` (active for pipeline). Built-ins are immutable.
-- `kshana_delete_comfy_workflow({id})` — permanent. Confirm first.
+- `dhee_validate_comfy_workflow(path)` — fast structural sniff. Returns parsed node count, detected pipeline, input nodes, LoRA count. **Always run first.**
+- `dhee_analyze_comfy_workflow(path)` — LLM analysis. Returns suggested display name, pipeline, variable mappings, LoRA keywords. May return `llmFailed: true` if no LLM is available — fall back to manual mapping in that case.
+- `dhee_save_comfy_workflow({source_path, manifest, on_conflict?})` — persist after user confirms. Default `on_conflict: 'fail'`. If the requested id already exists, the user picks `overwrite` or `rename`.
+- `dhee_list_comfy_workflows({user_only?})` — list installed workflows.
+- `dhee_update_comfy_workflow({id, patch})` — patch displayName / defaults / mappings / `isOverride` (active for pipeline). Built-ins are immutable.
+- `dhee_delete_comfy_workflow({id})` — permanent. Confirm first.
 
 ## Add-a-workflow flow
 
 ### 1. Validate
 
 ```
-kshana_validate_comfy_workflow(path=<attachment.path>)
+dhee_validate_comfy_workflow(path=<attachment.path>)
 ```
 
 If invalid, summarize the reason in plain language and stop. Don't try to repair the file. Common cases:
@@ -40,7 +40,7 @@ If invalid, summarize the reason in plain language and stop. Don't try to repair
 ### 2. Analyze
 
 ```
-kshana_analyze_comfy_workflow(path=<attachment.path>)
+dhee_analyze_comfy_workflow(path=<attachment.path>)
 ```
 
 Two outcomes:
@@ -105,7 +105,7 @@ Only after explicit user approval ("yes", "save it", "looks good"). Construct th
 Then call:
 
 ```
-kshana_save_comfy_workflow(
+dhee_save_comfy_workflow(
   source_path=<attachment.path>,
   manifest=<the manifest object>,
   on_conflict='fail',  # default
@@ -130,28 +130,28 @@ Tell the user the workflow is saved and immediately available. Optionally sugges
 If yes:
 
 ```
-kshana_update_comfy_workflow(id='cinematic_anime', patch={ isOverride: true })
+dhee_update_comfy_workflow(id='cinematic_anime', patch={ isOverride: true })
 ```
 
 ## Manage existing workflows
 
 ### List
 
-`kshana_list_comfy_workflows({ user_only: true })` — for "what custom workflows do I have installed?"
+`dhee_list_comfy_workflows({ user_only: true })` — for "what custom workflows do I have installed?"
 
-`kshana_list_comfy_workflows({})` — for "show me everything available", including built-ins.
+`dhee_list_comfy_workflows({})` — for "show me everything available", including built-ins.
 
 ### Edit defaults
 
 User says "change my cinematic workflow to default seed=42":
 
 1. Get the current manifest (you already see it from list output, or ask the user). The patch is just on `parameterMappings[i].defaultValue`.
-2. `kshana_update_comfy_workflow({ id, patch: { parameterMappings: [...updated array...] } })` — note `parameterMappings` is replaced entirely, not merged per-element. Construct the full new array.
+2. `dhee_update_comfy_workflow({ id, patch: { parameterMappings: [...updated array...] } })` — note `parameterMappings` is replaced entirely, not merged per-element. Construct the full new array.
 3. Confirm what changed.
 
 ### Set active for a pipeline
 
-`kshana_update_comfy_workflow({ id, patch: { isOverride: true } })` — makes this the default workflow chosen by the LLM for its pipeline. Only one user override per pipeline; setting a new one supersedes any prior.
+`dhee_update_comfy_workflow({ id, patch: { isOverride: true } })` — makes this the default workflow chosen by the LLM for its pipeline. Only one user override per pipeline; setting a new one supersedes any prior.
 
 ### Delete
 
@@ -159,7 +159,7 @@ Always confirm before deleting:
 
 > Delete `cinematic_anime`? This removes the workflow JSON and its manifest. There's no undo.
 
-Then `kshana_delete_comfy_workflow({ id })`.
+Then `dhee_delete_comfy_workflow({ id })`.
 
 ## What you do NOT do
 

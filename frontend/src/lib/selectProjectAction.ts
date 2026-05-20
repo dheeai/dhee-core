@@ -16,8 +16,8 @@ export async function selectProjectByName(
   dispatch: Dispatch,
   send: Send,
 ): Promise<{ ok: boolean; reason?: string }> {
-  const projectName = name.replace(/\.kshana$/, "");
-  const dirName = `${projectName}.kshana`;
+  const projectName = name.replace(/\.dhee$/, "");
+  const dirName = `${projectName}.dhee`;
 
   dispatch({ type: "SELECT_PROJECT", name: projectName });
   send({ type: "select_project", data: { projectName } });

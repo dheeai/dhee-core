@@ -509,7 +509,7 @@ export function updateSegmentLayers(
     layersChanged &&
     downgradePrevention.preservedIndexes.length === 0;
 
-  let layerHistory = existing.layerHistory ? [...existing.layerHistory] : [];
+  const layerHistory = existing.layerHistory ? [...existing.layerHistory] : [];
   let versionInfo: SegmentVersionInfo;
 
   if (isReplacement) {

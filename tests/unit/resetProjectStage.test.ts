@@ -16,7 +16,7 @@ import {
 let basePath: string;
 
 beforeEach(() => {
-  basePath = mkdtempSync(join(tmpdir(), 'kshana-reset-stage-'));
+  basePath = mkdtempSync(join(tmpdir(), 'dhee-reset-stage-'));
 });
 
 afterEach(() => {
@@ -58,7 +58,7 @@ function n(opts: NodeOpts) {
 }
 
 function makeProject(name: string, project: Record<string, unknown>): string {
-  const dir = join(basePath, `${name}.kshana`);
+  const dir = join(basePath, `${name}.dhee`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'project.json'), JSON.stringify(project, null, 2));
   return dir;
@@ -69,7 +69,7 @@ function readProject(name: string): Record<string, unknown> & {
   currentPhase?: string;
 } {
   return JSON.parse(
-    readFileSync(join(basePath, `${name}.kshana`, 'project.json'), 'utf8'),
+    readFileSync(join(basePath, `${name}.dhee`, 'project.json'), 'utf8'),
   );
 }
 
@@ -267,7 +267,7 @@ describe('resetProjectStage core mutations', () => {
       stage: 'final_video',
     });
     const written = JSON.parse(
-      readFileSync(join(basePath, 'p.kshana', 'project.json'), 'utf8'),
+      readFileSync(join(basePath, 'p.dhee', 'project.json'), 'utf8'),
     ) as Record<string, unknown> & {
       executorState?: { nodes?: Record<string, Record<string, unknown>> };
     };

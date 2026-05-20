@@ -21,24 +21,24 @@ export interface ListProjectsDetails {
   projects: ProjectSummary[];
 }
 
-export const kshanaListProjects = defineTool({
-  name: "kshana_list_projects",
-  label: "kshana list-projects",
-  description: "List all kshana projects in the repo. Includes both `*.kshana` directories (canonical) and bare-name folders that contain a `project.json` (kshana-desktop's NewProjectDialog convention). Returns each project's name, current phase, style, and title where available.",
+export const dheeListProjects = defineTool({
+  name: "dhee_list_projects",
+  label: "dhee list-projects",
+  description: "List all dhee projects in the repo. Includes both `*.dhee` directories (canonical) and bare-name folders that contain a `project.json` (dhee-desktop's NewProjectDialog convention). Returns each project's name, current phase, style, and title where available.",
   parameters: Params,
   async execute(_id, _params: Static<typeof Params>): Promise<AgentToolResult<ListProjectsDetails>> {
     const entries = await readdir(getProjectsDir(), { withFileTypes: true });
     // Two conventions are accepted:
-    //   1. `<name>.kshana/` (canonical, every kshana-core CLI project)
-    //   2. `<name>/` containing `project.json` (kshana-desktop's
+    //   1. `<name>.dhee/` (canonical, every dhee-core CLI project)
+    //   2. `<name>/` containing `project.json` (dhee-desktop's
     //      NewProjectDialog default)
     // Pre-fix this filtered to (1) only, hiding desktop-created
     // projects entirely — pi-agent then guessed the active project
-    // from whatever .kshana sibling happened to exist.
+    // from whatever .dhee sibling happened to exist.
     const candidates: string[] = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue;
-      if (e.name.endsWith(".kshana")) {
+      if (e.name.endsWith(".dhee")) {
         candidates.push(e.name);
         continue;
       }
@@ -49,14 +49,14 @@ export const kshanaListProjects = defineTool({
         await stat(join(getProjectsDir(), e.name, "project.json"));
         candidates.push(e.name);
       } catch {
-        // No project.json — not a kshana project.
+        // No project.json — not a dhee project.
       }
     }
     const projectDirs = candidates.sort();
 
     const summaries: ProjectSummary[] = [];
     for (const dirname of projectDirs) {
-      const name = dirname.replace(/\.kshana$/, "");
+      const name = dirname.replace(/\.dhee$/, "");
       const projectJson = join(getProjectsDir(), dirname, "project.json");
       let summary: ProjectSummary = { name, hasProjectJson: false };
       try {
@@ -92,7 +92,7 @@ export const kshanaListProjects = defineTool({
 
 function formatSummaries(projects: ProjectSummary[]): string {
   if (projects.length === 0) {
-    return "No kshana projects found in the repo root.";
+    return "No dhee projects found in the repo root.";
   }
   const lines = [`Found ${projects.length} project(s):`, ""];
   for (const p of projects) {

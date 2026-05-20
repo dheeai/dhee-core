@@ -11,7 +11,7 @@
 
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import { findKshanaCoreRoot } from '../../agent/pi/paths.js';
+import { finddheeCoreRoot } from '../../agent/pi/paths.js';
 import { getUserWorkflowsDir, markRegistryInitialized } from './workflowsRoot.js';
 import type { WorkflowManifest, WorkflowManifestFile, WorkflowPipeline } from './types.js';
 
@@ -23,7 +23,7 @@ import type { WorkflowManifest, WorkflowManifestFile, WorkflowPipeline } from '.
  * (inferred from directory when unset).
  *
  * Why "always both" rather than mode-gating the scan:
- *   The desktop sets `COMFY_MODE=cloud` AFTER kshana-core is imported.
+ *   The desktop sets `COMFY_MODE=cloud` AFTER dhee-core is imported.
  *   The registry singleton is constructed lazily on first lookup;
  *   between the two events, calls into the registry would see only
  *   `workflows/built-in/` and never find cloud workflows. Even with
@@ -60,7 +60,7 @@ function inferManifestMode(absDir: string): 'local' | 'cloud' | 'both' {
   if (absDir.endsWith('/workflows/built-in') || absDir.endsWith('\\workflows\\built-in')) {
     return 'local';
   }
-  // User uploads (workflows/user/, kshana-desktop's userData/...) and
+  // User uploads (workflows/user/, dhee-desktop's userData/...) and
   // anything else: default to 'local'. Reason: user manifests reference
   // custom nodes / model files only present on the user's own ComfyUI
   // install — they can't run on cloud ComfyUI. saveWorkflow() forces
@@ -171,15 +171,15 @@ export class WorkflowModeRegistry {
   constructor(projectRoot?: string) {
     // process.cwd() is wrong in the embedded desktop path (cwd is the
     // desktop's repo, which has no `workflows/` directory). Resolve
-    // the kshana-core package root explicitly so the workflow scan
-    // finds the manifests that ship with kshana-core regardless of
+    // the dhee-core package root explicitly so the workflow scan
+    // finds the manifests that ship with dhee-core regardless of
     // who's hosting it. Fall back to cwd if the package root can't
     // be found (shouldn't happen — but better than throwing here).
     if (projectRoot) {
       this.projectRoot = projectRoot;
     } else {
       try {
-        this.projectRoot = findKshanaCoreRoot(import.meta.url);
+        this.projectRoot = finddheeCoreRoot(import.meta.url);
       } catch {
         this.projectRoot = process.cwd();
       }
@@ -196,17 +196,17 @@ export class WorkflowModeRegistry {
 
     const isCloudMode = process.env['COMFY_MODE'] === 'cloud';
 
-    // Build the scan list: kshana-core's built-in/cloud subdirs (always),
-    // plus user uploads. When a host (kshana-desktop) has set a user
+    // Build the scan list: dhee-core's built-in/cloud subdirs (always),
+    // plus user uploads. When a host (dhee-desktop) has set a user
     // workflows directory via setUserWorkflowsDir(), we use *that*
-    // for user workflows and skip kshana-core's `workflows/user/` —
-    // otherwise dev-machine workflows under the kshana-core checkout
+    // for user workflows and skip dhee-core's `workflows/user/` —
+    // otherwise dev-machine workflows under the dhee-core checkout
     // would leak into a packaged-app user's view. CLI / dev runs
-    // fall back to the kshana-core-relative paths.
+    // fall back to the dhee-core-relative paths.
     const hostUserDir = getUserWorkflowsDir();
     const scanDirs: string[] = [];
     for (const d of workflowDirs()) {
-      // Skip the kshana-core-relative user dir if the host has set its own.
+      // Skip the dhee-core-relative user dir if the host has set its own.
       if (hostUserDir && (d === 'workflows/user' || d === 'workflows')) continue;
       scanDirs.push(join(this.projectRoot, d));
     }

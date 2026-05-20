@@ -48,7 +48,7 @@ function findTestCases(): Array<TestCase & { characterContent: string; worldStyl
   const cases: Array<TestCase & { characterContent: string; worldStyle: string }> = [];
 
   for (const proj of projects) {
-    const projDir = `${proj}.kshana`;
+    const projDir = `${proj}.dhee`;
     if (!existsSync(projDir)) continue;
 
     // Find character content

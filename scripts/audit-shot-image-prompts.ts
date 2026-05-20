@@ -52,7 +52,7 @@ if (!projectDir) {
   console.error('Usage: pnpm tsx scripts/audit-shot-image-prompts.ts <project_dir>');
   process.exit(1);
 }
-const projectRoot = projectDir.endsWith('.kshana') ? projectDir : `${projectDir}.kshana`;
+const projectRoot = projectDir.endsWith('.dhee') ? projectDir : `${projectDir}.dhee`;
 if (!existsSync(projectRoot)) {
   console.error(`Project not found: ${projectRoot}`);
   process.exit(1);

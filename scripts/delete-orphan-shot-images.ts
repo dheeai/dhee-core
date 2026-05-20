@@ -19,7 +19,7 @@ function main() {
     console.error('Usage: pnpm tsx scripts/delete-orphan-shot-images.ts <project>');
     process.exit(1);
   }
-  const name = projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`;
+  const name = projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`;
   const projectDir = join(REPO_ROOT, name);
   const assetsDir = join(projectDir, 'assets', 'images');
   const projectJsonPath = join(projectDir, 'project.json');

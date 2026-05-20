@@ -36,10 +36,10 @@ async function main() {
     console.error('Usage: pnpm tsx scripts/probe-grok-one-shot.ts <project> <scene> <shot>');
     process.exit(1);
   }
-  const projectName = projectArg.endsWith('.kshana') ? projectArg.replace(/\.kshana$/, '') : projectArg;
+  const projectName = projectArg.endsWith('.dhee') ? projectArg.replace(/\.dhee$/, '') : projectArg;
   const scene = parseInt(sceneArg, 10);
   const shot = parseInt(shotArg, 10);
-  const projectDir = resolve(REPO_ROOT, `${projectName}.kshana`);
+  const projectDir = resolve(REPO_ROOT, `${projectName}.dhee`);
 
   if (!existsSync(projectDir)) {
     console.error(`Project not found: ${projectDir}`);

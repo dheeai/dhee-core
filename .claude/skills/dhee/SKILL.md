@@ -1,10 +1,10 @@
 ---
-name: kshana
+name: dhee
 version: 1.0.0
 description: |
-  Drive the kshana-core video pipeline from the shell. Use when the user asks to
+  Drive the dhee-core video pipeline from the shell. Use when the user asks to
   create a video from a story/idea, generate scenes/shots/images/videos for a
-  kshana project, regenerate one piece of a project (a shot prompt, a scene's
+  dhee project, regenerate one piece of a project (a shot prompt, a scene's
   prose), override LLM-generated content with their own, or check the status
   of a running project. The pipeline goes: text input → scene breakdown →
   shot prompts → first/last frame images → video clips → final assembly.
@@ -15,24 +15,24 @@ allowed-tools:
   - Write
 ---
 
-# kshana-core CLI
+# dhee-core CLI
 
-A short reference for driving the kshana-core video pipeline. **Always run
-commands from the kshana-core repo root** (where `package.json` lives). All
+A short reference for driving the dhee-core video pipeline. **Always run
+commands from the dhee-core repo root** (where `package.json` lives). All
 commands are `pnpm <verb> <project> ...`.
 
 ## When to use this skill
 
 Invoke it when the user asks for any of these:
 
-- "create a kshana project", "make a video from this story/idea"
+- "create a dhee project", "make a video from this story/idea"
 - "regenerate shot N's prompt", "redo scene 3"
 - "show me the prompt for shot 2", "what did the LLM generate for scene 1"
 - "use my version of scene 3 instead of the one the LLM wrote"
 - "what's the status of my project", "did anything fail"
 - "run the pipeline", "stop after scene breakdown", "go to final video"
 
-If the user is asking a code question (not asking to drive kshana), don't
+If the user is asking a code question (not asking to drive dhee), don't
 invoke this skill — they probably want to edit source.
 
 ## Decision tree — what to run for what intent
@@ -41,7 +41,7 @@ Use this to translate fuzzy user requests into the right command.
 
 | User says | What to run | Why |
 |---|---|---|
-| "make a video about X" / "create a kshana project" | `pnpm new` + `pnpm run-to` | bootstrap from scratch |
+| "make a video about X" / "create a dhee project" | `pnpm new` + `pnpm run-to` | bootstrap from scratch |
 | "what's going on?" / "is it stuck?" | `pnpm status` first, then `pnpm inspect <node>` on anything failed | always probe before changing |
 | "show me [thing]" | `pnpm inspect <project> <alias>` | reads the artifact + metadata |
 | "do shot 2 next" / "I want to do shot by shot" | `pnpm run-to <project> shot_image:scene_N_shot_M` then `shot_video:scene_N_shot_M` | per-node gate pauses after that one |
@@ -238,7 +238,7 @@ pnpm reset myproj scene_video_prompt --clean
 ## What lives where in the project folder
 
 ```
-<project>.kshana/
+<project>.dhee/
 ├── original_input.md              # user's story or idea
 ├── project.json                   # full state (phases + executorState)
 ├── chapters/chapter_1/
@@ -270,7 +270,7 @@ pnpm reset myproj scene_video_prompt --clean
   graph and cause subtle bugs.
 - **Logs:** `logs/llm-calls-truncated.log` is the most useful when something
   went wrong inside an LLM call. `logs/debug.log` for ComfyUI cloud activity.
-  Per-project: `<project>.kshana/logs/executor.log`.
+  Per-project: `<project>.dhee/logs/executor.log`.
 
 ## What this skill does NOT cover
 

@@ -26,7 +26,7 @@ export interface PlannerToolContext {
   template: VideoTemplate;
   /** Load the latest project state at tool execution time. */
   getProject: () => GenericProjectFile;
-  /** Returns the path to the active .kshana project directory (resolved at call time) */
+  /** Returns the path to the active .dhee project directory (resolved at call time) */
   getProjectDir: () => string;
   /** Shared registry state across planner tool calls within a session */
   registry?: AssetRegistry;
@@ -371,7 +371,7 @@ ${Object.keys(context.template.artifactTypes).join(', ')}`,
       const typeDef = context.template.artifactTypes[artifactType];
       const shouldMarkFull = markFullySatisfied ?? (typeDef && !typeDef.isCollection);
 
-      // Persist content to disk in .kshana/plans/<artifact_type>.md
+      // Persist content to disk in .dhee/plans/<artifact_type>.md
       // This ensures intermediate artifacts survive session restarts.
       let persistedPath: string | undefined;
       if (content && context.getProjectDir()) {
@@ -497,7 +497,7 @@ The goal is stored in project.json and read on session resume.`,
         mutableProject['targetDuration'] = preferences.duration;
       }
       if (typeof preferences.style === 'string' && preferences.style) {
-        project.style = preferences.style as GenericProjectFile['style'];
+        project.style = preferences.style;
       }
 
       // Clear completion state so the nudge loop and workflow resume

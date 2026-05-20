@@ -631,7 +631,7 @@ export function normalizeShotImagePrompt(parsed: unknown): void {
   if (!p.frames || typeof p.frames !== 'object') return;
 
   const firstFrame = p.frames['first_frame'];
-  const firstRefs = (Array.isArray(firstFrame?.references) ? firstFrame!.references : []) as Array<{ refId?: string }>;
+  const firstRefs = (Array.isArray(firstFrame?.references) ? firstFrame.references : []) as Array<{ refId?: string }>;
   if (firstRefs.length === 0) return; // nothing to inherit
 
   for (const [frameId, frame] of Object.entries(p.frames)) {

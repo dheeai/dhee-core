@@ -33,7 +33,7 @@ const SHOT = parseInt(shotArg, 10);
 const SEED = seedArg ? parseInt(seedArg, 10) : 13;
 const projectRoot = resolve(
   process.cwd(),
-  projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`,
+  projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`,
 );
 
 const shotPromptPath = join(projectRoot, `prompts/images/shots/scene-${SCENE}-shot-${SHOT}.json`);

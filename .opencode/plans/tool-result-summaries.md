@@ -33,7 +33,7 @@ Transforms agentic loop to use tool result summaries in message history while pe
 **Storage Structure**:
 
 ```
-.kshana/tool-results/
+.dhee/tool-results/
   ├── index.json                    # Metadata index
   ├── tool_result_001.json          # Full result + summary
   ├── tool_result_002.json
@@ -516,7 +516,7 @@ const ENABLE_TOOL_SUMMARIES = process.env.ENABLE_TOOL_SUMMARIES === 'true';
 
 1. **Threshold value**: 500 chars suggested - confirm based on testing
 2. **Cleanup policy**: How long to keep tool results? (Suggest: 7 days)
-3. **Store location**: `.kshana/tool-results/` acceptable?
+3. **Store location**: `.dhee/tool-results/` acceptable?
 4. **Backward compatibility**: Need to handle existing agents without summary support?
 
 ---

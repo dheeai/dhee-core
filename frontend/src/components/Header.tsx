@@ -46,7 +46,7 @@ export function Header({ onProviderSettings, onWorkflows, onStop, onClearChat, p
         {/* Left: Brand + Project */}
         <div className="flex items-center gap-3">
           <span className="font-[family-name:var(--font-display)] text-xl font-bold text-cyan">
-            Kshana
+            dhee
           </span>
           {projectSelector || (
             <span className="text-graphite-100 text-sm">

@@ -1,10 +1,10 @@
 /**
  * Server discovery file — the contract that lets external agents
  * (pi-agent, openclaw, anything that can read a JSON file) find
- * the running kshana-core HTTP server without knowing the random
+ * the running dhee-core HTTP server without knowing the random
  * port the desktop allocated for it.
  *
- * On start, the server writes `~/.kshana/server.json` with its url,
+ * On start, the server writes `~/.dhee/server.json` with its url,
  * port, pid, and version. On graceful shutdown, the file is removed.
  * If a stale file is left behind by a crash, the next start
  * overwrites it.
@@ -28,7 +28,7 @@ export interface DiscoveryFileContent {
   pid: number;
   /** Server mode at the time the file was written. */
   mode?: 'local' | 'remote' | 'auto';
-  /** kshana-core package version, useful for compatibility checks. */
+  /** dhee-core package version, useful for compatibility checks. */
   version?: string;
   /** Unix-ms timestamp the server wrote the file. */
   startedAt: number;
@@ -46,13 +46,13 @@ export interface WriteDiscoveryOptions {
 
 /**
  * Resolve the canonical discovery file path. Honours
- * `KSHANA_DISCOVERY_FILE` if set; otherwise falls back to
- * `~/.kshana/server.json`.
+ * `dhee_DISCOVERY_FILE` if set; otherwise falls back to
+ * `~/.dhee/server.json`.
  */
 export function defaultDiscoveryPath(): string {
-  const override = process.env['KSHANA_DISCOVERY_FILE'];
+  const override = process.env['dhee_DISCOVERY_FILE'];
   if (override && override.trim()) return override.trim();
-  return join(homedir(), '.kshana', 'server.json');
+  return join(homedir(), '.dhee', 'server.json');
 }
 
 /**
@@ -116,7 +116,7 @@ export function readDiscoveryFile(path: string = defaultDiscoveryPath()): Discov
 
 /**
  * Check whether a discovery file points at a process that no longer
- * exists. The desktop hard-killing kshana-core (force quit) leaves a
+ * exists. The desktop hard-killing dhee-core (force quit) leaves a
  * stale file; clients can `kill(pid, 0)` (signal 0 doesn't actually
  * deliver a signal — just tests existence) to detect this and ignore
  * the file rather than connecting to a port that's now silent or owned

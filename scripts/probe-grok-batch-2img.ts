@@ -17,7 +17,7 @@ import { join, resolve, dirname } from 'path';
 import { ComfyUIClient } from '../src/services/comfyui/ComfyUIClient.js';
 
 const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..');
-const PROJECT_DIR = join(REPO_ROOT, 'noir_detective_story_setup-3.kshana');
+const PROJECT_DIR = join(REPO_ROOT, 'noir_detective_story_setup-3.dhee');
 
 async function main() {
   const project = JSON.parse(readFileSync(join(PROJECT_DIR, 'project.json'), 'utf-8'));

@@ -135,7 +135,7 @@ describe('ConversationManager session activity', () => {
 
     activeSession.sessionContext = createRemoteSession(
       session.id,
-      'demo.kshana',
+      'demo.dhee',
       remoteFsA,
     );
 

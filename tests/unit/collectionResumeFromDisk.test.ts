@@ -42,7 +42,7 @@ describe('listCollectionItemsFromDisk', () => {
   let projectDir: string;
 
   beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), 'kshana-collresume-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'dhee-collresume-'));
   });
 
   afterEach(() => {

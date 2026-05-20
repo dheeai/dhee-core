@@ -7,7 +7,7 @@
  * frame-emission path (passing `frame: frameId` to `addAsset`),
  * `applyAssetToProjectSchema` silently bailed on every shot frame,
  * so projects that ran end-to-end still have empty `scenes[]`.
- * Readers (PromptsView's two-column layout, kshana_show_first_frame's
+ * Readers (PromptsView's two-column layout, dhee_show_first_frame's
  * happy path, etc.) all need scenes[] to be populated. This helper
  * runs `backfillFromDisk` once when the gap is detected so existing
  * projects come up correctly without manual intervention.

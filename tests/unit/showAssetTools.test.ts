@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  kshanaShowFirstFrame,
-  kshanaShowLastFrame,
-  kshanaShowShotVideo,
-  kshanaShowFinalVideo,
+  dheeShowFirstFrame,
+  dheeShowLastFrame,
+  dheeShowShotVideo,
+  dheeShowFinalVideo,
 } from "../../src/agent/pi/tools/showAsset.js";
 
 interface ManifestEntry {
@@ -85,21 +85,21 @@ const MANIFEST_FIXTURE: ManifestEntry[] = [
 ];
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), "kshana-show-test-"));
-  const proj = join(projectsDir, "demo.kshana");
+  projectsDir = mkdtempSync(join(tmpdir(), "dhee-show-test-"));
+  const proj = join(projectsDir, "demo.dhee");
   mkdirSync(join(proj, "assets"), { recursive: true });
   writeFileSync(
     join(proj, "assets", "manifest.json"),
     JSON.stringify({ assets: MANIFEST_FIXTURE }, null, 2),
     "utf8",
   );
-  originalProjectsDir = process.env["KSHANA_PROJECTS_DIR"];
-  process.env["KSHANA_PROJECTS_DIR"] = projectsDir;
+  originalProjectsDir = process.env["dhee_PROJECTS_DIR"];
+  process.env["dhee_PROJECTS_DIR"] = projectsDir;
 });
 
 afterEach(() => {
-  if (originalProjectsDir === undefined) delete process.env["KSHANA_PROJECTS_DIR"];
-  else process.env["KSHANA_PROJECTS_DIR"] = originalProjectsDir;
+  if (originalProjectsDir === undefined) delete process.env["dhee_PROJECTS_DIR"];
+  else process.env["dhee_PROJECTS_DIR"] = originalProjectsDir;
   rmSync(projectsDir, { recursive: true, force: true });
 });
 
@@ -114,49 +114,49 @@ async function exec<T extends { execute: Function }>(tool: T, params: unknown): 
   };
 }
 
-describe("kshana_show_first_frame", () => {
+describe("dhee_show_first_frame", () => {
   it("picks the latest first-frame for the requested shot by createdAt", async () => {
-    const r = await exec(kshanaShowFirstFrame, { project: "demo", scene: 1, shot: 1 });
+    const r = await exec(dheeShowFirstFrame, { project: "demo", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/images/s1shot1_first_frame_klein_BBB.png");
     expect(r.details["asset_id"]).toBe("img_new");
     expect(r.details["created_at"]).toBe(2000);
   });
 
   it("scopes by scene+shot — does not return s1 shot2 when asked for s1 shot1", async () => {
-    const r = await exec(kshanaShowFirstFrame, { project: "demo", scene: 1, shot: 1 });
+    const r = await exec(dheeShowFirstFrame, { project: "demo", scene: 1, shot: 1 });
     expect(r.details["file_path"]).not.toContain("s1shot2");
   });
 
   it("returns a not-found result when the shot has no matching frame", async () => {
-    const r = await exec(kshanaShowFirstFrame, { project: "demo", scene: 9, shot: 9 });
+    const r = await exec(dheeShowFirstFrame, { project: "demo", scene: 9, shot: 9 });
     expect(r.details["found"]).toBe(false);
     expect(r.text.toLowerCase()).toContain("no first-frame");
   });
 });
 
-describe("kshana_show_last_frame", () => {
+describe("dhee_show_last_frame", () => {
   it("returns the last_frame variant, not the first_frame", async () => {
-    const r = await exec(kshanaShowLastFrame, { project: "demo", scene: 1, shot: 1 });
+    const r = await exec(dheeShowLastFrame, { project: "demo", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/images/s1shot1_last_frame_klein_CCC.png");
   });
 });
 
-describe("kshana_show_shot_video", () => {
+describe("dhee_show_shot_video", () => {
   it("picks the latest scene_video for the shot", async () => {
-    const r = await exec(kshanaShowShotVideo, { project: "demo", scene: 1, shot: 1 });
+    const r = await exec(dheeShowShotVideo, { project: "demo", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/videos/shots/s1shot1_ltx23_yyy.mp4");
     expect(r.details["created_at"]).toBe(3000);
   });
 
   it("does not return character_ref or final_video entries", async () => {
-    const r = await exec(kshanaShowShotVideo, { project: "demo", scene: 1, shot: 1 });
+    const r = await exec(dheeShowShotVideo, { project: "demo", scene: 1, shot: 1 });
     expect(r.details["asset_type"]).toBe("scene_video");
   });
 });
 
-describe("kshana_show_final_video", () => {
+describe("dhee_show_final_video", () => {
   it("returns the latest final_video by createdAt", async () => {
-    const r = await exec(kshanaShowFinalVideo, { project: "demo" });
+    const r = await exec(dheeShowFinalVideo, { project: "demo" });
     expect(r.details["file_path"]).toBe("assets/videos/final/final_video.mp4");
     expect(r.details["asset_id"]).toBe("final_new");
   });
@@ -164,19 +164,19 @@ describe("kshana_show_final_video", () => {
   it("ignores non-final-video assets even when they're newer", async () => {
     // char_ref has createdAt=8000, newer than final_old=5000, but final_new=9000 is newest.
     // The test ensures filter-by-type happens before max-by-createdAt.
-    const r = await exec(kshanaShowFinalVideo, { project: "demo" });
+    const r = await exec(dheeShowFinalVideo, { project: "demo" });
     expect(r.details["asset_type"]).toBe("final_video");
   });
 
   it("returns not-found when the project has no final_video entry", async () => {
     // Rewrite manifest with no final_video.
-    const proj = join(projectsDir, "demo.kshana");
+    const proj = join(projectsDir, "demo.dhee");
     writeFileSync(
       join(proj, "assets", "manifest.json"),
       JSON.stringify({ assets: MANIFEST_FIXTURE.filter((a) => a.type !== "final_video") }, null, 2),
       "utf8",
     );
-    const r = await exec(kshanaShowFinalVideo, { project: "demo" });
+    const r = await exec(dheeShowFinalVideo, { project: "demo" });
     expect(r.details["found"]).toBe(false);
   });
 });

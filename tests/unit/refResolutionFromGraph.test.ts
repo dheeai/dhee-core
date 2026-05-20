@@ -57,7 +57,7 @@ describe('ref-resolution from graph (PR2 contract — survives PR4)', () => {
   let projectDir: string;
 
   beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), 'kshana-refres-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'dhee-refres-'));
     mkdirSync(join(projectDir, 'assets/images'), { recursive: true });
   });
 

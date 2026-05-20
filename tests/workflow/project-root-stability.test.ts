@@ -15,13 +15,13 @@ describe('Project root stability', () => {
   let projectRoot: string;
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'kshana-project-root-'));
-    projectRoot = join(tempRoot, 'desktop-root.kshana');
+    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'dhee-project-root-'));
+    projectRoot = join(tempRoot, 'desktop-root.dhee');
     setActiveProjectDir(projectRoot);
   });
 
   afterEach(() => {
-    setActiveProjectDir('default.kshana');
+    setActiveProjectDir('default.dhee');
     if (fs.existsSync(tempRoot)) {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -38,8 +38,8 @@ describe('Project root stability', () => {
 
   // The previous "called via updateProjectTool" idempotency case lived
   // in a tool that was removed when pi-agent took over project setup
-  // (see `kshana_new`). The "already_exists" decision is now made by
+  // (see `dhee_new`). The "already_exists" decision is now made by
   // pi at a different layer; the in-process `createProject` itself
   // doesn't no-op on a populated root and shouldn't be tested as if
-  // it does. Coverage for the new flow lives next to `kshana_new`.
+  // it does. Coverage for the new flow lives next to `dhee_new`.
 });

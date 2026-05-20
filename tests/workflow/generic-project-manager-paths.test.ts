@@ -13,13 +13,13 @@ describe('Generic project manager path handling', () => {
   let projectRoot: string;
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'kshana-generic-path-'));
-    projectRoot = join(tempRoot, 'desktop-project.kshana');
+    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'dhee-generic-path-'));
+    projectRoot = join(tempRoot, 'desktop-project.dhee');
     initializeTemplates();
   });
 
   afterEach(() => {
-    setActiveProjectDir('default.kshana');
+    setActiveProjectDir('default.dhee');
     if (fs.existsSync(tempRoot)) {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

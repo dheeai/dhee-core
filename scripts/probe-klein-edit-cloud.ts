@@ -24,7 +24,7 @@ import { parameterizeGeneric } from '../src/services/comfyui/WorkflowLoader.js';
 const projectDir = resolve(
   process.cwd(),
   '..',
-  'BurgerEating.kshana',
+  'BurgerEating.dhee',
 );
 const imagesDir = join(projectDir, 'assets/images');
 

@@ -1,22 +1,22 @@
 /**
  * Bug: pi-agent tools that take a `project` param hardcoded
- * `<projectsDir>/<name>.kshana` instead of using `resolveProjectDir`,
- * so a workspace folder created by kshana-desktop (no `.kshana`
+ * `<projectsDir>/<name>.dhee` instead of using `resolveProjectDir`,
+ * so a workspace folder created by dhee-desktop (no `.dhee`
  * suffix, only a `project.json` inside) is rejected with "Project not
- * found" — even when the host has correctly pinned KSHANA_PROJECTS_DIR
+ * found" — even when the host has correctly pinned dhee_PROJECTS_DIR
  * to the parent and the agent has been told the active project name
  * via the focus announcement.
  *
  * Symptom from the field: opening "The Village" (a bare-name folder
  * with `project.json`) and asking "show me s1 shot 1" fired
- * `kshana_show_shot`, `kshana_status`, and `kshana_list_items` —
+ * `dhee_show_shot`, `dhee_status`, and `dhee_list_items` —
  * every one returned "doesn't seem to exist" because the suffix probe
- * was the only path tried. `kshana_list_projects` then enumerated
- * `*.kshana` folders only, listed BurgerEating, and the agent
+ * was the only path tried. `dhee_list_projects` then enumerated
+ * `*.dhee` folders only, listed BurgerEating, and the agent
  * confidently picked the wrong project.
  *
  * Each test creates a bare-name workspace folder, drops a minimal
- * `project.json` inside, points KSHANA_PROJECTS_DIR at the parent,
+ * `project.json` inside, points dhee_PROJECTS_DIR at the parent,
  * and asserts the tool succeeds. Failing means the tool is still on
  * the legacy hardcoded-suffix path.
  */
@@ -24,9 +24,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { kshanaStatus } from "../../src/agent/pi/tools/status.js";
-import { kshanaListItems } from "../../src/agent/pi/tools/listItems.js";
-import { kshanaListProjects } from "../../src/agent/pi/tools/listProjects.js";
+import { dheeStatus } from "../../src/agent/pi/tools/status.js";
+import { dheeListItems } from "../../src/agent/pi/tools/listItems.js";
+import { dheeListProjects } from "../../src/agent/pi/tools/listProjects.js";
 import { createShowShotTool } from "../../src/agent/pi/tools/showShot.js";
 
 const PROJECT_NAME = "TheVillage";
@@ -42,13 +42,13 @@ function textOf(result: ToolResult): string {
     .join("\n");
 }
 
-describe("pi-agent tools resolve bare-name project folders (no .kshana suffix)", () => {
+describe("pi-agent tools resolve bare-name project folders (no .dhee suffix)", () => {
   let projectsDir: string;
   let projectDir: string;
   let originalEnv: string | undefined;
 
   beforeEach(() => {
-    projectsDir = mkdtempSync(join(tmpdir(), "kshana-bare-"));
+    projectsDir = mkdtempSync(join(tmpdir(), "dhee-bare-"));
     projectDir = join(projectsDir, PROJECT_NAME);
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(
@@ -78,18 +78,18 @@ describe("pi-agent tools resolve bare-name project folders (no .kshana suffix)",
         },
       }),
     );
-    originalEnv = process.env["KSHANA_PROJECTS_DIR"];
-    process.env["KSHANA_PROJECTS_DIR"] = projectsDir;
+    originalEnv = process.env["dhee_PROJECTS_DIR"];
+    process.env["dhee_PROJECTS_DIR"] = projectsDir;
   });
 
   afterEach(() => {
-    if (originalEnv === undefined) delete process.env["KSHANA_PROJECTS_DIR"];
-    else process.env["KSHANA_PROJECTS_DIR"] = originalEnv;
+    if (originalEnv === undefined) delete process.env["dhee_PROJECTS_DIR"];
+    else process.env["dhee_PROJECTS_DIR"] = originalEnv;
     rmSync(projectsDir, { recursive: true, force: true });
   });
 
-  it("kshana_status accepts a bare-name folder with project.json", async () => {
-    const result = (await kshanaStatus.execute(
+  it("dhee_status accepts a bare-name folder with project.json", async () => {
+    const result = (await dheeStatus.execute(
       "tc-1",
       { project: PROJECT_NAME } as never,
       undefined as never,
@@ -100,8 +100,8 @@ describe("pi-agent tools resolve bare-name project folders (no .kshana suffix)",
     expect(text.toLowerCase()).not.toContain("project.json not found");
   });
 
-  it("kshana_list_items accepts a bare-name folder with project.json", async () => {
-    const result = (await kshanaListItems.execute(
+  it("dhee_list_items accepts a bare-name folder with project.json", async () => {
+    const result = (await dheeListItems.execute(
       "tc-2",
       { project: PROJECT_NAME } as never,
       undefined as never,
@@ -112,17 +112,17 @@ describe("pi-agent tools resolve bare-name project folders (no .kshana suffix)",
     expect(text.toLowerCase()).not.toContain("project.json not found");
   });
 
-  it("kshana_list_projects enumerates bare-name folders that contain a project.json", async () => {
-    // Drop a sibling `.kshana` project too — both should appear in the
+  it("dhee_list_projects enumerates bare-name folders that contain a project.json", async () => {
+    // Drop a sibling `.dhee` project too — both should appear in the
     // listing. Pre-fix, only the suffixed one shows up because the
-    // filter is `.endsWith('.kshana')`.
-    mkdirSync(join(projectsDir, "OtherProj.kshana"), { recursive: true });
+    // filter is `.endsWith('.dhee')`.
+    mkdirSync(join(projectsDir, "OtherProj.dhee"), { recursive: true });
     writeFileSync(
-      join(projectsDir, "OtherProj.kshana", "project.json"),
+      join(projectsDir, "OtherProj.dhee", "project.json"),
       JSON.stringify({ version: "3.0", name: "OtherProj", templateId: "narrative" }),
     );
 
-    const result = (await kshanaListProjects.execute(
+    const result = (await dheeListProjects.execute(
       "tc-3",
       {} as never,
       undefined as never,
@@ -133,7 +133,7 @@ describe("pi-agent tools resolve bare-name project folders (no .kshana suffix)",
     expect(names).toContain("OtherProj");
   });
 
-  it("kshana_show_shot finds a shot in a bare-name folder with project.json", async () => {
+  it("dhee_show_shot finds a shot in a bare-name folder with project.json", async () => {
     // showShot's existence check is `loadProject(name)` returning null
     // when the suffixed path doesn't exist. We don't care about the
     // shot data here — only that we don't get the bare "no shot

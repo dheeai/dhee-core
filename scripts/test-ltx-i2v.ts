@@ -6,7 +6,7 @@
  *   pnpm tsx scripts/test-ltx-i2v.ts <image-path> [prompt] [duration]
  *
  * Example:
- *   pnpm tsx scripts/test-ltx-i2v.ts earth_dead_five_ships-2.kshana/assets/images/a9TO4tXL_Scene1_00041_.png "Camera slowly pans across a desolate landscape" 5
+ *   pnpm tsx scripts/test-ltx-i2v.ts earth_dead_five_ships-2.dhee/assets/images/a9TO4tXL_Scene1_00041_.png "Camera slowly pans across a desolate landscape" 5
  */
 
 import { join } from 'path';

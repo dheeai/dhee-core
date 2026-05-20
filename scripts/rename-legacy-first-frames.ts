@@ -30,7 +30,7 @@ function main() {
     console.error('Usage: pnpm tsx scripts/rename-legacy-first-frames.ts <project>');
     process.exit(1);
   }
-  const name = projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`;
+  const name = projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`;
   const projectDir = join(REPO_ROOT, name);
   const jsonPath = join(projectDir, 'project.json');
   const project = JSON.parse(readFileSync(jsonPath, 'utf-8'));

@@ -13,7 +13,7 @@ import { execSync } from 'child_process';
 import { LLMClient } from '../src/core/llm/index.js';
 
 const MAX_ITERATIONS = parseInt(process.argv[2] || '3', 10);
-const PROJECT_DIR = process.argv[3] || 'air_already_thick_promise.kshana';
+const PROJECT_DIR = process.argv[3] || 'air_already_thick_promise.dhee';
 const GUIDE_PATH = 'prompts/skills/defaults/scene_breakdown_guide.md';
 const RUBRIC_PATH = 'tests/autoresearch/rubrics/scene-video-prompt-binary.json';
 const OUTPUT_DIR = 'test-output/autoresearch-svp';

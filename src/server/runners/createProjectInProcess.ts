@@ -11,7 +11,7 @@
  * caller-supplied name.
  *
  * Used by:
- *   - pi-agent `kshana_new` tool (replaces runScript shell-out)
+ *   - pi-agent `dhee_new` tool (replaces runScript shell-out)
  *   - (future) HTTP endpoint or scripts/new-project.ts CLI
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -26,7 +26,7 @@ import type { ProjectFile } from '../../tasks/video/workflow/types.js';
 import type { InputType } from '../../tasks/video/workflow/types.js';
 
 /**
- * Resolve user-friendly style aliases to canonical kshana style names.
+ * Resolve user-friendly style aliases to canonical dhee style names.
  *
  *   live / live-action / realism / cinematic / photorealistic → cinematic_realism
  *   anime / animation / animated / cartoon / 2d → anime
@@ -50,7 +50,7 @@ export function resolveStyle(input: string): string | null {
 }
 
 export interface CreateProjectInProcessOpts {
-  /** Folder will be `<basePath>/<name>.kshana`. */
+  /** Folder will be `<basePath>/<name>.dhee`. */
   name: string;
   /** Story text or idea seeded into original_input.md. */
   input: string;
@@ -67,12 +67,12 @@ export interface CreateProjectInProcessOpts {
   /**
    * Initialize into an existing project folder instead of creating one.
    *
-   * The kshana-desktop new-project dialog pre-creates `<workspace>/<name>/`
+   * The dhee-desktop new-project dialog pre-creates `<workspace>/<name>/`
    * with a stub `project.json`/asset manifest before the chat-embedded
    * wizard runs. With this flag, we treat the existing folder as the
-   * target — the stub project.json is overwritten with kshana-core's
+   * target — the stub project.json is overwritten with dhee-core's
    * properly templated v2.0 file, and `original_input.md` is written
-   * fresh. The folder name is used verbatim; no `.kshana` suffix is
+   * fresh. The folder name is used verbatim; no `.dhee` suffix is
    * appended.
    */
   existingDir?: string | undefined;
@@ -93,8 +93,8 @@ export class CreateProjectError extends Error {
 }
 
 /**
- * Create a kshana project on disk in-process. Mirrors `pnpm new` but
- * callable from any host that has the kshana-core bundle loaded.
+ * Create a dhee project on disk in-process. Mirrors `pnpm new` but
+ * callable from any host that has the dhee-core bundle loaded.
  *
  * Throws `CreateProjectError` for usage violations (unknown style,
  * non-positive duration, empty input, project already exists). Other
@@ -122,7 +122,7 @@ export function createProjectInProcess(
     );
   }
 
-  const projectDir = opts.existingDir ?? join(opts.basePath, `${opts.name}.kshana`);
+  const projectDir = opts.existingDir ?? join(opts.basePath, `${opts.name}.dhee`);
   if (!opts.existingDir && existsSync(projectDir)) {
     throw new CreateProjectError(
       `Project directory already exists: ${projectDir}`,

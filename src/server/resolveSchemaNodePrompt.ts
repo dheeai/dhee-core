@@ -13,7 +13,7 @@ export interface SchemaNodePromptResponse {
   nodeId: string;
   nodeType: string;
   prompt: Record<string, unknown>;
-  /** Path relative to <project>.kshana/, for shot_video preview. Caller turns this into a URL. */
+  /** Path relative to <project>.dhee/, for shot_video preview. Caller turns this into a URL. */
   firstFramePath?: string;
   /**
    * Deterministic on-disk prompt-file path the caller should try to read.

@@ -28,14 +28,14 @@ const currentDir =
 /**
  * Get the workflows directory path.
  * Priority:
- * 1. KSHANA_WORKFLOWS_DIR environment variable (set by desktop app)
- * 2. Check if kshana-desktop/workflows exists (sibling directory)
- * 3. Check if kshana-core/workflows exists (current package)
+ * 1. dhee_WORKFLOWS_DIR environment variable (set by desktop app)
+ * 2. Check if dhee-desktop/workflows exists (sibling directory)
+ * 3. Check if dhee-core/workflows exists (current package)
  * 4. Fall back to process.cwd()/workflows (for CLI usage)
  */
 function getWorkflowsDir(): string {
   // 1. Check environment variable (set by desktop app)
-  const workflowsDirEnv = process.env['KSHANA_WORKFLOWS_DIR'];
+  const workflowsDirEnv = process.env['dhee_WORKFLOWS_DIR'];
   if (workflowsDirEnv) {
     const envPath = String(workflowsDirEnv).trim();
     if (envPath && fs.existsSync(envPath)) {
@@ -43,10 +43,10 @@ function getWorkflowsDir(): string {
     }
   }
 
-  // 2. Try to find kshana-desktop/workflows (sibling directory)
-  // This works when kshana-core is a dependency of kshana-desktop
+  // 2. Try to find dhee-desktop/workflows (sibling directory)
+  // This works when dhee-core is a dependency of dhee-desktop
   try {
-    // In node_modules, we might be at kshana-desktop/node_modules/kshana-core
+    // In node_modules, we might be at dhee-desktop/node_modules/dhee-core
     // or in a monorepo structure
     let searchDir = currentDir;
     for (let i = 0; i < 5; i++) {
@@ -57,7 +57,7 @@ function getWorkflowsDir(): string {
           return resolved;
         }
       }
-      // Also check if we're in kshana-desktop/node_modules/kshana-core
+      // Also check if we're in dhee-desktop/node_modules/dhee-core
       const altDesktopWorkflows = path.join(searchDir, '..', '..', '..', 'workflows');
       if (fs.existsSync(altDesktopWorkflows)) {
         const resolved = path.resolve(altDesktopWorkflows);
@@ -71,7 +71,7 @@ function getWorkflowsDir(): string {
     // Ignore errors during path resolution
   }
 
-  // 3. Try kshana-core/workflows (current package)
+  // 3. Try dhee-core/workflows (current package)
   // When running from source: src/services/comfyui/WorkflowLoader.ts -> workflows/
   // When running from dist: dist/services/comfyui/WorkflowLoader.js -> workflows/
   const inkWorkflows = path.resolve(currentDir, '..', '..', 'workflows');
@@ -88,7 +88,7 @@ function getWorkflowsDir(): string {
  * Load a workflow JSON template from the workflows directory.
  */
 export function loadWorkflowTemplate(templateName: string): WorkflowTemplate {
-  // Resolve at call time so updates to KSHANA_WORKFLOWS_DIR (via settings restart) are honored
+  // Resolve at call time so updates to dhee_WORKFLOWS_DIR (via settings restart) are honored
   const templatePath = path.join(getWorkflowsDir(), templateName);
 
   if (!fs.existsSync(templatePath)) {

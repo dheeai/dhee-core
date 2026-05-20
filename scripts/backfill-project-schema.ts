@@ -1,12 +1,12 @@
 #!/usr/bin/env tsx
 /**
  * Phase 5 backfill CLI: reads existing manifest + executorState in a
- * project's <name>.kshana folder and writes the equivalent
+ * project's <name>.dhee folder and writes the equivalent
  * scenes/shots/frames tree into project.json.
  *
  * Usage:
  *   pnpm backfill-schema <project-name>
- *   pnpm backfill-schema --all     # walk every *.kshana folder in cwd
+ *   pnpm backfill-schema --all     # walk every *.dhee folder in cwd
  */
 import { readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -15,7 +15,7 @@ import { backfillFromDisk } from "../src/core/project/backfillFromDisk.js";
 import { verifyShotPaths } from "../src/core/project/verifyShotPaths.js";
 
 function backfillOne(projectName: string): void {
-  const dirName = projectName.endsWith(".kshana") ? projectName : `${projectName}.kshana`;
+  const dirName = projectName.endsWith(".dhee") ? projectName : `${projectName}.dhee`;
   const dir = resolve(dirName);
   // Phase A: walk manifest + executorState (cheap, gives history-aware
   // metadata when present).
@@ -50,7 +50,7 @@ function main(): void {
   if (args.includes("--all")) {
     const cwd = process.cwd();
     const projects = readdirSync(cwd).filter((name) => {
-      if (!name.endsWith(".kshana")) return false;
+      if (!name.endsWith(".dhee")) return false;
       try {
         return statSync(join(cwd, name)).isDirectory();
       } catch {

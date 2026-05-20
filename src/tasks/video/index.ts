@@ -303,7 +303,7 @@ export function createExecutorAgent(options: CreateExecutorAgentOptions): Execut
     project: project as unknown as GenericProjectFile,
     projectDir,
     goal,
-    name: 'kshana-executor',
+    name: 'dhee-executor',
     parallelMediaGeneration: options.parallelMediaGeneration,
   });
 }

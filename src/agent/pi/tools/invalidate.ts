@@ -1,13 +1,13 @@
 /**
- * `kshana_invalidate` — unified invalidation tool.
+ * `dhee_invalidate` — unified invalidation tool.
  *
- * Replaces the old triple of `kshana_regen` + `kshana_reset` (LLM) and
+ * Replaces the old triple of `dhee_regen` + `dhee_reset` (LLM) and
  * the UI's redoNode IPC. One operation: pick a selection, mark those
  * nodes pending. Never runs — the user explicitly says go via
- * `kshana_run_to`. Two run modes are then available downstream:
- *   - `kshana_run_to`                          → continue from here
+ * `dhee_run_to`. Two run modes are then available downstream:
+ *   - `dhee_run_to`                          → continue from here
  *     (runs every pending node in the graph)
- *   - `kshana_run_to scope='last_invalidated'` → run ONLY what was
+ *   - `dhee_run_to scope='last_invalidated'` → run ONLY what was
  *     just invalidated (uses the whitelist this op writes to
  *     `executorState.lastInvalidatedIds`).
  *
@@ -32,7 +32,7 @@ const Params = Type.Object({
   projectDir: Type.Optional(
     Type.String({
       description:
-        "Absolute path to the project folder. Pass when the host (e.g. kshana-desktop) created the project at a workspace path that doesn't follow the default `<name>.kshana` convention.",
+        "Absolute path to the project folder. Pass when the host (e.g. dhee-desktop) created the project at a workspace path that doesn't follow the default `<name>.dhee` convention.",
     }),
   ),
   node: Type.Optional(
@@ -69,11 +69,11 @@ function failure(message: string): AgentToolResult<InvalidateDetails> {
   };
 }
 
-export const kshanaInvalidate = defineTool({
-  name: "kshana_invalidate",
-  label: "kshana invalidate",
+export const dheeInvalidate = defineTool({
+  name: "dhee_invalidate",
+  label: "dhee invalidate",
   description:
-    "Invalidate a selection of nodes (mark them pending) so the next kshana_run_to regenerates them. Three selection modes: `node` (single id/alias), `type` (every node of a typeId), `stage` (type cone — start type plus every downstream type). Cascades to transitive dependents — invalidating a single shot_video also marks the dependent final_video pending so the next run actually re-renders it. Does NOT run the pipeline — call kshana_run_to after. Use `kshana_run_to scope='last_invalidated'` to run ONLY the just-invalidated set (which now includes the cascaded dependents). IMPORTANT: invalidating a node re-runs its producer LLM, which writes a fresh file and overwrites whatever is on disk. If you just hand-wrote that file (e.g. authored a motion directive at `prompts/motion/scene_N_shot_M.json` or an image prompt at `prompts/images/shots/scene-N-shot-M.json`), invalidate the CONSUMER node, not the producer — e.g. `shot_video:scene_N_shot_M` (not `shot_motion_directive:…`) to keep an authored motion directive, or `shot_image:scene_N_shot_M` (not `shot_image_prompt:…`) to keep an authored image prompt. Invalidating the producer wipes your text on the next dispatch.",
+    "Invalidate a selection of nodes (mark them pending) so the next dhee_run_to regenerates them. Three selection modes: `node` (single id/alias), `type` (every node of a typeId), `stage` (type cone — start type plus every downstream type). Cascades to transitive dependents — invalidating a single shot_video also marks the dependent final_video pending so the next run actually re-renders it. Does NOT run the pipeline — call dhee_run_to after. Use `dhee_run_to scope='last_invalidated'` to run ONLY the just-invalidated set (which now includes the cascaded dependents). IMPORTANT: invalidating a node re-runs its producer LLM, which writes a fresh file and overwrites whatever is on disk. If you just hand-wrote that file (e.g. authored a motion directive at `prompts/motion/scene_N_shot_M.json` or an image prompt at `prompts/images/shots/scene-N-shot-M.json`), invalidate the CONSUMER node, not the producer — e.g. `shot_video:scene_N_shot_M` (not `shot_motion_directive:…`) to keep an authored motion directive, or `shot_image:scene_N_shot_M` (not `shot_image_prompt:…`) to keep an authored image prompt. Invalidating the producer wipes your text on the next dispatch.",
   parameters: Params,
   async execute(_id, params: Static<typeof Params>): Promise<AgentToolResult<InvalidateDetails>> {
     let projectDir: string;
@@ -96,7 +96,7 @@ export const kshanaInvalidate = defineTool({
     const project = JSON.parse(readFileSync(projectJsonPath, "utf-8")) as ProjectFile;
     if (!project.executorState || !project.executorState.nodes) {
       return failure(
-        "Cannot invalidate — project has no executorState. Run a stage first (kshana_run_to).",
+        "Cannot invalidate — project has no executorState. Run a stage first (dhee_run_to).",
       );
     }
 
@@ -115,7 +115,7 @@ export const kshanaInvalidate = defineTool({
       const target =
         params.node ?? params.type ?? params.stage ?? "(none)";
       return failure(
-        `No nodes matched the selection '${target}'. Check kshana_list_items for available ids/types.`,
+        `No nodes matched the selection '${target}'. Check dhee_list_items for available ids/types.`,
       );
     }
 
@@ -129,7 +129,7 @@ export const kshanaInvalidate = defineTool({
       `Invalidated ${result.invalidated.length} node(s): ` +
       `${result.invalidated.slice(0, 8).join(", ")}` +
       `${result.invalidated.length > 8 ? `, …(+${result.invalidated.length - 8} more)` : ""}` +
-      `. Use kshana_run_to to continue from here, or kshana_run_to scope='last_invalidated' to run ONLY this set.`;
+      `. Use dhee_run_to to continue from here, or dhee_run_to scope='last_invalidated' to run ONLY this set.`;
 
     return {
       content: [{ type: "text", text: summary }],

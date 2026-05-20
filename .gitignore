@@ -22,7 +22,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
-*.kshana/
+*.dhee/
 # Testing
 coverage/
 
@@ -39,7 +39,7 @@ pnpm-debug.log*
 prompt-optimizer/
 
 # Project data
-.kshana/
+.dhee/
 
 # Local outputs (generated images/videos)
 outputs/

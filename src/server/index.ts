@@ -1,5 +1,5 @@
 /**
- * kshana-core server entry point.
+ * dhee-core server entry point.
  * Creates a Fastify server with HTTP and WebSocket support.
  */
 import { createRequire } from 'module';
@@ -47,7 +47,7 @@ export interface ServerConfig {
     methods?: string[];
   };
   /**
-   * Write a discovery file (`~/.kshana/server.json` by default) on
+   * Write a discovery file (`~/.dhee/server.json` by default) on
    * start so external agents (pi-agent, openclaw) can locate the
    * server without knowing the random port the desktop allocated.
    * Defaults to true; set to false for tests or when running
@@ -58,7 +58,7 @@ export interface ServerConfig {
   version?: string;
 }
 
-export interface KshanaServer {
+export interface dheeServer {
   app: FastifyInstance;
   conversationManager: ConversationManager;
   wsHandler: WebSocketHandler;
@@ -72,7 +72,7 @@ export interface KshanaServer {
 export async function createServer(
   routeOptions: RouteOptions,
   serverConfig: ServerConfig = {}
-): Promise<KshanaServer> {
+): Promise<dheeServer> {
   const {
     host = '127.0.0.1',
     port = 3000,

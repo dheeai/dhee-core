@@ -153,7 +153,7 @@ export async function renderSceneBundle(req: SceneBundleRequest): Promise<SceneB
     };
     // Reuse parameterizeGeneric for consistency with the rest of the
     // codebase. The expander already returned the parameterMappings.
-    const submission = parameterizeGeneric(workflow as Record<string, unknown>, { parameterMappings }, params) as Record<string, unknown>;
+    const submission = parameterizeGeneric(workflow, { parameterMappings }, params);
 
     // ── 7. Submit + wait ────────────────────────────────────────────
     const startMs = Date.now();
@@ -217,12 +217,12 @@ function resolveBaseWorkflowPath(): string {
   // Same lookup pattern as WorkflowLoader.getWorkflowsDir, but inlined
   // here to avoid importing the loader's heavy machinery.
   const candidates = [
-    process.env['KSHANA_WORKFLOWS_DIR'],
+    process.env['dhee_WORKFLOWS_DIR'],
     join(process.cwd(), 'workflows'),
   ].filter((x): x is string => typeof x === 'string' && x.length > 0);
   for (const dir of candidates) {
     const p = join(dir, 'built-in/ltx23_promptrelay_4seg_local.json');
     if (existsSync(p)) return p;
   }
-  throw new Error('renderSceneBundle: cannot find ltx23_promptrelay_4seg_local.json — set KSHANA_WORKFLOWS_DIR');
+  throw new Error('renderSceneBundle: cannot find ltx23_promptrelay_4seg_local.json — set dhee_WORKFLOWS_DIR');
 }

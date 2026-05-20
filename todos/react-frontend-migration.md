@@ -2,7 +2,7 @@
 
 ## Done
 - [x] Vite + React 19 + Tailwind CSS 4 + TypeScript scaffold
-- [x] Kshana-website design system (dark theme, cyan/green accents, glassmorphic panels, aurora glow)
+- [x] dhee-website design system (dark theme, cyan/green accents, glassmorphic panels, aurora glow)
 - [x] State management (context + useReducer)
 - [x] WebSocket hook with auto-reconnect + exponential backoff
 - [x] Header, Sidebar, ChatTimeline, ToolCallCard, TaskInput components

@@ -6,7 +6,7 @@
 
 Let users add their own ComfyUI workflows by uploading the JSON in the pi-agent chat. Pi-agent validates, runs LLM analysis to discover configurable variables, presents them, and saves a manifest after the user confirms (or refines via chat). Settings → Workflows tab provides ongoing management (list, edit defaults, delete, set active).
 
-The desktop is a green-field port of an existing kshana-core feature (`frontend/src/components/WorkflowManager.tsx`, REST endpoints in `src/server/routes.ts`, `WorkflowModeRegistry`). We don't reimplement the registry, parser, or LLM analyzer — we expose them as pi-agent tools and IPC handlers.
+The desktop is a green-field port of an existing dhee-core feature (`frontend/src/components/WorkflowManager.tsx`, REST endpoints in `src/server/routes.ts`, `WorkflowModeRegistry`). We don't reimplement the registry, parser, or LLM analyzer — we expose them as pi-agent tools and IPC handlers.
 
 ## Architecture
 
@@ -42,9 +42,9 @@ interface Attachment {
 [2] ChatInput shows a chip "📎 my-workflow.json"
 [3] User types "add this workflow", sends
 [4] Pi-agent (with comfyui skill loaded) detects JSON attachment
-       → kshana_validate_comfy_workflow(path)
+       → dhee_validate_comfy_workflow(path)
        → if not ComfyUI shape, replies why and stops
-[5] kshana_analyze_comfy_workflow(path)
+[5] dhee_analyze_comfy_workflow(path)
        → LLM analysis returns suggested name, pipeline, variables, defaults, LoRA keywords
 [6] Pi-agent presents in chat as a markdown table:
        | Variable | Node | Default | Required |
@@ -53,7 +53,7 @@ interface Attachment {
        - "make denoise configurable, default 0.85"
        - "rename it to 'My Cinematic'"
        - "looks good, save it"
-[8] On confirmation: kshana_save_comfy_workflow(manifest)
+[8] On confirmation: dhee_save_comfy_workflow(manifest)
        → writes {id}.json + {id}.manifest.json under workflows/user/
        → registry.refresh()
 [9] Pi-agent: "Saved as 'My Cinematic'. It's now available."
@@ -65,10 +65,10 @@ interface Attachment {
 | Phase | Repo | Goal |
 |---|---|---|
 | 0 | both | Branch + plan doc |
-| 1 | kshana-core | Export APIs from `manager`, add 6 tools, add skill, tests |
-| 2 | kshana-desktop | IPC bridge: `window.kshana.workflows.*` |
-| 3 | kshana-desktop | Generic attachment system + chat upload UI |
-| 4 | kshana-desktop | Settings → Workflows tab |
+| 1 | dhee-core | Export APIs from `manager`, add 6 tools, add skill, tests |
+| 2 | dhee-desktop | IPC bridge: `window.dhee.workflows.*` |
+| 3 | dhee-desktop | Generic attachment system + chat upload UI |
+| 4 | dhee-desktop | Settings → Workflows tab |
 | 5 | both | Skill prompt iteration (the conversational quality) |
 | 6 | both | E2E tests |
 
@@ -85,31 +85,31 @@ interface Attachment {
 
 ## Files
 
-### kshana-core (Add)
+### dhee-core (Add)
 - `prompts/skills/comfyui-workflow-integration.md`
 - `src/agent/pi/tools/comfyui/{validateWorkflow,analyzeWorkflow,saveWorkflow,listWorkflows,updateWorkflow,deleteWorkflow,index}.ts`
 - `src/services/providers/workflowsRoot.ts` — `setWorkflowsRoot()` indirection
 - `tests/unit/agent/comfyuiWorkflowTools.test.ts`
 - `tests/unit/agent/comfyuiSkillFlow.test.ts`
 
-### kshana-core (Modify)
+### dhee-core (Modify)
 - `src/agent/pi/tools/index.ts` — register new tools
 - `src/server/manager.ts` — re-export `WorkflowModeRegistry`, `parseWorkflow`, `analyzeWorkflowWithLLM`, `setWorkflowsRoot`
 - `src/services/providers/WorkflowModeRegistry.ts` — honor `setWorkflowsRoot()`, throw if set after singleton init
 - `src/server/routes.ts` — refactor handlers to call shared helper functions (single source of truth with the tools)
 
-### kshana-desktop (Add)
-- `src/main/handlers/workflowsBridge.ts` (or fold into `kshanaIpcBridge.ts`)
+### dhee-desktop (Add)
+- `src/main/handlers/workflowsBridge.ts` (or fold into `dheeIpcBridge.ts`)
 - `src/renderer/components/SettingsPanel/WorkflowsTab.tsx` + test
 - `src/renderer/components/chat/ChatInput/AttachmentChip.tsx`
 - `src/shared/attachmentTypes.ts` — generic Attachment type
 
-### kshana-desktop (Modify)
+### dhee-desktop (Modify)
 - `src/main/main.ts` — `setWorkflowsRoot(...)` early; `project:select-attachment` IPC
-- `src/main/preload.ts` — `projectBridge.selectAttachment`, `kshanaBridge.workflows`
-- `src/main/kshanaIpcBridge.ts` — workflows handlers
-- `src/main/kshanaCoreManager.ts` — call `setWorkflowsRoot` after kshana-core loads
-- `src/shared/kshanaIpc.ts` — types for workflows IPC + `RunTaskRequest.attachments`
+- `src/main/preload.ts` — `projectBridge.selectAttachment`, `dheeBridge.workflows`
+- `src/main/dheeIpcBridge.ts` — workflows handlers
+- `src/main/dheeCoreManager.ts` — call `setWorkflowsRoot` after dhee-core loads
+- `src/shared/dheeIpc.ts` — types for workflows IPC + `RunTaskRequest.attachments`
 - `src/renderer/components/SettingsPanel/SettingsPanel.tsx` — `'workflows'` tab
 - `src/renderer/components/chat/ChatInput/ChatInput.tsx` — 📎 button, attachment state
 - `src/renderer/components/chat/ChatPanelEmbedded/ChatPanelEmbedded.tsx` — forward attachments

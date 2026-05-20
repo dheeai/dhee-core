@@ -114,8 +114,8 @@ export interface InputProcessorConfig {
 
 /**
  * Default configuration. ffmpeg/ffprobe paths resolve at construction
- * time so the desktop wrapper can set KSHANA_FFMPEG_PATH /
- * KSHANA_FFPROBE_PATH after kshana-core has loaded.
+ * time so the desktop wrapper can set dhee_FFMPEG_PATH /
+ * dhee_FFPROBE_PATH after dhee-core has loaded.
  */
 function buildDefaultConfig(): InputProcessorConfig {
   return {

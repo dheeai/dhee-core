@@ -1,5 +1,5 @@
 /**
- * Tests for the pi-agent `kshana_new` tool — the in-process wrapper
+ * Tests for the pi-agent `dhee_new` tool — the in-process wrapper
  * around createProjectInProcess that the chat panel invokes when a user
  * says "create a new project". Verifies validation, params → core call
  * mapping, and response shape.
@@ -19,22 +19,22 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { kshanaNew } from '../../src/agent/pi/tools/newProject.js';
+import { dheeNew } from '../../src/agent/pi/tools/newProject.js';
 
 let projectsDir: string;
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), 'kshana-new-tool-'));
-  process.env['KSHANA_PROJECTS_DIR'] = projectsDir;
+  projectsDir = mkdtempSync(join(tmpdir(), 'dhee-new-tool-'));
+  process.env['dhee_PROJECTS_DIR'] = projectsDir;
 });
 
 afterEach(() => {
   rmSync(projectsDir, { recursive: true, force: true });
-  delete process.env['KSHANA_PROJECTS_DIR'];
+  delete process.env['dhee_PROJECTS_DIR'];
 });
 
 function executeNew(params: Record<string, unknown>) {
-  return kshanaNew.execute(
+  return dheeNew.execute(
     'call-id-1',
     params as never,
     undefined as never,
@@ -43,7 +43,7 @@ function executeNew(params: Record<string, unknown>) {
   );
 }
 
-describe('pi-agent kshanaNew tool', () => {
+describe('pi-agent dheeNew tool', () => {
   // ── Validation paths ─────────────────────────────────────────────
 
   it('returns failure when style is missing', async () => {
@@ -56,7 +56,7 @@ describe('pi-agent kshanaNew tool', () => {
     expect((r.content as Array<{ text: string }>)[0].text).toMatch(
       /style is required/,
     );
-    expect(existsSync(join(projectsDir, 'p.kshana'))).toBe(false);
+    expect(existsSync(join(projectsDir, 'p.dhee'))).toBe(false);
   });
 
   it('returns failure when duration is missing', async () => {
@@ -144,7 +144,7 @@ describe('pi-agent kshanaNew tool', () => {
       initialPhase?: string;
     };
     expect(d.status).toBe('completed');
-    expect(d.projectDir).toBe(join(projectsDir, 'noir.kshana'));
+    expect(d.projectDir).toBe(join(projectsDir, 'noir.dhee'));
     expect(d.resolvedStyle).toBe('cinematic_realism');
     expect(d.initialPhase).toBeDefined();
 
@@ -211,13 +211,13 @@ describe('pi-agent kshanaNew tool', () => {
       duration: 45,
     });
     const text = (r.content as Array<{ text: string }>)[0].text;
-    expect(text).toMatch(/Created project: p\.kshana/);
+    expect(text).toMatch(/Created project: p\.dhee/);
     expect(text).toMatch(/Style:\s+cinematic_realism/);
     expect(text).toMatch(/Duration:\s+45s/);
     expect(text).toMatch(/Initial phase/);
   });
 
-  // ── existingDir param (kshana-desktop wizard handoff) ───────────
+  // ── existingDir param (dhee-desktop wizard handoff) ───────────
   // The desktop's chat-embedded wizard pre-creates a project folder
   // (NewProjectDialog) before pi-agent gets the kickoff message. The
   // tool must accept `existingDir` and forward it to the in-process
@@ -243,9 +243,9 @@ describe('pi-agent kshanaNew tool', () => {
       const d = r.details as { status: string; projectDir?: string };
       expect(d.status).toBe('completed');
       expect(d.projectDir).toBe(desktopDir);
-      // Did NOT create the default <name>.kshana sibling under projectsDir.
+      // Did NOT create the default <name>.dhee sibling under projectsDir.
       expect(
-        existsSync(join(projectsDir, 'desktop_pre_created.kshana')),
+        existsSync(join(projectsDir, 'desktop_pre_created.dhee')),
       ).toBe(false);
     });
 

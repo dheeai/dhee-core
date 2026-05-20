@@ -99,7 +99,7 @@ async function main() {
   const renderTimeout = getEnvTimeout('REMOTION_RENDER_TIMEOUT', 600_000);
 
   for (let i = 0; i < placements.length; i++) {
-    const p = placements[i]!;
+    const p = placements[i];
     const progressStart = i / total;
     console.log(`REMOTION_PROGRESS:${JSON.stringify({
       placementIndex: i,

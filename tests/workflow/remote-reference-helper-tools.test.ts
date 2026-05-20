@@ -114,14 +114,14 @@ describe('remote reference helper tools', () => {
   let projectRoot: string;
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'kshana-remote-helper-'));
-    projectRoot = join(tempRoot, 'remote-helper-test.kshana');
+    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'dhee-remote-helper-'));
+    projectRoot = join(tempRoot, 'remote-helper-test.dhee');
     setActiveProjectDir(projectRoot);
     createProject('A helper test', 'cinematic_realism', tempRoot);
   });
 
   afterEach(() => {
-    setActiveProjectDir('default.kshana');
+    setActiveProjectDir('default.dhee');
     if (fs.existsSync(tempRoot)) {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

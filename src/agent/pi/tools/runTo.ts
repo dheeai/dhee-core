@@ -14,7 +14,7 @@ import type { GenericProjectFile } from "../../../core/templates/types.js";
 import type { AssetEvent } from "./parseAssetLines.js";
 
 export interface MediaEvent extends AssetEvent {
-  /** Project name (no .kshana suffix) — captured from the tool params. */
+  /** Project name (no .dhee suffix) — captured from the tool params. */
   project: string;
   /** Tool that produced this asset, for downstream display. */
   source: string;
@@ -27,7 +27,7 @@ const Params = Type.Object({
   projectDir: Type.Optional(
     Type.String({
       description:
-        "Absolute path to the project folder. Pass this when the host (e.g. kshana-desktop) created the project at a workspace path that doesn't follow the default `<name>.kshana` convention. When omitted, the tool probes <projectsDir>/<name>.kshana and then <projectsDir>/<name>.",
+        "Absolute path to the project folder. Pass this when the host (e.g. dhee-desktop) created the project at a workspace path that doesn't follow the default `<name>.dhee` convention. When omitted, the tool probes <projectsDir>/<name>.dhee and then <projectsDir>/<name>.",
     }),
   ),
   stage: Type.Optional(
@@ -42,7 +42,7 @@ const Params = Type.Object({
   scope: Type.Optional(
     Type.Union([Type.Literal('all'), Type.Literal('last_invalidated')], {
       description:
-        "Run scope. 'all' (default) drains every pending node in the graph (continue-from-here). 'last_invalidated' runs ONLY the nodes set by the most-recent kshana_invalidate call — leaves all other pending work alone. Use this after kshana_invalidate when the user wants a single targeted regeneration without auto-cascading into other unfinished work.",
+        "Run scope. 'all' (default) drains every pending node in the graph (continue-from-here). 'last_invalidated' runs ONLY the nodes set by the most-recent dhee_invalidate call — leaves all other pending work alone. Use this after dhee_invalidate when the user wants a single targeted regeneration without auto-cascading into other unfinished work.",
     }),
   ),
 });
@@ -64,7 +64,7 @@ export function createRunToTool(opts?: {
   onMedia?: MediaCallback;
   /**
    * Session id used to route runner events back to the originating
-   * chat. When set, `kshana_run_to` dispatches to the background
+   * chat. When set, `dhee_run_to` dispatches to the background
    * task runner and returns immediately — keeping the chat
    * responsive while the run executes detached. When unset (legacy
    * CLI / test paths), the tool runs inline, blocking until done.
@@ -72,10 +72,10 @@ export function createRunToTool(opts?: {
   sessionId?: string;
 }): ToolDefinition {
   return defineTool({
-    name: "kshana_run_to",
-    label: "kshana run-to",
+    name: "dhee_run_to",
+    label: "dhee run-to",
     description:
-      "Drive the kshana pipeline on a project up to a stage (or to completion). Returns immediately when run from a desktop chat session — the run executes off the agent's tool-call loop on the background task runner so chat stays responsive. Progress streams in as discrete events.",
+      "Drive the dhee pipeline on a project up to a stage (or to completion). Returns immediately when run from a desktop chat session — the run executes off the agent's tool-call loop on the background task runner so chat stays responsive. Progress streams in as discrete events.",
     parameters: Params,
     executionMode: "sequential",
     async execute(_id, params: Static<typeof Params>, signal, onUpdate) {
@@ -105,7 +105,7 @@ export function createRunToTool(opts?: {
             details: { status: "running", stopReason: null, log: text },
           };
         }
-        const text = `Cannot start: task ${result.activeTaskId} (${result.activeTaskKind}) is already running on '${result.activeProjectName}'. Use kshana_task_cancel to abort it, or wait.`;
+        const text = `Cannot start: task ${result.activeTaskId} (${result.activeTaskKind}) is already running on '${result.activeProjectName}'. Use dhee_task_cancel to abort it, or wait.`;
         return {
           content: [{ type: "text", text }],
           details: { status: "rejected", stopReason: null, log: text },
@@ -143,7 +143,7 @@ export function createRunToTool(opts?: {
           const state = (project as unknown as { executorState?: ExecutorState }).executorState;
           if (!state) {
             return failure(
-              `Cannot resolve alias '${classified.alias}' — project has no executorState yet. Run kshana_run_to without a target first to bootstrap.`,
+              `Cannot resolve alias '${classified.alias}' — project has no executorState yet. Run dhee_run_to without a target first to bootstrap.`,
             );
           }
           const resolved = resolveNodeId(state, classified.alias);
@@ -211,7 +211,7 @@ export function createRunToTool(opts?: {
                   kind: event.kind,
                   path: event.filePath,
                   project: params.project,
-                  source: "kshana_run_to",
+                  source: "dhee_run_to",
                 });
               },
             }
@@ -239,4 +239,4 @@ export function createRunToTool(opts?: {
 }
 
 /** Backwards-compatible export used by the TUI / smoke paths (no media bridge). */
-export const kshanaRunTo: ToolDefinition = createRunToTool();
+export const dheeRunTo: ToolDefinition = createRunToTool();

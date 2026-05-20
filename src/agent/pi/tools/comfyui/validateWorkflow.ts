@@ -25,9 +25,9 @@ function failure(message: string, log?: string): { content: { type: "text"; text
   };
 }
 
-export const kshanaValidateComfyWorkflow = defineTool({
-  name: "kshana_validate_comfy_workflow",
-  label: "kshana validate-comfy-workflow",
+export const dheeValidateComfyWorkflow = defineTool({
+  name: "dhee_validate_comfy_workflow",
+  label: "dhee validate-comfy-workflow",
   description:
     "Check whether a JSON file at `path` is a valid ComfyUI workflow. Cheap structural sniff — no LLM, no network. Run this first when a user attaches a workflow file before doing analysis.",
   parameters: Params,

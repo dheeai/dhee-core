@@ -34,7 +34,7 @@ describe("synthesizeNodesFromAssets", () => {
       baseImage(1, 1, "last_frame", "assets/images/B.png", 200),
     ]);
     expect(Object.keys(nodes)).toEqual(["shot_image:scene_1_shot_1"]);
-    const n = nodes["shot_image:scene_1_shot_1"]!;
+    const n = nodes["shot_image:scene_1_shot_1"];
     expect(n.typeId).toBe("shot_image");
     expect(n.itemId).toBe("scene_1_shot_1");
     expect(n.outputPaths).toEqual({
@@ -49,7 +49,7 @@ describe("synthesizeNodesFromAssets", () => {
       baseImage(1, 1, "first_frame", "assets/images/old.png", 100),
       baseImage(1, 1, "first_frame", "assets/images/new.png", 500),
     ]);
-    expect(nodes["shot_image:scene_1_shot_1"]!.outputPaths!["first_frame"]).toBe(
+    expect(nodes["shot_image:scene_1_shot_1"].outputPaths!["first_frame"]).toBe(
       "assets/images/new.png",
     );
   });
@@ -61,7 +61,7 @@ describe("synthesizeNodesFromAssets", () => {
     ]);
     expect(nodes["shot_image:scene_2_shot_3"]).toBeDefined();
     expect(nodes["shot_video:scene_2_shot_3"]).toBeDefined();
-    expect(nodes["shot_video:scene_2_shot_3"]!.outputPath).toBe("assets/videos/shots/x.mp4");
+    expect(nodes["shot_video:scene_2_shot_3"].outputPath).toBe("assets/videos/shots/x.mp4");
   });
 
   it("ignores entries with no nodeId", () => {
@@ -94,7 +94,7 @@ describe("synthesizeNodesFromAssets", () => {
         createdAt: 999,
       },
     ]);
-    expect(nodes["shot_image:scene_1_shot_1"]!.outputPaths!["first_frame"]).toBe("assets/images/p.png");
+    expect(nodes["shot_image:scene_1_shot_1"].outputPaths!["first_frame"]).toBe("assets/images/p.png");
   });
 
   it("skips a scene_image with no recognizable frame", () => {

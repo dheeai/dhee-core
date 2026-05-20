@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import { kshanaTools } from "./tools/index.js";
+import { dheeTools } from "./tools/index.js";
 import { loadOrchestratorPrompt } from "./prompt.js";
-import { ensureDir, getKshanaConfigDir, getProjectsDir } from "./paths.js";
+import { ensureDir, getdheeConfigDir, getProjectsDir } from "./paths.js";
 import { ensureOpenRouterApiKeyFromEnv } from "./ensureOpenRouterKey.js";
 
-export const kshanaExtension: ExtensionFactory = (pi) => {
-  for (const tool of kshanaTools) {
+export const dheeExtension: ExtensionFactory = (pi) => {
+  for (const tool of dheeTools) {
     pi.registerTool(tool);
   }
 };
@@ -30,8 +30,8 @@ function applyHeavyTierDefaults(argv: string[]): string[] {
   return defaults;
 }
 
-function ensureKshanaAgentDir(): string {
-  const agentDir = ensureDir(join(getKshanaConfigDir(), "pi-agent"));
+function ensuredheeAgentDir(): string {
+  const agentDir = ensureDir(join(getdheeConfigDir(), "pi-agent"));
   const settingsPath = join(agentDir, "settings.json");
   if (!existsSync(settingsPath)) {
     writeFileSync(
@@ -53,9 +53,9 @@ function ensureKshanaAgentDir(): string {
   return agentDir;
 }
 
-export async function bootKshanaTUI(argv: string[] = []): Promise<void> {
+export async function bootdheeTUI(argv: string[] = []): Promise<void> {
   const { main } = await import("@mariozechner/pi-coding-agent");
-  const agentDir = ensureKshanaAgentDir();
+  const agentDir = ensuredheeAgentDir();
   if (!process.env["PI_CODING_AGENT_DIR"]) {
     process.env["PI_CODING_AGENT_DIR"] = agentDir;
   }
@@ -68,10 +68,10 @@ export async function bootKshanaTUI(argv: string[] = []): Promise<void> {
     ...tierDefaults,
     ...argv,
   ];
-  await main(baseArgs, { extensionFactories: [kshanaExtension] });
+  await main(baseArgs, { extensionFactories: [dheeExtension] });
 }
 
-export { kshanaTools };
+export { dheeTools };
 
 // Embed surface — hosts that want to drive a PiSessionAgent in-process
 // (e.g. the Electron desktop app) import these directly. Keep this

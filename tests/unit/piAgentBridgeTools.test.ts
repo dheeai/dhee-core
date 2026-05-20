@@ -34,7 +34,7 @@ const mockedRunExecutor = vi.mocked(runExecutor);
 let projectsDir: string;
 
 function makeProject(name: string, contents: object): string {
-  const projectDir = join(projectsDir, `${name}.kshana`);
+  const projectDir = join(projectsDir, `${name}.dhee`);
   mkdirSync(projectDir, { recursive: true });
   writeFileSync(
     join(projectDir, 'project.json'),
@@ -44,14 +44,14 @@ function makeProject(name: string, contents: object): string {
 }
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), 'kshana-pi-bridge-'));
-  process.env['KSHANA_PROJECTS_DIR'] = projectsDir;
+  projectsDir = mkdtempSync(join(tmpdir(), 'dhee-pi-bridge-'));
+  process.env['dhee_PROJECTS_DIR'] = projectsDir;
   mockedRunExecutor.mockReset();
 });
 
 afterEach(() => {
   rmSync(projectsDir, { recursive: true, force: true });
-  delete process.env['KSHANA_PROJECTS_DIR'];
+  delete process.env['dhee_PROJECTS_DIR'];
 });
 
 // Convenience: the tools always return { content, details }; this
@@ -87,7 +87,7 @@ describe('pi-agent runTo tool — bridge to runExecutor', () => {
 
   it('returns failure when project.json is missing', async () => {
     // Make a directory but don't write project.json into it.
-    mkdirSync(join(projectsDir, 'broken.kshana'), { recursive: true });
+    mkdirSync(join(projectsDir, 'broken.dhee'), { recursive: true });
     const tool = createRunToTool();
     const result = await executeTool(tool, { project: 'broken' });
     expect((result.details as { status: string }).status).toBe('failed');
@@ -110,7 +110,7 @@ describe('pi-agent runTo tool — bridge to runExecutor', () => {
 
     expect(mockedRunExecutor).toHaveBeenCalledTimes(1);
     const opts = mockedRunExecutor.mock.calls[0][0];
-    expect(opts.projectDir).toBe(join(projectsDir, 'happy.kshana'));
+    expect(opts.projectDir).toBe(join(projectsDir, 'happy.dhee'));
     expect(opts.project).toMatchObject({
       templateId: 'narrative',
       title: 'Happy',
@@ -238,7 +238,7 @@ describe('pi-agent runTo tool — bridge to runExecutor', () => {
       kind: 'image',
       path: '/abs/foo.png',
       project: 'myproj',
-      source: 'kshana_run_to',
+      source: 'dhee_run_to',
     });
   });
 
@@ -286,9 +286,9 @@ describe('pi-agent runTo tool — bridge to runExecutor', () => {
   });
 });
 
-// regen tool removed — the LLM-facing kshana_regen / kshana_reset
-// tools were collapsed into the unified kshana_invalidate +
-// kshana_run_to scope='last_invalidated'. The HTTP /regen endpoint
+// regen tool removed — the LLM-facing dhee_regen / dhee_reset
+// tools were collapsed into the unified dhee_invalidate +
+// dhee_run_to scope='last_invalidated'. The HTTP /regen endpoint
 // (server/agentRoutes.ts) and pnpm regen / pnpm reset CLIs continue
 // to use regenNodes / resetProjectStage directly; their tests live
 // alongside those modules.

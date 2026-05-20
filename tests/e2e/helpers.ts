@@ -18,7 +18,7 @@ import type { ExecutionNode } from '../../src/core/planner/types.js';
  * Create a test project directory with original_input.md.
  */
 export function createTestProject(inputText?: string): string {
-  const projectDir = join(tmpdir(), `kshana-e2e-${Date.now()}`);
+  const projectDir = join(tmpdir(), `dhee-e2e-${Date.now()}`);
   mkdirSync(projectDir, { recursive: true });
 
   // Copy fixture or use provided text

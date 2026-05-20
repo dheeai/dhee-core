@@ -71,7 +71,7 @@ const shotNumbers = Array.from({ length: SEGMENT_COUNT }, (_, i) => startShot + 
 // ── Resolve project ──────────────────────────────────────────────────
 const projectRoot = resolve(
   process.cwd(),
-  projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`,
+  projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`,
 );
 if (!existsSync(projectRoot)) {
   console.error(`Project not found: ${projectRoot}`);

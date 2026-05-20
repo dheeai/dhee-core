@@ -119,7 +119,7 @@
 ### ✅ PASS: deleteProject > deletes existing project and returns true
 **GIVEN** existing project directory
 **WHEN** deleting project
-**THEN** should remove entire .kshana directory and return true
+**THEN** should remove entire .dhee directory and return true
 
 ---
 
@@ -152,7 +152,7 @@
 ---
 
 ### ✅ PASS: can detect existing project on startup
-**GIVEN** .kshana directory exists
+**GIVEN** .dhee directory exists
 **WHEN** checking for existing project on startup
 **THEN** should detect and allow continuation
 

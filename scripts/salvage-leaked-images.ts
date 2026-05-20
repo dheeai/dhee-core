@@ -4,13 +4,13 @@
  * (fixed in 2026-04-21 — run-to.ts now calls setActiveProjectDir).
  *
  * Before the fix, the CLI bootstrap never set the session projectDir, so
- * `submitImageGeneration` downloaded Klein outputs into `default.kshana/`
+ * `submitImageGeneration` downloaded Klein outputs into `default.dhee/`
  * while the executor graph registered paths under the correct project.
  * Each aborted shot_image node produced exactly one valid first_frame
  * before the next step tried to `edit_first_frame` and couldn't find it.
  *
  * This script parses the aborted run's log output, moves the leaked
- * first-frame pngs from `default.kshana/assets/images/` into the target
+ * first-frame pngs from `default.dhee/assets/images/` into the target
  * project's `assets/images/`, and writes
  * `outputPaths.first_frame = "assets/images/<name>.png"` on each
  * `shot_image:scene_N_shot_M` node in `project.json`. The executor's
@@ -30,7 +30,7 @@ import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync } from '
 import { join, resolve } from 'path';
 
 const REPO_ROOT = resolve(new URL('.', import.meta.url).pathname, '..');
-const LEAK_DIR = join(REPO_ROOT, 'default.kshana', 'assets', 'images');
+const LEAK_DIR = join(REPO_ROOT, 'default.dhee', 'assets', 'images');
 
 function main() {
   const logPath = process.argv[2];
@@ -40,7 +40,7 @@ function main() {
     process.exit(1);
   }
 
-  const projectDir = join(REPO_ROOT, `${projectName}.kshana`);
+  const projectDir = join(REPO_ROOT, `${projectName}.dhee`);
   const projectJsonPath = join(projectDir, 'project.json');
   const assetsDir = join(projectDir, 'assets', 'images');
 
@@ -106,7 +106,7 @@ function main() {
       }
     } else {
       renameSync(leakedPath, targetPath);
-      console.log(`  [move] ${filename} → ${projectName}.kshana/assets/images/`);
+      console.log(`  [move] ${filename} → ${projectName}.dhee/assets/images/`);
       moved++;
     }
 

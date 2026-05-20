@@ -57,8 +57,8 @@ describe('web UI timeline flow', () => {
   });
 
   it('sends timeline_update when selecting a project with timeline.json', async () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), 'kshana-webui-'));
-    const projectDir = join(tempRoot, 'story-demo.kshana');
+    const tempRoot = mkdtempSync(join(tmpdir(), 'dhee-webui-'));
+    const projectDir = join(tempRoot, 'story-demo.dhee');
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(join(projectDir, 'project.json'), JSON.stringify({
       templateId: 'narrative',
@@ -96,7 +96,7 @@ describe('web UI timeline flow', () => {
       'narrative',
       'cinematic_realism',
       60,
-      'story-demo.kshana',
+      'story-demo.dhee',
     );
     expect(timelineMessage).toBeTruthy();
     expect(timelineMessage.data.timeline).toEqual(expect.objectContaining({

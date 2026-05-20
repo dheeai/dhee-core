@@ -50,7 +50,7 @@ export class WorkflowIntegrationError extends Error {
 // ---------------------------------------------------------------------------
 
 /**
- * Where user-uploaded workflows live. Hosts (kshana-desktop) override
+ * Where user-uploaded workflows live. Hosts (dhee-desktop) override
  * via `setUserWorkflowsDir()`; default is `<cwd>/workflows/user/`
  * which works for the CLI / dev environment.
  */
@@ -80,7 +80,7 @@ function safeId(input: string): string {
  * Force the workflow registry to re-scan its directories and rebuild
  * its mode-filtered map. Call this after any process-wide change
  * that affects manifest visibility — most notably a `COMFY_MODE`
- * env-var flip when the host (kshana-desktop) toggles between local
+ * env-var flip when the host (dhee-desktop) toggles between local
  * and cloud.
  *
  * Without this, `getAllModes()` keeps returning the previous
@@ -411,7 +411,7 @@ export function getWorkflow(id: string): WorkflowManifest | undefined {
   if (fromRegistry) return fromRegistry;
 
   // Fallback: read from disk. Only the user dir — built-ins live
-  // inside kshana-core's checkout and the registry is the canonical
+  // inside dhee-core's checkout and the registry is the canonical
   // path for those.
   const userDir = getUserWorkflowsDirForWrite();
   const manifestPath = join(userDir, `${id}.manifest.json`);

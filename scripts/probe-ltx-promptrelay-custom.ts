@@ -10,7 +10,7 @@
  *   pnpm tsx scripts/probe-ltx-promptrelay-custom.ts
  *
  * Output:
- *   sun_hadnt_yet_cleared-2.kshana/assets/videos/promptrelay_probe/
+ *   sun_hadnt_yet_cleared-2.dhee/assets/videos/promptrelay_probe/
  *     custom_3shot_<timestamp>.mp4
  */
 import 'dotenv/config';
@@ -22,7 +22,7 @@ import { expandPromptRelayWorkflow } from '../src/services/providers/promptRelay
 
 process.env['COMFY_MODE'] = 'local';
 
-const projectRoot = resolve(process.cwd(), 'sun_hadnt_yet_cleared-2.kshana');
+const projectRoot = resolve(process.cwd(), 'sun_hadnt_yet_cleared-2.dhee');
 if (!existsSync(projectRoot)) {
   console.error(`Project not found: ${projectRoot}`);
   process.exit(1);

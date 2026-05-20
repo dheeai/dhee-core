@@ -20,7 +20,7 @@ interface ManifestEntry {
 }
 
 export interface ShowDetails {
-  /** Path relative to <project>.kshana/. The frontend renders inline when this matches an image/video extension. */
+  /** Path relative to <project>.dhee/. The frontend renders inline when this matches an image/video extension. */
   file_path: string;
   asset_id: string;
   asset_type: string;
@@ -134,7 +134,7 @@ function validateShotFrameParams(
  * smoke tests, legacy callers), the tool still returns the path in
  * `details` — just no chat-side rendering.
  *
- * The named exports below (`kshanaShowFirstFrame` etc.) preserve the
+ * The named exports below (`dheeShowFirstFrame` etc.) preserve the
  * pre-factory shape for any caller that imports them directly. They
  * are equivalent to `createShow*Tool({})` (no media emission).
  */
@@ -144,8 +144,8 @@ export interface ShowAssetOpts {
 
 export function createShowFirstFrameTool(opts: ShowAssetOpts = {}): ToolDefinition {
   return defineTool({
-    name: "kshana_show_first_frame",
-    label: "kshana show first-frame",
+    name: "dhee_show_first_frame",
+    label: "dhee show first-frame",
     description:
       "Show the latest generated first-frame image for a specific shot. Reads from project.json's scenes tree first, falls back to the manifest for legacy projects. Renders the image inline in chat when used from a desktop session.",
     parameters: ShotFrameParams,
@@ -158,7 +158,7 @@ export function createShowFirstFrameTool(opts: ShowAssetOpts = {}): ToolDefiniti
           kind: "image",
           project: params.project,
           path: shot.firstFrame.path,
-          source: "kshana_show_first_frame",
+          source: "dhee_show_first_frame",
         });
         return frameResult(shot.firstFrame, "");
       }
@@ -173,7 +173,7 @@ export function createShowFirstFrameTool(opts: ShowAssetOpts = {}): ToolDefiniti
           kind: "image",
           project: params.project,
           path: latest.path,
-          source: "kshana_show_first_frame",
+          source: "dhee_show_first_frame",
         });
       }
       return manifestResult(
@@ -186,8 +186,8 @@ export function createShowFirstFrameTool(opts: ShowAssetOpts = {}): ToolDefiniti
 
 export function createShowLastFrameTool(opts: ShowAssetOpts = {}): ToolDefinition {
   return defineTool({
-    name: "kshana_show_last_frame",
-    label: "kshana show last-frame",
+    name: "dhee_show_last_frame",
+    label: "dhee show last-frame",
     description:
       "Show the latest generated last-frame image for a specific shot. Reads from project.json's scenes tree first, falls back to the manifest. Renders inline.",
     parameters: ShotFrameParams,
@@ -200,7 +200,7 @@ export function createShowLastFrameTool(opts: ShowAssetOpts = {}): ToolDefinitio
           kind: "image",
           project: params.project,
           path: shot.lastFrame.path,
-          source: "kshana_show_last_frame",
+          source: "dhee_show_last_frame",
         });
         return frameResult(shot.lastFrame, "");
       }
@@ -215,7 +215,7 @@ export function createShowLastFrameTool(opts: ShowAssetOpts = {}): ToolDefinitio
           kind: "image",
           project: params.project,
           path: latest.path,
-          source: "kshana_show_last_frame",
+          source: "dhee_show_last_frame",
         });
       }
       return manifestResult(
@@ -228,8 +228,8 @@ export function createShowLastFrameTool(opts: ShowAssetOpts = {}): ToolDefinitio
 
 export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinition {
   return defineTool({
-    name: "kshana_show_shot_video",
-    label: "kshana show shot-video",
+    name: "dhee_show_shot_video",
+    label: "dhee show shot-video",
     description:
       "Show the latest rendered shot video clip. Reads from project.json's scenes tree first, falls back to the manifest. Renders inline.",
     parameters: ShotFrameParams,
@@ -242,7 +242,7 @@ export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinitio
           kind: "video",
           project: params.project,
           path: shot.video.path,
-          source: "kshana_show_shot_video",
+          source: "dhee_show_shot_video",
         });
         return {
           content: [{ type: "text", text: `${shot.video.path} (created ${new Date(shot.video.createdAt).toISOString()})` }],
@@ -265,7 +265,7 @@ export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinitio
           kind: "video",
           project: params.project,
           path: latest.path,
-          source: "kshana_show_shot_video",
+          source: "dhee_show_shot_video",
         });
       }
       return manifestResult(
@@ -282,8 +282,8 @@ const FinalVideoParams = Type.Object({
 
 export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefinition {
   return defineTool({
-    name: "kshana_show_final_video",
-    label: "kshana show final-video",
+    name: "dhee_show_final_video",
+    label: "dhee show final-video",
     description:
       "Show the assembled final video for a project. Reads project.finalVideo first, falls back to manifest. Renders inline.",
     parameters: FinalVideoParams,
@@ -295,7 +295,7 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
           kind: "video",
           project: params.project,
           path: finalVideo.path,
-          source: "kshana_show_final_video",
+          source: "dhee_show_final_video",
         });
         return {
           content: [{ type: "text", text: `${finalVideo.path} (created ${new Date(finalVideo.createdAt).toISOString()})` }],
@@ -315,7 +315,7 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
           kind: "video",
           project: params.project,
           path: latest.path,
-          source: "kshana_show_final_video",
+          source: "dhee_show_final_video",
         });
       }
       return manifestResult(
@@ -329,7 +329,7 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
 // ── Backwards-compat named exports ──────────────────────────────────
 // Equivalent to `createShow*Tool({})` (no onMedia). Kept so existing
 // imports from tools/index.ts and tests don't have to change.
-export const kshanaShowFirstFrame = createShowFirstFrameTool();
-export const kshanaShowLastFrame = createShowLastFrameTool();
-export const kshanaShowShotVideo = createShowShotVideoTool();
-export const kshanaShowFinalVideo = createShowFinalVideoTool();
+export const dheeShowFirstFrame = createShowFirstFrameTool();
+export const dheeShowLastFrame = createShowLastFrameTool();
+export const dheeShowShotVideo = createShowShotVideoTool();
+export const dheeShowFinalVideo = createShowFinalVideoTool();

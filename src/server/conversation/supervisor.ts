@@ -6,8 +6,8 @@
  * to the runner's `failed` / `completed` / `asset` events and pushes
  * a `[SYSTEM EVENT]` message into the running session via `runTask`.
  * Pi-agent reads it in context with the rest of the conversation
- * and decides — terse text ack, tool call (kshana_invalidate /
- * kshana_run_to scope='last_invalidated' / kshana_show_shot), or
+ * and decides — terse text ack, tool call (dhee_invalidate /
+ * dhee_run_to scope='last_invalidated' / dhee_show_shot), or
  * escalation back to the user.
  *
  * This module owns three concerns, all pure:
@@ -217,6 +217,6 @@ export function buildSupervisorTask(info: SupervisorEventInfo): string {
     `1. Does the description match the prompt? (subject, setting, action, mood)`,
     `2. Are there significant generation artifacts? (anatomical errors, doubled subjects, broken composition, severe texture issues)`,
     ``,
-    `If EITHER fails clearly, call kshana_invalidate node=<id> for this asset. Otherwise a one-line ack is fine.`,
+    `If EITHER fails clearly, call dhee_invalidate node=<id> for this asset. Otherwise a one-line ack is fine.`,
   ].join('\n');
 }

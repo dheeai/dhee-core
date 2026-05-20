@@ -1,6 +1,6 @@
 /**
  * ProjectManager - Handles project file creation, reading, and updating.
- * Manages the *.kshana directory structure and project.json index file.
+ * Manages the *.dhee directory structure and project.json index file.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'fs';
@@ -74,7 +74,7 @@ export function getProjectDir(basePath: string = defaultBasePath()): string {
  * Summary info returned by scanProjects().
  */
 export interface ProjectInfo {
-  /** Directory name (e.g., "story.kshana") */
+  /** Directory name (e.g., "story.dhee") */
   dirName: string;
   /** Project title from project.json */
   title: string;
@@ -87,7 +87,7 @@ export interface ProjectInfo {
 }
 
 /**
- * Scan for all *.kshana project directories under basePath.
+ * Scan for all *.dhee project directories under basePath.
  * Returns an array of project summaries sorted by most recently updated.
  */
 export function scanProjects(basePath: string = defaultBasePath()): ProjectInfo[] {
@@ -97,7 +97,7 @@ export function scanProjects(basePath: string = defaultBasePath()): ProjectInfo[
   const projects: ProjectInfo[] = [];
 
   for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.endsWith('.kshana')) continue;
+    if (!entry.isDirectory() || !entry.name.endsWith('.dhee')) continue;
 
     const projectJsonPath = join(basePath, entry.name, PROJECT_FILE);
     if (!existsSync(projectJsonPath)) continue;
@@ -107,7 +107,7 @@ export function scanProjects(basePath: string = defaultBasePath()): ProjectInfo[
       const data = JSON.parse(raw);
       projects.push({
         dirName: entry.name,
-        title: entry.name.replace(/\.kshana$/, ''),
+        title: entry.name.replace(/\.dhee$/, ''),
         templateId: data.templateId ?? 'narrative',
         currentPhase: data.currentPhase ?? 'unknown',
         updatedAt: data.updatedAt ?? 0,
@@ -124,12 +124,12 @@ export function scanProjects(basePath: string = defaultBasePath()): ProjectInfo[
 
 /**
  * Infer a project directory name from the user's input content.
- * Uses generateProjectTitle() to create a slug, appends ".kshana",
+ * Uses generateProjectTitle() to create a slug, appends ".dhee",
  * and handles collisions by appending a number suffix.
  */
 export function inferProjectDirName(content: string, basePath: string = defaultBasePath()): string {
   const slug = generateProjectTitle(content);
-  const base = `${slug}.kshana`;
+  const base = `${slug}.dhee`;
 
   if (!existsSync(join(basePath, base))) {
     return base;
@@ -137,10 +137,10 @@ export function inferProjectDirName(content: string, basePath: string = defaultB
 
   // Handle collision
   let counter = 2;
-  while (existsSync(join(basePath, `${slug}-${counter}.kshana`))) {
+  while (existsSync(join(basePath, `${slug}-${counter}.dhee`))) {
     counter++;
   }
-  return `${slug}-${counter}.kshana`;
+  return `${slug}-${counter}.dhee`;
 }
 
 /**
@@ -702,7 +702,7 @@ export function isProjectCompatible(basePath: string = defaultBasePath()): {
       return {
         compatible: false,
         version: 'unknown',
-        reason: `Old project without version metadata (before ${PROJECT_VERSION}). Delete .kshana directory to start fresh.`,
+        reason: `Old project without version metadata (before ${PROJECT_VERSION}). Delete .dhee directory to start fresh.`,
       };
     }
 
@@ -710,7 +710,7 @@ export function isProjectCompatible(basePath: string = defaultBasePath()): {
       return {
         compatible: false,
         version: project.version,
-        reason: `Incompatible version ${project.version}. Expected ${PROJECT_VERSION}. Delete .kshana directory to start fresh.`,
+        reason: `Incompatible version ${project.version}. Expected ${PROJECT_VERSION}. Delete .dhee directory to start fresh.`,
       };
     }
 
@@ -1005,7 +1005,7 @@ export function getProjectStyle(basePath: string = defaultBasePath()): ProjectSt
  */
 export function getProjectStyleConfig(basePath: string = defaultBasePath()): StyleConfig {
   const style = getProjectStyle(basePath);
-  return STYLE_CONFIGS[style as keyof typeof STYLE_CONFIGS] ?? STYLE_CONFIGS['cinematic_realism'];
+  return STYLE_CONFIGS[style] ?? STYLE_CONFIGS['cinematic_realism'];
 }
 
 /**
@@ -1081,7 +1081,7 @@ export const MAX_SCENES = 12;
  * defined in src/core/project/projectSchema.ts).
  *
  * The manifest stays as the append-only ledger; project.json is the
- * shape the Storyboard / kshana_show_* / reset paths read from.
+ * shape the Storyboard / dhee_show_* / reset paths read from.
  */
 export function addAsset(asset: AssetInfo, basePath: string = defaultBasePath()): void {
   let manifest: { assets: AssetInfo[] } = { assets: [] };
@@ -1345,7 +1345,7 @@ export function getFilesContext(project: ProjectFile): string {
 
   for (const file of project.files) {
     const nameStr = file.name ? ` (${file.name})` : '';
-    context += `- **${file.type}${nameStr}**: \`.kshana/${file.path}\`\n`;
+    context += `- **${file.type}${nameStr}**: \`.dhee/${file.path}\`\n`;
   }
 
   return context.trim();
@@ -1408,7 +1408,7 @@ You should start from the beginning and create all content.
 ## Reading Content
 
 You can read available content using read_file with the paths listed above.
-All paths are relative to the .kshana/ directory.
+All paths are relative to the .dhee/ directory.
 `;
 
   return context.trim();

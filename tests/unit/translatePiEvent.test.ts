@@ -7,7 +7,7 @@ import {
   type TranslationContext,
 } from "../../src/agent/pi/translateEvent.js";
 
-const ctx0: TranslationContext = { agentName: "kshana-pi", finalAssistantText: "" };
+const ctx0: TranslationContext = { agentName: "dhee-pi", finalAssistantText: "" };
 
 describe("translatePiEvent — tool execution", () => {
   it("turns tool_execution_start into tool_call with the args object", () => {
@@ -15,7 +15,7 @@ describe("translatePiEvent — tool execution", () => {
       {
         type: "tool_execution_start",
         toolCallId: "t1",
-        toolName: "kshana_status",
+        toolName: "dhee_status",
         args: { project: "chhaya" },
       } as never,
       ctx0,
@@ -24,16 +24,16 @@ describe("translatePiEvent — tool execution", () => {
       {
         type: "tool_call",
         toolCallId: "t1",
-        toolName: "kshana_status",
+        toolName: "dhee_status",
         arguments: { project: "chhaya" },
-        agentName: "kshana-pi",
+        agentName: "dhee-pi",
       },
     ]);
   });
 
   it("normalizes missing args to an empty object on tool_execution_start", () => {
     const r = translatePiEvent(
-      { type: "tool_execution_start", toolCallId: "t1", toolName: "kshana_list_projects" } as never,
+      { type: "tool_execution_start", toolCallId: "t1", toolName: "dhee_list_projects" } as never,
       ctx0,
     );
     const ev = r.events[0] as { type: string; arguments: unknown };
@@ -46,7 +46,7 @@ describe("translatePiEvent — tool execution", () => {
       {
         type: "tool_execution_update",
         toolCallId: "t1",
-        toolName: "kshana_run_to",
+        toolName: "dhee_run_to",
         args: {},
         partialResult: { content: [{ type: "text", text: "step 3/10" }] },
       } as never,
@@ -70,7 +70,7 @@ describe("translatePiEvent — tool execution", () => {
       {
         type: "tool_execution_update",
         toolCallId: "t1",
-        toolName: "kshana_run_to",
+        toolName: "dhee_run_to",
         args: {},
         partialResult: { content: [{ type: "image", url: "..." }] },
       } as never,
@@ -84,7 +84,7 @@ describe("translatePiEvent — tool execution", () => {
       {
         type: "tool_execution_end",
         toolCallId: "t1",
-        toolName: "kshana_show_first_frame",
+        toolName: "dhee_show_first_frame",
         result: {
           content: [{ type: "text", text: "assets/images/s1shot1_first_frame.png" }],
           details: {
@@ -109,7 +109,7 @@ describe("translatePiEvent — tool execution", () => {
       {
         type: "tool_execution_end",
         toolCallId: "t1",
-        toolName: "kshana_status",
+        toolName: "dhee_status",
         result: { content: [{ type: "text", text: "boom" }], details: {} },
         isError: true,
       } as never,
@@ -216,7 +216,7 @@ describe("translatePiEvent — agent_end", () => {
   it("uses context.finalAssistantText as the agent end output when present", () => {
     const r = translatePiEvent(
       { type: "agent_end", messages: [] } as never,
-      { agentName: "kshana-pi", finalAssistantText: "Hello there" },
+      { agentName: "dhee-pi", finalAssistantText: "Hello there" },
     );
     expect(r.events).toEqual([]);
     expect(r.agentEndOutput).toBe("Hello there");

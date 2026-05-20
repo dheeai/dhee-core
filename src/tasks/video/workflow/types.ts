@@ -287,7 +287,7 @@ export interface PhaseInfo {
   status: PhaseStatus;
   /** Current planner stage (if in_progress) */
   plannerStage?: PlannerStage;
-  /** Path to the plan file (relative to .kshana/) */
+  /** Path to the plan file (relative to .dhee/) */
   planFile?: string;
   /** Timestamp when phase started */
   startedAt?: number;
@@ -400,7 +400,7 @@ export interface SettingData {
 export interface SceneRef {
   /** Scene number/identifier */
   sceneNumber: number;
-  /** Reference to scene file (relative to .kshana/) */
+  /** Reference to scene file (relative to .dhee/) */
   file?: string;
   /** Scene title */
   title?: string;
@@ -496,7 +496,7 @@ export type ContentStatus = 'available' | 'partial' | 'missing';
 export interface ContentEntry {
   /** Current status of this content */
   status: ContentStatus;
-  /** Path to the main file for this content (relative to .kshana/). Only set when file exists. */
+  /** Path to the main file for this content (relative to .dhee/). Only set when file exists. */
   file?: string;
   /** For itemized content (characters/settings), list of item names */
   items?: string[];
@@ -544,7 +544,7 @@ export interface ProjectFile {
   id: string;
   /** Project title */
   title: string;
-  /** Path to original input file (relative to .kshana/) */
+  /** Path to original input file (relative to .dhee/) */
   originalInputFile: string;
   /** Visual style for the project (cinematic_realism or anime) */
   style: ProjectStyle;
@@ -627,7 +627,7 @@ export interface ProjectFile {
   files?: Array<{
     /** Type of file (original_input, plot, story, character, setting, scene, image, video) */
     type: string;
-    /** Relative path within .kshana directory */
+    /** Relative path within .dhee directory */
     path: string;
     /** Optional name for items (character name, setting name, scene number) */
     name?: string;
@@ -706,7 +706,7 @@ export interface PhaseConfig {
   nextPhase: WorkflowPhase | null;
   /** Prompt file name (without .json) for agent */
   promptFile: string;
-  /** Path to plan output file (relative to .kshana/) */
+  /** Path to plan output file (relative to .dhee/) */
   planOutputFile?: string;
   /** Primary agent type for this phase */
   agentType: AgentType;

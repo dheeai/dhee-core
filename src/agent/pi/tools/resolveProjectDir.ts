@@ -1,13 +1,13 @@
 /**
- * Resolve a kshana project's on-disk folder.
+ * Resolve a dhee project's on-disk folder.
  *
  * Two conventions exist in the wild:
- *   1. `<name>.kshana` — the canonical kshana-core convention (every
+ *   1. `<name>.dhee` — the canonical dhee-core convention (every
  *      `pnpm new` project, every test fixture).
- *   2. `<name>` — what kshana-desktop's NewProjectDialog creates
+ *   2. `<name>` — what dhee-desktop's NewProjectDialog creates
  *      (workspace folder + project name, no suffix).
  *
- * Earlier versions hardcoded `.kshana`, which made pi-agent's tools
+ * Earlier versions hardcoded `.dhee`, which made pi-agent's tools
  * fail on desktop-created projects. The LLM's fallback was to `mv`
  * the folder — destructive and surprising. This resolver replaces
  * that with a deterministic existence probe, plus an explicit
@@ -47,10 +47,10 @@ export class ProjectDirNotFoundError extends Error {
  *
  * Probe order:
  *   1. Explicit `projectDir` (must be absolute and exist)
- *   2. `<basePath>/<name>.kshana`
+ *   2. `<basePath>/<name>.dhee`
  *   3. `<basePath>/<name>`
  *
- * The `.kshana` form is tried before the bare form so existing
+ * The `.dhee` form is tried before the bare form so existing
  * projects keep their behavior unchanged when a sibling folder
  * happens to share the bare name.
  */
@@ -65,7 +65,7 @@ export function resolveProjectDir(opts: ResolveProjectDirOpts): string {
     if (existsSync(abs)) return abs;
   }
 
-  const suffixed = resolve(opts.basePath, `${opts.name}.kshana`);
+  const suffixed = resolve(opts.basePath, `${opts.name}.dhee`);
   attempted.push(suffixed);
   if (existsSync(suffixed)) return suffixed;
 

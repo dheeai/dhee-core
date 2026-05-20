@@ -1,5 +1,5 @@
 /**
- * Regression: long-running background tasks (kshana_run_to dispatched
+ * Regression: long-running background tasks (dhee_run_to dispatched
  * via the BackgroundTaskRunner) must keep streaming progress events
  * to the originating chat session AFTER the agent's turn ends.
  *
@@ -27,7 +27,7 @@ import {
 } from '../../src/server/runners/BackgroundTaskRunner.js';
 import { __resetBackgroundTaskRunnerForTesting } from '../../src/server/runners/backgroundTaskRunnerSingleton.js';
 
-const SINGLETON_KEY = '__kshana_background_task_runner__';
+const SINGLETON_KEY = '__dhee_background_task_runner__';
 
 function installRunner(runner: BackgroundTaskRunner): void {
   (globalThis as unknown as Record<string, unknown>)[SINGLETON_KEY] = runner;
@@ -148,7 +148,7 @@ describe('ConversationManager — backgroundEvents pin survives agent-turn end',
     internalSession.sessionContext = {
       sessionId,
       mode: 'local',
-      projectDir: 'ambient.kshana',
+      projectDir: 'ambient.dhee',
     } as never;
     internalSession.initialized = true;
 

@@ -1,4 +1,4 @@
-# Kshana-Core Pipeline Architecture: Plot → Final Video
+# dhee-Core Pipeline Architecture: Plot → Final Video
 
 ## Overview
 

@@ -15,16 +15,16 @@ export type FocusProjectCallback = (projectName: string) => Promise<FocusProject
 const Params = Type.Object({
   project: Type.String({
     description:
-      "Project name (no .kshana suffix) to focus on. The frontend will treat this as the active project, populating the storyboard / phase / timeline panels.",
+      "Project name (no .dhee suffix) to focus on. The frontend will treat this as the active project, populating the storyboard / phase / timeline panels.",
   }),
 });
 
 export function createFocusProjectTool(callback: FocusProjectCallback): ToolDefinition {
   return defineTool({
-    name: "kshana_focus_project",
-    label: "kshana focus-project",
+    name: "dhee_focus_project",
+    label: "dhee focus-project",
     description:
-      "Focus a project as the active project for this session. Tells the UI to populate the storyboard, phase, and timeline panels for the named project. Use this when the user says things like 'let's work on X', 'open project Y', 'switch to Z'. After focusing, prefer this project as the default for subsequent kshana_* tool calls when the user doesn't name one explicitly.",
+      "Focus a project as the active project for this session. Tells the UI to populate the storyboard, phase, and timeline panels for the named project. Use this when the user says things like 'let's work on X', 'open project Y', 'switch to Z'. After focusing, prefer this project as the default for subsequent dhee_* tool calls when the user doesn't name one explicitly.",
     parameters: Params,
     async execute(_id, params: Static<typeof Params>): Promise<AgentToolResult<FocusProjectResult | { error: string }>> {
       try {

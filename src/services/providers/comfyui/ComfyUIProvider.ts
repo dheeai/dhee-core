@@ -30,13 +30,13 @@ import type {
   VideoGenerationInput,
   ProviderProgressCallback,
 } from '../types.js';
-import { findKshanaCoreRoot } from '../../../agent/pi/paths.js';
+import { finddheeCoreRoot } from '../../../agent/pi/paths.js';
 
-// Anchor on kshana-core's own root so embedded hosts (kshana-desktop)
+// Anchor on dhee-core's own root so embedded hosts (dhee-desktop)
 // don't lose log entries when their cwd has no `logs/` dir.
 const DEBUG_LOG_DIR = (() => {
   try {
-    return path.join(findKshanaCoreRoot(import.meta.url), 'logs');
+    return path.join(finddheeCoreRoot(import.meta.url), 'logs');
   } catch {
     return path.join(process.cwd(), 'logs');
   }
@@ -65,7 +65,7 @@ export function replaceUnresolvedLoadImages(
   for (const [nid, n] of Object.entries(workflow)) {
     const node = n as { class_type?: string; inputs?: Record<string, unknown> };
     if (node.class_type === 'LoadImage' && typeof node.inputs?.['image'] === 'string') {
-      const img = node.inputs['image'] as string;
+      const img = node.inputs['image'];
       const isKnownUpload = uploadedNames.has(img);
       log(`[video workflow] LoadImage node ${nid}: image=${img}  known_upload=${isKnownUpload}`);
       if (!isKnownUpload) {
@@ -228,13 +228,13 @@ export class ComfyUIProvider implements GenerationProvider {
       for (let i = 0; i < 4; i++) {
         genParams[`reference_image_${i + 1}`] = referenceImageFilenames[i] ?? inputImageFilename ?? '';
       }
-      workflow = parameterizeGeneric(template, modeManifest, genParams) as Record<string, unknown>;
+      workflow = parameterizeGeneric(template, modeManifest, genParams);
 
       // Safety: replace any remaining LoadImage placeholders
       for (const [, wfNode] of Object.entries(workflow)) {
         const n = wfNode as { class_type?: string; inputs?: Record<string, unknown> };
         if (n.class_type === 'LoadImage' && typeof n.inputs?.['image'] === 'string') {
-          if ((n.inputs['image'] as string).startsWith('ref_image_')) {
+          if ((n.inputs['image']).startsWith('ref_image_')) {
             n.inputs['image'] = inputImageFilename ?? '';
           }
         }
@@ -263,7 +263,7 @@ export class ComfyUIProvider implements GenerationProvider {
     // Queue and wait (WS connects first, then submits — prevents missing cloud events)
     onProgress?.({ percentage: 0, message: 'Queueing prompt...', done: false });
     const workflowId = modeManifest?.id ?? workflowName;
-    const { promptId, outputs: wsOutputs } = await this.queueAndWait(client, workflow as Record<string, unknown>, onProgress, workflowId);
+    const { promptId, outputs: wsOutputs } = await this.queueAndWait(client, workflow, onProgress, workflowId);
 
     // Download result (use WS-collected outputs for cloud, /history for local)
     return this.downloadFirstOutput(client, promptId, outputDir, 'image/png', wsOutputs, filenamePrefix, workflowId);
@@ -289,7 +289,7 @@ export class ComfyUIProvider implements GenerationProvider {
 
     // Determine workflow: explicit user override (mode registry) wins,
     // otherwise default to the built-in FLUX 2 Klein edit workflow
-    // shipped with kshana-core. The exact ID resolves via
+    // shipped with dhee-core. The exact ID resolves via
     // chooseImageEditWorkflow (mode-aware: local vs cloud).
     let workflowName = process.env['COMFY_MODE'] === 'cloud'
       ? 'flux2_klein_edit_cloud'
@@ -421,14 +421,14 @@ export class ComfyUIProvider implements GenerationProvider {
         editParams[`reference_image_${i + 1}`] = referenceImageFilenames[i] ?? uploadResult.name;
       }
 
-      workflow = parameterizeGeneric(template, modeManifest, editParams) as Record<string, unknown>;
+      workflow = parameterizeGeneric(template, modeManifest, editParams);
 
       // Safety: set any remaining LoadImage nodes that still have placeholder filenames
       let placeholderCount = 0;
       for (const [nid, node] of Object.entries(workflow)) {
         const n = node as { class_type?: string; inputs?: Record<string, unknown> };
         if (n.class_type === 'LoadImage' && typeof n.inputs?.['image'] === 'string') {
-          if ((n.inputs['image'] as string).startsWith('ref_image_')) {
+          if ((n.inputs['image']).startsWith('ref_image_')) {
             console.log(`[FLUX Klein] Replacing placeholder on node ${nid}: ${n.inputs['image']} → ${uploadResult.name}`);
             n.inputs['image'] = uploadResult.name;
             placeholderCount++;
@@ -458,7 +458,7 @@ export class ComfyUIProvider implements GenerationProvider {
     // Queue and wait
     onProgress?.({ percentage: 0, message: 'Queueing prompt...', done: false });
     const workflowId = modeManifest?.id ?? workflowName;
-    const { promptId, outputs: wsOutputs } = await this.queueAndWait(client, workflow as Record<string, unknown>, onProgress, workflowId);
+    const { promptId, outputs: wsOutputs } = await this.queueAndWait(client, workflow, onProgress, workflowId);
 
     return this.downloadFirstOutput(client, promptId, outputDir, 'image/png', wsOutputs, filenamePrefix, workflowId);
   }
@@ -491,7 +491,7 @@ export class ComfyUIProvider implements GenerationProvider {
     // 1. The executor passes modeId = generation strategy (i2v, t2v, flfv, fmlfv)
     // 2. Find the best workflow that supports this strategy (user override > built-in)
     // 3. If no strategy specified, fall back to pipeline default
-    let workflowName = 'ltx23';
+    const workflowName = 'ltx23';
     let modeManifest = null as any;
     const strategy = input.modeId || 'i2v';
     try {
@@ -619,7 +619,7 @@ export class ComfyUIProvider implements GenerationProvider {
         genericParams[frameId] = uploadedName;
       }
 
-      workflow = parameterizeGeneric(template, modeManifest, genericParams) as Record<string, unknown>;
+      workflow = parameterizeGeneric(template, modeManifest, genericParams);
 
       // Boolean toggle nodes (PrimitiveBoolean) for i2v/t2v switching:
       // These are handled by parameterizeGeneric via defaultValue from the manifest.
@@ -666,7 +666,7 @@ export class ComfyUIProvider implements GenerationProvider {
     // Queue and wait
     onProgress?.({ percentage: 0, message: 'Queueing prompt...', done: false });
     const workflowId = modeManifest?.id ?? workflowName;
-    const { promptId, outputs: wsOutputs } = await this.queueAndWait(client, workflow as Record<string, unknown>, onProgress, workflowId);
+    const { promptId, outputs: wsOutputs } = await this.queueAndWait(client, workflow, onProgress, workflowId);
 
     const result = await this.downloadFirstOutput(client, promptId, outputDir, 'video/mp4', wsOutputs, filenamePrefix, workflowId);
     // Inject workflow name into metadata for upstream logging

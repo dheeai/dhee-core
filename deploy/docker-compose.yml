@@ -1,7 +1,7 @@
 services:
-  kshana-core-prod:
-    image: ${PROD_IMAGE:-kshana-core:latest}
-    container_name: kshana-core-prod
+  dhee-core-prod:
+    image: ${PROD_IMAGE:-dhee-core:latest}
+    container_name: dhee-core-prod
     restart: unless-stopped
     env_file:
       - .env.prod
@@ -11,9 +11,9 @@ services:
     expose:
       - "8080"
 
-  kshana-core-dev:
-    image: ${DEV_IMAGE:-kshana-core:latest}
-    container_name: kshana-core-dev
+  dhee-core-dev:
+    image: ${DEV_IMAGE:-dhee-core:latest}
+    container_name: dhee-core-dev
     restart: unless-stopped
     env_file:
       - .env.dev
@@ -25,7 +25,7 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
-    container_name: kshana-core-nginx
+    container_name: dhee-core-nginx
     restart: unless-stopped
     ports:
       - "80:80"

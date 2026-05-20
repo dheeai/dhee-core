@@ -15,21 +15,21 @@ import { LocalFileSystem } from '../../../src/core/fs/LocalFileSystem.js';
 
 describe('SessionContext', () => {
   it('returns default project dir outside a session', () => {
-    setDefaultProjectDir('fallback.kshana');
-    expect(getSessionProjectDir()).toBe('fallback.kshana');
+    setDefaultProjectDir('fallback.dhee');
+    expect(getSessionProjectDir()).toBe('fallback.dhee');
   });
 
   it('returns session project dir inside a session', () => {
-    const session = createLocalSession('test-1', 'project-a.kshana');
+    const session = createLocalSession('test-1', 'project-a.dhee');
 
     runInSession(session, () => {
-      expect(getSessionProjectDir()).toBe('project-a.kshana');
+      expect(getSessionProjectDir()).toBe('project-a.dhee');
     });
   });
 
   it('isolates two concurrent sessions', async () => {
-    const sessionA = createLocalSession('sess-a', 'alpha.kshana');
-    const sessionB = createLocalSession('sess-b', 'beta.kshana');
+    const sessionA = createLocalSession('sess-a', 'alpha.dhee');
+    const sessionB = createLocalSession('sess-b', 'beta.dhee');
 
     const results: string[] = [];
 
@@ -46,21 +46,21 @@ describe('SessionContext', () => {
 
     await Promise.all([promiseA, promiseB]);
 
-    expect(results).toContain('A:alpha.kshana');
-    expect(results).toContain('B:beta.kshana');
+    expect(results).toContain('A:alpha.dhee');
+    expect(results).toContain('B:beta.dhee');
   });
 
   it('setSessionProjectDir mutates only the current session', () => {
-    const sessionA = createLocalSession('sess-a', 'original.kshana');
+    const sessionA = createLocalSession('sess-a', 'original.dhee');
 
     runInSession(sessionA, () => {
-      setSessionProjectDir('changed.kshana');
-      expect(getSessionProjectDir()).toBe('changed.kshana');
+      setSessionProjectDir('changed.dhee');
+      expect(getSessionProjectDir()).toBe('changed.dhee');
     });
 
     // Outside session, default is unaffected
-    setDefaultProjectDir('default.kshana');
-    expect(getSessionProjectDir()).toBe('default.kshana');
+    setDefaultProjectDir('default.dhee');
+    expect(getSessionProjectDir()).toBe('default.dhee');
   });
 
   it('provides LocalFileSystem via getSessionFs()', () => {
@@ -76,12 +76,12 @@ describe('SessionContext', () => {
   });
 
   it('getCurrentSession returns context inside session', () => {
-    const session = createLocalSession('test-ctx', 'ctx.kshana');
+    const session = createLocalSession('test-ctx', 'ctx.dhee');
     runInSession(session, () => {
       const ctx = getCurrentSession();
       expect(ctx).toBeDefined();
       expect(ctx!.sessionId).toBe('test-ctx');
-      expect(ctx!.projectDir).toBe('ctx.kshana');
+      expect(ctx!.projectDir).toBe('ctx.dhee');
       expect(ctx!.mode).toBe('local');
     });
   });

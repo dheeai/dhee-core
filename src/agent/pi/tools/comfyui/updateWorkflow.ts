@@ -46,9 +46,9 @@ function failure(message: string): { content: { type: "text"; text: string }[]; 
   };
 }
 
-export const kshanaUpdateComfyWorkflow = defineTool({
-  name: "kshana_update_comfy_workflow",
-  label: "kshana update-comfy-workflow",
+export const dheeUpdateComfyWorkflow = defineTool({
+  name: "dhee_update_comfy_workflow",
+  label: "dhee update-comfy-workflow",
   description:
     "Patch fields on an existing user-uploaded workflow's manifest. Common uses: change displayName, adjust default values in parameterMappings, toggle isOverride to set this workflow as active for its pipeline. Refuses to patch built-in workflows.",
   parameters: Params,

@@ -36,7 +36,7 @@ function main() {
     console.error('Usage: pnpm tsx scripts/clear-last-frames-for-model.ts <project> <modelTag>');
     process.exit(1);
   }
-  const projectName = projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`;
+  const projectName = projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`;
   const projectDir = join(REPO_ROOT, projectName);
   const jsonPath = join(projectDir, 'project.json');
   if (!existsSync(jsonPath)) {

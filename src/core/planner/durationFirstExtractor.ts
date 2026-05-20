@@ -97,7 +97,7 @@ function warnOnce(key: string, message: string): void {
   const last = recentWarnings.get(key) ?? 0;
   if (now - last < WARNING_DEDUPE_MS) return;
   recentWarnings.set(key, now);
-  // eslint-disable-next-line no-console
+   
   console.warn(message);
 }
 

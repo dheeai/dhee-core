@@ -227,7 +227,7 @@ describe('no per-item node is left depending on a deleted type-level parent', ()
 
 describe('state-heal on session resume repairs missing matching-scope deps', () => {
   // Reproduces the exact persisted-state shape observed in the broken
-  // lazarus_drive.kshana/project.json: per-item nodes exist and are completed,
+  // lazarus_drive.dhee/project.json: per-item nodes exist and are completed,
   // but their matching-scope deps were stripped by the old dangling-dep
   // cleanup. On resume, the fix must detect and restore those deps so that
   // resets (or re-runs of downstream nodes) correctly see parent content.
@@ -329,7 +329,7 @@ describe('state-heal on session resume repairs missing matching-scope deps', () 
 });
 
 describe('lazarus_drive production scenario regression', () => {
-  // Reproduces the bug observed in the real `lazarus_drive.kshana` project:
+  // Reproduces the bug observed in the real `lazarus_drive.dhee` project:
   // every character_image, setting_image, object_image, and scene_video_prompt
   // ended up with dependencies = ['world_style'] only, because the post-
   // expansion dangling-dep cleanup stripped the `character`/`setting`/`scene`/

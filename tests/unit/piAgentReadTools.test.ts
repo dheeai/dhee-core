@@ -9,7 +9,7 @@
  * formatting, filter combinations, and a few edge cases (empty graphs,
  * bare folders, path traversal, oversized failed-node lists).
  *
- * Approach: temp `KSHANA_PROJECTS_DIR` per test, write project fixtures
+ * Approach: temp `dhee_PROJECTS_DIR` per test, write project fixtures
  * with `mkdirSync`/`writeFileSync`, invoke the tool's `execute`
  * directly, assert on the response shape.
  */
@@ -17,17 +17,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { kshanaStatus } from '../../src/agent/pi/tools/status.js';
-import { kshanaListItems } from '../../src/agent/pi/tools/listItems.js';
-import { kshanaListProjects } from '../../src/agent/pi/tools/listProjects.js';
-import { kshanaReadArtifact } from '../../src/agent/pi/tools/readArtifact.js';
+import { dheeStatus } from '../../src/agent/pi/tools/status.js';
+import { dheeListItems } from '../../src/agent/pi/tools/listItems.js';
+import { dheeListProjects } from '../../src/agent/pi/tools/listProjects.js';
+import { dheeReadArtifact } from '../../src/agent/pi/tools/readArtifact.js';
 
 // ── Temp project fixtures ────────────────────────────────────────────
 
 let projectsDir: string;
 
 function makeProject(name: string, contents: object): string {
-  const projectDir = join(projectsDir, `${name}.kshana`);
+  const projectDir = join(projectsDir, `${name}.dhee`);
   mkdirSync(projectDir, { recursive: true });
   writeFileSync(
     join(projectDir, 'project.json'),
@@ -37,15 +37,15 @@ function makeProject(name: string, contents: object): string {
 }
 
 function makeBareProjectDir(name: string): string {
-  // Folder ends in .kshana but has no project.json — used to test the
+  // Folder ends in .dhee but has no project.json — used to test the
   // "bare folder" pathway in listProjects.
-  const dir = join(projectsDir, `${name}.kshana`);
+  const dir = join(projectsDir, `${name}.dhee`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 function executeTool(
-  tool: typeof kshanaStatus | typeof kshanaListItems | typeof kshanaListProjects | typeof kshanaReadArtifact,
+  tool: typeof dheeStatus | typeof dheeListItems | typeof dheeListProjects | typeof dheeReadArtifact,
   params: unknown,
 ) {
   return tool.execute(
@@ -68,22 +68,22 @@ function node(
 }
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), 'kshana-read-tools-'));
-  process.env['KSHANA_PROJECTS_DIR'] = projectsDir;
+  projectsDir = mkdtempSync(join(tmpdir(), 'dhee-read-tools-'));
+  process.env['dhee_PROJECTS_DIR'] = projectsDir;
 });
 
 afterEach(() => {
   rmSync(projectsDir, { recursive: true, force: true });
-  delete process.env['KSHANA_PROJECTS_DIR'];
+  delete process.env['dhee_PROJECTS_DIR'];
 });
 
 // ────────────────────────────────────────────────────────────────────
-// kshana_status
+// dhee_status
 // ────────────────────────────────────────────────────────────────────
 
-describe('pi-agent kshana_status', () => {
+describe('pi-agent dhee_status', () => {
   it('returns failure when project does not exist', async () => {
-    const r = await executeTool(kshanaStatus, { project: 'nope' });
+    const r = await executeTool(dheeStatus, { project: 'nope' });
     expect((r.details as { status: string }).status).toBe('failed');
     expect((r.content as Array<{ text: string }>)[0].text).toMatch(
       /Project not found/,
@@ -91,8 +91,8 @@ describe('pi-agent kshana_status', () => {
   });
 
   it('returns failure when project.json is missing', async () => {
-    mkdirSync(join(projectsDir, 'broken.kshana'));
-    const r = await executeTool(kshanaStatus, { project: 'broken' });
+    mkdirSync(join(projectsDir, 'broken.dhee'));
+    const r = await executeTool(dheeStatus, { project: 'broken' });
     expect((r.details as { status: string }).status).toBe('failed');
     expect((r.content as Array<{ text: string }>)[0].text).toMatch(
       /project.json not found/,
@@ -117,7 +117,7 @@ describe('pi-agent kshana_status', () => {
         },
       },
     });
-    const r = await executeTool(kshanaStatus, { project: 'noir' });
+    const r = await executeTool(dheeStatus, { project: 'noir' });
     expect((r.details as { status: string }).status).toBe('completed');
     const text = (r.content as Array<{ text: string }>)[0].text;
     expect(text).toMatch(/Project: Noir Detective/);
@@ -141,7 +141,7 @@ describe('pi-agent kshana_status', () => {
         },
       },
     });
-    const r = await executeTool(kshanaStatus, { project: 'p' });
+    const r = await executeTool(dheeStatus, { project: 'p' });
     const text = (r.content as Array<{ text: string }>)[0].text;
     expect(text).toMatch(/Failed nodes:/);
     expect(text).toMatch(/shot_image:s1_s1: comfy 500/);
@@ -154,7 +154,7 @@ describe('pi-agent kshana_status', () => {
       nodes[`n${i}`] = node(`shot_image:n${i}`, 'shot_image', 'failed', `err ${i}`);
     }
     makeProject('p', { title: 'P', executorState: { nodes } });
-    const r = await executeTool(kshanaStatus, { project: 'p' });
+    const r = await executeTool(dheeStatus, { project: 'p' });
     const text = (r.content as Array<{ text: string }>)[0].text;
     // Top 10 are listed; 5 remaining are summarized.
     expect(text).toMatch(/shot_image:n0: err 0/);
@@ -166,7 +166,7 @@ describe('pi-agent kshana_status', () => {
 
   it('handles a project with no executorState gracefully', async () => {
     makeProject('fresh', { title: 'Fresh' });
-    const r = await executeTool(kshanaStatus, { project: 'fresh' });
+    const r = await executeTool(dheeStatus, { project: 'fresh' });
     expect((r.details as { status: string }).status).toBe('completed');
     const text = (r.content as Array<{ text: string }>)[0].text;
     expect(text).toMatch(/Total nodes: 0/);
@@ -179,10 +179,10 @@ describe('pi-agent kshana_status', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// kshana_list_items
+// dhee_list_items
 // ────────────────────────────────────────────────────────────────────
 
-describe('pi-agent kshana_list_items', () => {
+describe('pi-agent dhee_list_items', () => {
   function projectWithGraph() {
     return makeProject('p', {
       title: 'P',
@@ -200,19 +200,19 @@ describe('pi-agent kshana_list_items', () => {
   }
 
   it('returns failure on missing project', async () => {
-    const r = await executeTool(kshanaListItems, { project: 'gone' });
+    const r = await executeTool(dheeListItems, { project: 'gone' });
     expect((r.details as { status: string }).status).toBe('failed');
   });
 
   it('returns failure on missing project.json', async () => {
-    mkdirSync(join(projectsDir, 'broken.kshana'));
-    const r = await executeTool(kshanaListItems, { project: 'broken' });
+    mkdirSync(join(projectsDir, 'broken.dhee'));
+    const r = await executeTool(dheeListItems, { project: 'broken' });
     expect((r.details as { status: string }).status).toBe('failed');
   });
 
   it('lists every node sorted by id when no filters', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, { project: 'p' });
+    const r = await executeTool(dheeListItems, { project: 'p' });
     const d = r.details as { total: number; matches: number; log: string };
     expect(d.total).toBe(6);
     expect(d.matches).toBe(6);
@@ -224,7 +224,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('filters by typeId', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, {
+    const r = await executeTool(dheeListItems, {
       project: 'p',
       type: 'shot_video',
     });
@@ -243,7 +243,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('filters by literal status (pending)', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, {
+    const r = await executeTool(dheeListItems, {
       project: 'p',
       status: 'pending',
     });
@@ -253,7 +253,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('status=terminal includes completed | failed | skipped (NOT running, NOT pending)', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, {
+    const r = await executeTool(dheeListItems, {
       project: 'p',
       status: 'terminal',
     });
@@ -266,7 +266,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('filters by grep regex against node id', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, {
+    const r = await executeTool(dheeListItems, {
       project: 'p',
       grep: 's1_s1',
     });
@@ -277,7 +277,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('combines type + status + grep filters', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, {
+    const r = await executeTool(dheeListItems, {
       project: 'p',
       type: 'shot_image',
       status: 'pending',
@@ -291,7 +291,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('failed-node lines include the first line of the error message', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, {
+    const r = await executeTool(dheeListItems, {
       project: 'p',
       status: 'failed',
     });
@@ -301,7 +301,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('returns failure on invalid grep regex', async () => {
     projectWithGraph();
-    const r = await executeTool(kshanaListItems, {
+    const r = await executeTool(dheeListItems, {
       project: 'p',
       grep: '[invalid(',
     });
@@ -313,7 +313,7 @@ describe('pi-agent kshana_list_items', () => {
 
   it('handles empty graph (no executorState) → 0/0 matching', async () => {
     makeProject('empty', { title: 'Empty' });
-    const r = await executeTool(kshanaListItems, { project: 'empty' });
+    const r = await executeTool(dheeListItems, { project: 'empty' });
     const d = r.details as { total: number; matches: number };
     expect(d.total).toBe(0);
     expect(d.matches).toBe(0);
@@ -321,21 +321,21 @@ describe('pi-agent kshana_list_items', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// kshana_list_projects
+// dhee_list_projects
 // ────────────────────────────────────────────────────────────────────
 
-describe('pi-agent kshana_list_projects', () => {
+describe('pi-agent dhee_list_projects', () => {
   it('returns "no projects found" message when projects dir is empty', async () => {
-    const r = await executeTool(kshanaListProjects, {});
+    const r = await executeTool(dheeListProjects, {});
     const d = r.details as { count: number; projects: unknown[] };
     expect(d.count).toBe(0);
     expect(d.projects).toEqual([]);
     expect((r.content as Array<{ text: string }>)[0].text).toMatch(
-      /No kshana projects found/,
+      /No dhee projects found/,
     );
   });
 
-  it('lists multiple .kshana folders alphabetically with project.json metadata', async () => {
+  it('lists multiple .dhee folders alphabetically with project.json metadata', async () => {
     // Create out-of-order to verify sort.
     makeProject('zeta', { title: 'Zeta' });
     makeProject('alpha', {
@@ -345,7 +345,7 @@ describe('pi-agent kshana_list_projects', () => {
       templateId: 'narrative',
     });
     makeProject('mid', { title: 'Middle One' });
-    const r = await executeTool(kshanaListProjects, {});
+    const r = await executeTool(dheeListProjects, {});
     const d = r.details as {
       count: number;
       projects: Array<{ name: string; title?: string; style?: string; phase?: string; templateId?: string; hasProjectJson: boolean }>;
@@ -372,7 +372,7 @@ describe('pi-agent kshana_list_projects', () => {
   it('flags bare folders (no project.json) without crashing', async () => {
     makeBareProjectDir('bare');
     makeProject('real', { title: 'Real' });
-    const r = await executeTool(kshanaListProjects, {});
+    const r = await executeTool(dheeListProjects, {});
     const d = r.details as {
       count: number;
       projects: Array<{ name: string; hasProjectJson: boolean }>;
@@ -389,10 +389,10 @@ describe('pi-agent kshana_list_projects', () => {
   });
 
   it('treats unparseable project.json as a bare folder (does not throw)', async () => {
-    const dir = join(projectsDir, 'corrupt.kshana');
+    const dir = join(projectsDir, 'corrupt.dhee');
     mkdirSync(dir);
     writeFileSync(join(dir, 'project.json'), '{ NOT VALID JSON');
-    const r = await executeTool(kshanaListProjects, {});
+    const r = await executeTool(dheeListProjects, {});
     const d = r.details as {
       count: number;
       projects: Array<{ name: string; hasProjectJson: boolean }>;
@@ -404,11 +404,11 @@ describe('pi-agent kshana_list_projects', () => {
     });
   });
 
-  it('ignores non-.kshana directories and files in projects dir', async () => {
+  it('ignores non-.dhee directories and files in projects dir', async () => {
     makeProject('keep', { title: 'Keep' });
-    mkdirSync(join(projectsDir, 'random_folder')); // not .kshana
+    mkdirSync(join(projectsDir, 'random_folder')); // not .dhee
     writeFileSync(join(projectsDir, 'a-file.txt'), 'hi');
-    const r = await executeTool(kshanaListProjects, {});
+    const r = await executeTool(dheeListProjects, {});
     const d = r.details as {
       count: number;
       projects: Array<{ name: string }>;
@@ -419,13 +419,13 @@ describe('pi-agent kshana_list_projects', () => {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// kshana_read_artifact
+// dhee_read_artifact
 // ────────────────────────────────────────────────────────────────────
 
-describe('pi-agent kshana_read_artifact', () => {
+describe('pi-agent dhee_read_artifact', () => {
   it('reads a top-level file and reports the resolved path + byte count', async () => {
     const dir = makeProject('p', { title: 'P' });
-    const r = await executeTool(kshanaReadArtifact, {
+    const r = await executeTool(dheeReadArtifact, {
       project: 'p',
       path: 'project.json',
     });
@@ -441,7 +441,7 @@ describe('pi-agent kshana_read_artifact', () => {
     const dir = makeProject('p', { title: 'P' });
     mkdirSync(join(dir, 'scenes'));
     writeFileSync(join(dir, 'scenes/scene_1.md'), '# Scene 1\nA dark alley.');
-    const r = await executeTool(kshanaReadArtifact, {
+    const r = await executeTool(dheeReadArtifact, {
       project: 'p',
       path: 'scenes/scene_1.md',
     });
@@ -456,7 +456,7 @@ describe('pi-agent kshana_read_artifact', () => {
     // is *plausibly* meaningful even though it would also be rejected.
     writeFileSync(join(projectsDir, 'secret.txt'), 'shhh');
     await expect(
-      executeTool(kshanaReadArtifact, {
+      executeTool(dheeReadArtifact, {
         project: 'p',
         path: '../secret.txt',
       }),
@@ -466,7 +466,7 @@ describe('pi-agent kshana_read_artifact', () => {
   it('rejects absolute paths outside the project folder', async () => {
     makeProject('p', { title: 'P' });
     await expect(
-      executeTool(kshanaReadArtifact, {
+      executeTool(dheeReadArtifact, {
         project: 'p',
         path: '/etc/passwd',
       }),
@@ -476,7 +476,7 @@ describe('pi-agent kshana_read_artifact', () => {
   it('throws ENOENT-style error when target file does not exist', async () => {
     makeProject('p', { title: 'P' });
     await expect(
-      executeTool(kshanaReadArtifact, {
+      executeTool(dheeReadArtifact, {
         project: 'p',
         path: 'does-not-exist.md',
       }),
@@ -486,7 +486,7 @@ describe('pi-agent kshana_read_artifact', () => {
   it('throws when the project folder itself is missing', async () => {
     // No makeProject call → project doesn't exist.
     await expect(
-      executeTool(kshanaReadArtifact, {
+      executeTool(dheeReadArtifact, {
         project: 'ghost',
         path: 'project.json',
       }),

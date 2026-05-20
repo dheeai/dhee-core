@@ -1,11 +1,11 @@
 /**
- * Pure invalidation op for `kshana_invalidate`.
+ * Pure invalidation op for `dhee_invalidate`.
  *
  * Walks the supplied id list, marks each existing node `pending` and
  * clears its execution metadata (outputPath, promptPath, completedAt,
  * startedAt, artifactId, error). Records the resulting set on
  * `executorState.lastInvalidatedIds` so a later
- * `kshana_run_to scope='last_invalidated'` can read it.
+ * `dhee_run_to scope='last_invalidated'` can read it.
  *
  * Cascade: by default, every transitive dependent (via each node's
  * `dependents` edge list) is also marked pending. Without this, a
@@ -17,7 +17,7 @@
  *
  * Mark-pending (not remove-and-rebuild) is the contract: invalidate
  * regenerates EXISTING nodes; the graph topology stays intact. The
- * remove-and-rebuild flavor of the old `kshana_reset` is reachable
+ * remove-and-rebuild flavor of the old `dhee_reset` is reachable
  * via a separate `clean: true` opt-in (TBD) when the user has
  * changed something upstream that might alter which per-items exist.
  *
@@ -230,7 +230,7 @@ export function applyInvalidation(
     }
   }
 
-  // Whitelist for `kshana_run_to scope='last_invalidated'`. Always
+  // Whitelist for `dhee_run_to scope='last_invalidated'`. Always
   // overwrite — most-recent-invalidate wins. Empty list when nothing
   // matched (rather than leaving a stale older list around). The
   // whitelist intentionally includes cascaded ids so the targeted

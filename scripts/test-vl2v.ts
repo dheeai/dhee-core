@@ -16,7 +16,7 @@ import { ComfyUIClient } from '../src/services/comfyui/index.js';
 import { parameterizeGeneric } from '../src/services/comfyui/WorkflowLoader.js';
 
 const PROJECT_NAME = process.argv[2] || 'noir_detective_story_setup-3';
-const PROJECT_DIR = join(process.cwd(), `${PROJECT_NAME}.kshana`);
+const PROJECT_DIR = join(process.cwd(), `${PROJECT_NAME}.dhee`);
 const OUTPUT_DIR = join(process.cwd(), 'test-output', 'vl2v-test');
 const WORKFLOW_PATH = join(process.cwd(), 'workflows', 'cloud', 'ltx23_vl2v_cloud.json');
 const MANIFEST_PATH = join(process.cwd(), 'workflows', 'cloud', 'ltx23_vl2v_cloud.manifest.json');

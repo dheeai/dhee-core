@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { inferShotFromPath } from "../lib/inferShotFromPath";
 
 describe("inferShotFromPath", () => {
-  it("parses scene/shot + frame from a kshana-style image filename", () => {
+  it("parses scene/shot + frame from a dhee-style image filename", () => {
     expect(inferShotFromPath("assets/images/s1shot1_first_frame_klein_aaa.png")).toEqual({
       scene: 1,
       shot: 1,
@@ -44,7 +44,7 @@ describe("inferShotFromPath", () => {
     });
   });
 
-  it("returns null for files that don't match the kshana grammar", () => {
+  it("returns null for files that don't match the dhee grammar", () => {
     expect(inferShotFromPath("assets/images/CharRef_kai_xyz.png")).toBeNull();
     expect(inferShotFromPath("assets/images/SettingRef_alley_abc.png")).toBeNull();
     expect(inferShotFromPath("assets/videos/final/final_video.mp4")).toBeNull();

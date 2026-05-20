@@ -1,5 +1,5 @@
 /**
- * Pure mapping from pi-coding-agent's session events to the kshana
+ * Pure mapping from pi-coding-agent's session events to the dhee
  * AgentEvent vocabulary that ConversationManager + the frontend expect.
  *
  * Extracted so the translation can be unit-tested without booting a real
@@ -15,7 +15,7 @@ import type {
   NotificationEvent,
 } from "../../events/events.js";
 
-export type TranslatedKshanaEvent =
+export type TranslateddheeEvent =
   | ToolCallEvent
   | ToolResultEvent
   | ToolStreamingEvent
@@ -34,8 +34,8 @@ export interface TranslationContext {
 }
 
 export interface TranslationResult {
-  /** kshana events to emit, in order. */
-  events: TranslatedKshanaEvent[];
+  /** dhee events to emit, in order. */
+  events: TranslateddheeEvent[];
   /** Updated context the caller should persist. */
   context: TranslationContext;
   /**

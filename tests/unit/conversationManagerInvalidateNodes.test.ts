@@ -32,20 +32,20 @@ let tmpRoot: string;
 let originalProjectsDir: string | undefined;
 
 beforeEach(() => {
-  tmpRoot = mkdtempSync(join(tmpdir(), 'kshana-invalidate-nodes-'));
-  originalProjectsDir = process.env['KSHANA_PROJECTS_DIR'];
-  process.env['KSHANA_PROJECTS_DIR'] = tmpRoot;
+  tmpRoot = mkdtempSync(join(tmpdir(), 'dhee-invalidate-nodes-'));
+  originalProjectsDir = process.env['dhee_PROJECTS_DIR'];
+  process.env['dhee_PROJECTS_DIR'] = tmpRoot;
 });
 
 afterEach(() => {
   if (originalProjectsDir === undefined)
-    delete process.env['KSHANA_PROJECTS_DIR'];
-  else process.env['KSHANA_PROJECTS_DIR'] = originalProjectsDir;
+    delete process.env['dhee_PROJECTS_DIR'];
+  else process.env['dhee_PROJECTS_DIR'] = originalProjectsDir;
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
 function setupProject(): { projectDir: string; projectJsonPath: string } {
-  const projectDir = join(tmpRoot, 'demo.kshana');
+  const projectDir = join(tmpRoot, 'demo.dhee');
   mkdirSync(join(projectDir, 'assets'), { recursive: true });
   const projectJsonPath = join(projectDir, 'project.json');
   writeFileSync(
@@ -214,7 +214,7 @@ describe('ConversationManager.invalidateNodes', () => {
   });
 
   it('throws when project.json has no executorState (empty graph)', async () => {
-    const projectDir = join(tmpRoot, 'empty.kshana');
+    const projectDir = join(tmpRoot, 'empty.dhee');
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(
       join(projectDir, 'project.json'),
@@ -234,11 +234,11 @@ describe('ConversationManager.invalidateNodes', () => {
   // accidentally hid a bug where invalidateNodes joined the basename
   // straight into nodePath.join, producing a relative `<name>/project.json`
   // that ENOENT'd against CWD.
-  it('resolves the project from a basename-style sessionContext (.kshana suffix)', async () => {
+  it('resolves the project from a basename-style sessionContext (.dhee suffix)', async () => {
     const { projectJsonPath } = setupProject();
     const cm = newCM();
-    // Mirror production: sessionContext.projectDir = "demo.kshana", not the abs path
-    const sessionId = attachConfiguredSession(cm, 'demo.kshana');
+    // Mirror production: sessionContext.projectDir = "demo.dhee", not the abs path
+    const sessionId = attachConfiguredSession(cm, 'demo.dhee');
 
     const result = await (cm as unknown as CMWithInvalidate).invalidateNodes(
       sessionId,
@@ -253,7 +253,7 @@ describe('ConversationManager.invalidateNodes', () => {
   });
 
   it('resolves the project from a basename-style sessionContext (bare name, desktop convention)', async () => {
-    // kshana-desktop's NewProjectDialog creates `<name>` (no suffix);
+    // dhee-desktop's NewProjectDialog creates `<name>` (no suffix);
     // resolveProjectDir's probe order falls through to that.
     const projectDir = join(tmpRoot, 'Baker and the Bee');
     mkdirSync(join(projectDir, 'assets'), { recursive: true });

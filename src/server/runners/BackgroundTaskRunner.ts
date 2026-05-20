@@ -1,8 +1,8 @@
 /**
  * Single-slot background task runner.
  *
- * Long-ish kshana operations (kshana_run_to, kshana_regen,
- * kshana_render_scene_bundle, kshana_audit_fidelity) take anywhere
+ * Long-ish dhee operations (dhee_run_to, dhee_regen,
+ * dhee_render_scene_bundle, dhee_audit_fidelity) take anywhere
  * from seconds to hours. If the agent dispatches them as ordinary
  * blocking tool calls, the chat session is starved while the work
  * runs. This runner detaches them: dispatch returns instantly with
@@ -82,7 +82,7 @@ export type DispatchResult =
 
 /**
  * Hooks the executor calls so the runner can forward progress to
- * subscribers (kshanaCoreManager → IPC → chat). They mirror the
+ * subscribers (dheeCoreManager → IPC → chat). They mirror the
  * shape of the existing runExecutor callbacks so wrapping tools is
  * trivial.
  */

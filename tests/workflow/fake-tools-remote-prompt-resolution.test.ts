@@ -100,13 +100,13 @@ describe('fake generation tools remote prompt resolution', () => {
   let projectRoot: string;
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'kshana-fake-tools-'));
-    projectRoot = join(tempRoot, 'remote-fake-test.kshana');
+    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'dhee-fake-tools-'));
+    projectRoot = join(tempRoot, 'remote-fake-test.dhee');
     setActiveProjectDir(projectRoot);
   });
 
   afterEach(() => {
-    setActiveProjectDir('default.kshana');
+    setActiveProjectDir('default.dhee');
     if (fs.existsSync(tempRoot)) {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

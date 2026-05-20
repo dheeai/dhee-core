@@ -63,9 +63,9 @@ function createProviderRegistry(): ProviderRegistry {
   }
 
   // Apply env var configuration
-  const imageProvider = process.env['KSHANA_IMAGE_PROVIDER'];
-  const editProvider = process.env['KSHANA_EDIT_PROVIDER'];
-  const videoProvider = process.env['KSHANA_VIDEO_PROVIDER'];
+  const imageProvider = process.env['dhee_IMAGE_PROVIDER'];
+  const editProvider = process.env['dhee_EDIT_PROVIDER'];
+  const videoProvider = process.env['dhee_VIDEO_PROVIDER'];
 
   if (imageProvider || editProvider || videoProvider) {
     registry.setConfig({

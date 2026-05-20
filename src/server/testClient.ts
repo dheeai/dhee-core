@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Simple WebSocket test client for kshana-core server.
+ * Simple WebSocket test client for dhee-core server.
  * Run with: npx tsx src/server/testClient.ts
  */
 import WebSocket from 'ws';
@@ -186,7 +186,7 @@ Commands:
 }
 
 // Main
-console.log('kshana-core WebSocket Test Client');
+console.log('dhee-core WebSocket Test Client');
 console.log('================================');
 
 const client = new TestClient();

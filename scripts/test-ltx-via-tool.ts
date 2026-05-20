@@ -13,11 +13,11 @@ import { getRegistry } from '../src/services/comfyui/WorkflowRegistry.js';
 
 async function main() {
   // Use a scene image from project assets
-  const testImage = path.resolve('.kshana/assets/images/96DPDyzl_Scene1_00132_.png');
+  const testImage = path.resolve('.dhee/assets/images/96DPDyzl_Scene1_00132_.png');
   if (!fs.existsSync(testImage)) {
     console.error(`Test image not found: ${testImage}`);
-    console.error('Available images in .kshana/assets/images/:');
-    const imagesDir = path.resolve('.kshana/assets/images');
+    console.error('Available images in .dhee/assets/images/:');
+    const imagesDir = path.resolve('.dhee/assets/images');
     if (fs.existsSync(imagesDir)) {
       fs.readdirSync(imagesDir).filter(f => f.endsWith('.png')).forEach(f => console.error(`  ${f}`));
     }
@@ -50,7 +50,7 @@ async function main() {
   console.log(`       Display: ${workflowMetadata.displayName}`);
 
   // Step 2: Create client and upload image
-  const assetsDir = path.resolve('.kshana/assets/videos');
+  const assetsDir = path.resolve('.dhee/assets/videos');
   if (!fs.existsSync(assetsDir)) {
     fs.mkdirSync(assetsDir, { recursive: true });
   }

@@ -89,7 +89,7 @@ export async function describeImageWithVLM(
   const fn = describer ?? defaultDescriber();
   if (!fn) {
     if (!warned) {
-      // eslint-disable-next-line no-console
+       
       console.warn(
         "[VLM] VLM_PROVIDER / VLM_API_KEY / VLM_MODEL not set — VLM calls will be skipped. The pi-agent oversight loop runs without vision feedback for asset events.",
       );

@@ -27,11 +27,11 @@ function failure(message: string): { content: { type: "text"; text: string }[]; 
   };
 }
 
-export const kshanaAnalyzeComfyWorkflow = defineTool({
-  name: "kshana_analyze_comfy_workflow",
-  label: "kshana analyze-comfy-workflow",
+export const dheeAnalyzeComfyWorkflow = defineTool({
+  name: "dhee_analyze_comfy_workflow",
+  label: "dhee analyze-comfy-workflow",
   description:
-    "LLM-analyze a validated ComfyUI workflow. Returns a suggested display name, pipeline type, parameter mappings (nodeId → standard input), and LoRA trigger keywords. Run AFTER kshana_validate_comfy_workflow succeeds. If the LLM is unavailable (offline / no API key), returns parsed nodes with `llmFailed=true` so you can fall back to asking the user to map nodes manually.",
+    "LLM-analyze a validated ComfyUI workflow. Returns a suggested display name, pipeline type, parameter mappings (nodeId → standard input), and LoRA trigger keywords. Run AFTER dhee_validate_comfy_workflow succeeds. If the LLM is unavailable (offline / no API key), returns parsed nodes with `llmFailed=true` so you can fall back to asking the user to map nodes manually.",
   parameters: Params,
   async execute(_id, params: Static<typeof Params>) {
     // Build a router. If env doesn't enable structured purposes, use a

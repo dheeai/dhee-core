@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { inferShotFromPath } from '../lib/inferShotFromPath'
 
 interface Props {
-  /** Path relative to <project>.kshana/. URL is built as /api/v1/assets/<project>/<path>. */
+  /** Path relative to <project>.dhee/. URL is built as /api/v1/assets/<project>/<path>. */
   path: string
-  /** Project name (no .kshana suffix). */
+  /** Project name (no .dhee suffix). */
   project: string
   /** image | video — picks <img> vs <video controls>. */
   kind: 'image' | 'video'

@@ -2,7 +2,7 @@
  * API Key Authentication for remote mode.
  *
  * In remote mode, clients must provide a valid API key to connect.
- * Keys are loaded from the KSHANA_API_KEYS environment variable
+ * Keys are loaded from the dhee_API_KEYS environment variable
  * (comma-separated) or from a config file.
  *
  * Co-located mode (localhost) skips auth entirely.
@@ -23,8 +23,8 @@ export interface ApiKeyEntry {
 export function loadApiKeys(): ApiKeyEntry[] {
   const keys: ApiKeyEntry[] = [];
 
-  // 1. Environment variable: KSHANA_API_KEYS=key1:client1,key2:client2
-  const envKeys = process.env['KSHANA_API_KEYS'];
+  // 1. Environment variable: dhee_API_KEYS=key1:client1,key2:client2
+  const envKeys = process.env['dhee_API_KEYS'];
   if (envKeys) {
     for (const entry of envKeys.split(',')) {
       const trimmed = entry.trim();
@@ -40,8 +40,8 @@ export function loadApiKeys(): ApiKeyEntry[] {
     }
   }
 
-  // 2. Config file: .kshana-keys.json
-  const configFile = join(process.cwd(), '.kshana-keys.json');
+  // 2. Config file: .dhee-keys.json
+  const configFile = join(process.cwd(), '.dhee-keys.json');
   if (existsSync(configFile)) {
     try {
       const content = readFileSync(configFile, 'utf-8');
@@ -54,7 +54,7 @@ export function loadApiKeys(): ApiKeyEntry[] {
         }
       }
     } catch {
-      console.warn('Warning: Could not parse .kshana-keys.json');
+      console.warn('Warning: Could not parse .dhee-keys.json');
     }
   }
 

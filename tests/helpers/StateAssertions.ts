@@ -306,7 +306,7 @@ export class StateAssertions {
       check: () => {
         const { existsSync } = require('node:fs');
         const { join } = require('node:path');
-        const fullPath = join(process.cwd(), '.kshana', relativePath);
+        const fullPath = join(process.cwd(), '.dhee', relativePath);
         return existsSync(fullPath);
       },
       message: `Expected file to exist: ${relativePath}`,
@@ -322,7 +322,7 @@ export class StateAssertions {
       check: () => {
         const { readFileSync, existsSync } = require('node:fs');
         const { join } = require('node:path');
-        const fullPath = join(process.cwd(), '.kshana', relativePath);
+        const fullPath = join(process.cwd(), '.dhee', relativePath);
 
         if (!existsSync(fullPath)) {
           return false;

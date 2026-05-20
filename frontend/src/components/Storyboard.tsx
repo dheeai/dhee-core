@@ -37,7 +37,7 @@ function itemIdToSceneShot(itemId: string | undefined): [number, number] | null 
   if (!itemId) return null
   const m = itemId.match(/^scene_(\d+)_shot_(\d+)$/)
   if (!m) return null
-  return [parseInt(m[1]!, 10), parseInt(m[2]!, 10)]
+  return [parseInt(m[1], 10), parseInt(m[2], 10)]
 }
 
 export function Storyboard({ onRedoNode, onRedoPrompt, onRedoNodeWithPrompt }: StoryboardProps) {

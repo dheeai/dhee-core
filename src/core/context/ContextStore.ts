@@ -29,7 +29,7 @@ export interface StoredContext extends StoredContextMeta {
 }
 
 // NOTE: Context directory is no longer used
-// Agents use .kshana/plans/, .kshana/characters/, etc. directly
+// Agents use .dhee/plans/, .dhee/characters/, etc. directly
 
 /**
  * Persistent context store for large content.
@@ -95,7 +95,7 @@ export class ContextStore {
    * DEPRECATED: File-based context storage has been replaced with dynamic file discovery.
    *
    * Agents now use:
-   * - list_project_files() to discover what content exists in .kshana/
+   * - list_project_files() to discover what content exists in .dhee/
    * - read_file() to read specific content when needed
    *
    * This method is kept for API compatibility but does NOT write to disk.

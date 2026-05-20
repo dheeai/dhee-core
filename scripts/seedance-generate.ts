@@ -4,7 +4,7 @@
  * SAME motion prompt and SAME first-frame image as an existing LTX shot,
  * so the two can be compared side-by-side by eye.
  *
- * Defaults target noir_detective_story_setup-3.kshana scene 1 shot 1, but
+ * Defaults target noir_detective_story_setup-3.dhee scene 1 shot 1, but
  * any prompt/image pair can be passed via --prompt and --image.
  *
  * Usage:
@@ -27,13 +27,13 @@ const DEFAULTS = {
     'Vikram at table, surges to his feet shoving chair backward scraping across floor, quick upward tilt from low angle, flickering torch atmosphere, cinematic tone, emphasis on rising motion and chair slide',
   image: resolve(
     REPO_ROOT,
-    'noir_detective_story_setup-3.kshana/assets/images/UTQTQQa-_0f8d340be31e85cd5953fac6cc48b84fe592a8699e9b519d37dfb1f5518b8226.png',
+    'noir_detective_story_setup-3.dhee/assets/images/UTQTQQa-_0f8d340be31e85cd5953fac6cc48b84fe592a8699e9b519d37dfb1f5518b8226.png',
   ),
   ltxVideo: resolve(
     REPO_ROOT,
-    'noir_detective_story_setup-3.kshana/assets/videos/shots/fmhuULCN_963b17a30936a2041a631c2706732d3bb4b8d1c52ea05650c56e91761fa710ea.mp4',
+    'noir_detective_story_setup-3.dhee/assets/videos/shots/fmhuULCN_963b17a30936a2041a631c2706732d3bb4b8d1c52ea05650c56e91761fa710ea.mp4',
   ),
-  outDir: resolve(REPO_ROOT, 'noir_detective_story_setup-3.kshana/assets/videos/compare_seedance_vs_ltx'),
+  outDir: resolve(REPO_ROOT, 'noir_detective_story_setup-3.dhee/assets/videos/compare_seedance_vs_ltx'),
   model: 'bytedance/seedance-2.0',
 };
 

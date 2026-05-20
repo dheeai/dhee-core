@@ -144,7 +144,7 @@ describe('agentOps.overrideNode', () => {
   let projectDir: string;
 
   beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), 'kshana-override-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'dhee-override-'));
     mkdirSync(projectDir, { recursive: true });
   });
 
@@ -193,7 +193,7 @@ describe('agentOps.inspectNode', () => {
   let projectDir: string;
 
   beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), 'kshana-inspect-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'dhee-inspect-'));
   });
 
   afterEach(() => {

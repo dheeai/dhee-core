@@ -9,7 +9,7 @@
  * - Other existing inputs
  */
 
-import { LLMClient } from '../llm/LLMClient.js';
+import type { LLMClient } from '../llm/LLMClient.js';
 import type {
   InputMediaType,
   InputPurpose,

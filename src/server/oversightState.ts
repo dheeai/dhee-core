@@ -30,7 +30,7 @@ export interface OversightState {
   vlmJudge: boolean;
 }
 
-const SINGLETON_KEY = "__kshana_oversight_state__";
+const SINGLETON_KEY = "__dhee_oversight_state__";
 
 interface Holder {
   [SINGLETON_KEY]?: OversightState;

@@ -23,7 +23,7 @@ function main(): void {
     process.exit(argv[0] === '--help' || argv[0] === '-h' ? 0 : 1);
   }
   const projectName = argv[0]!;
-  const projectDir = resolve(`${projectName}.kshana`);
+  const projectDir = resolve(`${projectName}.dhee`);
   if (!existsSync(projectDir)) {
     console.error(`Project not found: ${projectDir}`);
     process.exit(1);

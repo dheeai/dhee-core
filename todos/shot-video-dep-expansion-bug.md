@@ -88,7 +88,7 @@ Then inspect:
 
 ```
 jq '.executorState.nodes."shot_video:scene_1_shot_1".dependencies' \
-  sun_hadnt_yet_cleared-2.kshana/project.json
+  sun_hadnt_yet_cleared-2.dhee/project.json
 ```
 
 Expected: `["shot_image:scene_1_shot_1", "shot_motion_directive:scene_1_shot_1"]` (plus optional prev-shot-video ref). Anything else = bug still present.

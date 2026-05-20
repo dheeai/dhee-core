@@ -11,7 +11,7 @@ Generate infographics for each placement in `agent/content/infographic-placement
    - Update `remotion-infographics/src/index.tsx` to register all components
    - Rebuild the Remotion bundle
    - Render each placement as an infographic MP4 clip
-   - Save outputs to `.kshana/agent/infographic-placements/` and register in the manifest
+   - Save outputs to `.dhee/agent/infographic-placements/` and register in the manifest
 3. After the tool completes, mark phase complete and transition.
 
 **STEP 1: Call generate_all_infographics**
@@ -45,5 +45,5 @@ update_project(
 - Use `generate_all_infographics` for batch generation.
 - The Remotion sub-agent (LLM) generates complete component code for each placement, deciding animations, layout, styling, and visual elements autonomously.
 - Generated components are written to `remotion-infographics/src/components/Infographic{N}.tsx` where N is the placement number.
-- Generated infographic MP4s are stored in `.kshana/agent/infographic-placements/` and registered in the manifest.
+- Generated infographic MP4s are stored in `.dhee/agent/infographic-placements/` and registered in the manifest.
 - If there are no infographic placements, the tool may return successfully with zero generated; still mark phase complete and transition.

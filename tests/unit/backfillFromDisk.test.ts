@@ -30,7 +30,7 @@ function touch(rel: string): void {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "kshana-backfill-disk-"));
+  dir = mkdtempSync(join(tmpdir(), "dhee-backfill-disk-"));
   mkdirSync(join(dir, "assets", "images"), { recursive: true });
   mkdirSync(join(dir, "assets", "videos", "shots"), { recursive: true });
   mkdirSync(join(dir, "assets", "videos", "final"), { recursive: true });

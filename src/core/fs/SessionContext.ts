@@ -4,7 +4,7 @@
  * Replaces the global activeProjectDir singleton with per-session state.
  * Each WebSocket session (or CLI session) gets its own context containing:
  * - sessionId: Unique identifier
- * - projectDir: The active project directory name (e.g., "story.kshana")
+ * - projectDir: The active project directory name (e.g., "story.dhee")
  * - fs: The IFileSystem implementation for this session
  * - mode: Whether this is a local or remote session
  *
@@ -38,7 +38,7 @@ const defaultLocalFs = new LocalFileSystem();
 /**
  * Default project directory (backward-compatible with the old global).
  */
-let defaultProjectDir = 'default.kshana';
+let defaultProjectDir = 'default.dhee';
 
 /**
  * Get the current session context.

@@ -14,9 +14,9 @@ export interface Details {
   count: number;
 }
 
-export const kshanaListComfyWorkflows = defineTool({
-  name: "kshana_list_comfy_workflows",
-  label: "kshana list-comfy-workflows",
+export const dheeListComfyWorkflows = defineTool({
+  name: "dhee_list_comfy_workflows",
+  label: "dhee list-comfy-workflows",
   description:
     "List all ComfyUI workflows the registry knows about. Returns id, display name, pipeline, and built-in/active flags for each. Use to confirm a save succeeded or to show the user what's installed.",
   parameters: Params,

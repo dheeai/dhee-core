@@ -2,7 +2,7 @@
  * Tests for the embed barrels — `src/server/manager.ts`,
  * `src/server/runners/index.ts`, `src/agent/pi/index.ts`.
  *
- * Background: kshana-desktop wants to `require('kshana-core/manager')`
+ * Background: dhee-desktop wants to `require('dhee-core/manager')`
  * directly from its Electron main process, without dragging in the
  * Fastify server. Each barrel re-exports the in-process classes /
  * helpers a host needs, and crucially does NOT touch Fastify in its

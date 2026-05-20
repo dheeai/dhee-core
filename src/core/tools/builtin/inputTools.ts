@@ -459,7 +459,7 @@ Returns the appropriate artifact path based on the reference type:
 
       // Determine reference path based on input type and reference type
       let referencePath: string | undefined;
-      let referenceType_: string = referenceType;
+      const referenceType_: string = referenceType;
 
       if (input.mediaType === 'image') {
         referencePath = input.processing.localPath;

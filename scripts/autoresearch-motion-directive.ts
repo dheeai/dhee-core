@@ -18,7 +18,7 @@ import { execSync } from 'child_process';
 import { LLMClient } from '../src/core/llm/index.js';
 
 const MAX_ITERATIONS = parseInt(process.argv[2] || '3', 10);
-const PROJECT_DIR = process.argv[3] || 'lazarus_drive.kshana';
+const PROJECT_DIR = process.argv[3] || 'lazarus_drive.dhee';
 const GUIDE_PATH = 'prompts/skills/defaults/motion_directive_guide.md';
 const RUBRIC_PATH = 'tests/autoresearch/rubrics/motion-directive-binary.json';
 const OUTPUT_DIR = 'test-output/autoresearch-motion-directive';

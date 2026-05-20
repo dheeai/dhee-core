@@ -1,6 +1,6 @@
-export { kshanaValidateComfyWorkflow } from "./validateWorkflow.js";
-export { kshanaAnalyzeComfyWorkflow } from "./analyzeWorkflow.js";
-export { kshanaSaveComfyWorkflow } from "./saveWorkflow.js";
-export { kshanaListComfyWorkflows } from "./listWorkflows.js";
-export { kshanaUpdateComfyWorkflow } from "./updateWorkflow.js";
-export { kshanaDeleteComfyWorkflow } from "./deleteWorkflow.js";
+export { dheeValidateComfyWorkflow } from "./validateWorkflow.js";
+export { dheeAnalyzeComfyWorkflow } from "./analyzeWorkflow.js";
+export { dheeSaveComfyWorkflow } from "./saveWorkflow.js";
+export { dheeListComfyWorkflows } from "./listWorkflows.js";
+export { dheeUpdateComfyWorkflow } from "./updateWorkflow.js";
+export { dheeDeleteComfyWorkflow } from "./deleteWorkflow.js";

@@ -42,7 +42,7 @@ export interface AssemblyConfig {
   preset?: string;
   timeoutMs?: number;
   /** Watermark text drawn in the bottom-right corner. Defaults to env
-   * `KSHANA_WATERMARK` or `'kshana-core'`. Pass an empty string to disable. */
+   * `dhee_WATERMARK` or `'dhee-core'`. Pass an empty string to disable. */
   watermark?: string;
 }
 
@@ -233,7 +233,7 @@ export function resolveSegmentFilePaths(
         if (!absolutePath) {
           const bundles = manifest.filter(a => {
             if (a.type !== 'scene_video') return false;
-            const meta = (a.metadata ?? {}) as Record<string, unknown>;
+            const meta = (a.metadata ?? {});
             return meta['isBundle'] === true && meta['sceneNumber'] === segmentNum;
           });
           if (bundles.length > 0) {
@@ -243,7 +243,7 @@ export function resolveSegmentFilePaths(
             // metadata) implicitly cover everything in the scene.
             const matchingChunk = bundles.find(a => {
               if (shotNum === undefined) return true;
-              const meta = (a.metadata ?? {}) as Record<string, unknown>;
+              const meta = (a.metadata ?? {});
               const covers = meta['coversShots'];
               if (!Array.isArray(covers)) return true;
               return covers.includes(shotNum);
@@ -416,7 +416,7 @@ export function mobileCompatibleEncodeArgs(): string[] {
  * Regenerate with `scripts/render-watermark.ts` if the asset is missing.
  */
 const WATERMARK_PNG_CANDIDATES = [
-  'assets/watermark_kshana.png',
+  'assets/watermark_dhee.png',
   'assets/watermark.png',
 ];
 
@@ -445,11 +445,11 @@ function findKshanaCoreRootFromSource(): string | null {
  * Resolve the watermark PNG path (or `null` if none of the candidates
  * exist). Paths are checked in this order:
  *   1. relative to the current working directory
- *   2. relative to the kshana-core package root (walked up from this
+ *   2. relative to the dhee-core package root (walked up from this
  *      source file's location)
  *
  * The second tier matters in the desktop runtime: the host process's
- * cwd is `kshana-desktop/`, which doesn't ship `assets/watermark_*.png`.
+ * cwd is `dhee-desktop/`, which doesn't ship `assets/watermark_*.png`.
  * Without this fallback the watermark silently disappears from every
  * assembled final video.
  */
@@ -755,20 +755,20 @@ export async function assembleVideos(
     );
   }
 
-  // Watermark: composite a pre-rendered PNG (Apple Chancery 'kshana') onto
+  // Watermark: composite a pre-rendered PNG (Apple Chancery 'dhee') onto
   // the bottom-right. We use overlay (always available) instead of drawtext
   // (often missing on Homebrew/system FFmpeg builds because libfreetype is
-  // not enabled by default). Set KSHANA_WATERMARK=off to disable, or supply
+  // not enabled by default). Set dhee_WATERMARK=off to disable, or supply
   // `watermark: ''` in config.
   const watermarkDisabled =
-    config.watermark === '' || process.env['KSHANA_WATERMARK'] === 'off';
+    config.watermark === '' || process.env['dhee_WATERMARK'] === 'off';
   const watermarkPath = watermarkDisabled ? null : resolveWatermarkPath();
   if (watermarkPath) {
     // Append PNG as an extra -i input; track its index for the filter.
     const watermarkInputIdx = inputArgs.filter(a => a === '-i').length;
     inputArgs.push('-i', watermarkPath);
     filterParts.push(buildWatermarkOverlayFilter('concated', watermarkInputIdx, 'outv', height));
-  } else if (config.watermark !== '' && process.env['KSHANA_WATERMARK'] !== 'off') {
+  } else if (config.watermark !== '' && process.env['dhee_WATERMARK'] !== 'off') {
     // No watermark asset found — log a hint but don't fail the assembly.
     // We still need to alias `concated` to `outv` if no watermark was applied.
     filterParts.push(`[concated]copy[outv]`);

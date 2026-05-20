@@ -76,9 +76,9 @@ function Md({ children, className }: { children: string; className?: string }) {
 /** Parse progress from streaming text like "Step 2/3 (67%)" */
 function parseProgress(text: string): { step: number; total: number; percent: number } | null {
   const match = text.match(/(\d+)\s*\/\s*(\d+)\s*\((\d+)%\)/)
-  if (match) return { step: parseInt(match[1]!), total: parseInt(match[2]!), percent: parseInt(match[3]!) }
+  if (match) return { step: parseInt(match[1]), total: parseInt(match[2]), percent: parseInt(match[3]) }
   const pctMatch = text.match(/(\d+)%/)
-  if (pctMatch) return { step: 0, total: 0, percent: parseInt(pctMatch[1]!) }
+  if (pctMatch) return { step: 0, total: 0, percent: parseInt(pctMatch[1]) }
   return null
 }
 
@@ -183,7 +183,7 @@ function StructuredContentCard({ content }: { content: string }) {
     const fieldRegex = /\*\*(.+?):\*\*\s*(.+)/g
     let match
     while ((match = fieldRegex.exec(firstSection.body)) !== null) {
-      keyFields.push({ label: match[1]!, value: match[2]! })
+      keyFields.push({ label: match[1], value: match[2] })
     }
   }
 
@@ -249,7 +249,7 @@ function separateThinking(text: string): { thinking: string; content: string } {
   const thinkRegex = /<thinking>([\s\S]*?)<\/thinking>/g
   let match
   while ((match = thinkRegex.exec(text)) !== null) {
-    thinking += match[1]!
+    thinking += match[1]
   }
 
   // Remove thinking blocks from content
@@ -369,7 +369,7 @@ function ContentBody({ args, streamingContent, toolName }: { args: Record<string
           )}
         </div>
       ) : hasContent && isStructured ? (
-        <StructuredContentCard content={streamingContent!} />
+        <StructuredContentCard content={streamingContent} />
       ) : streamingContent ? (
         <div className="px-3 pb-2 max-h-72 overflow-y-auto">
           <Md className="text-xs">{streamingContent}</Md>
@@ -575,11 +575,11 @@ export function ToolCallCard({ toolCall, onEditPrompt, onRedoNode }: ToolCallCar
     return () => clearInterval(interval)
   }, [status])
 
-  // kshana_* tools collapse by default — the agent narrates results in chat,
+  // dhee_* tools collapse by default — the agent narrates results in chat,
   // so the JSON dump is duplication. Click the header to expand for details.
   // Other tools keep their legacy behavior (always expanded).
-  const isKshanaTool = toolName.startsWith('kshana_')
-  const [expanded, setExpanded] = useState<boolean>(!isKshanaTool)
+  const isdheeTool = toolName.startsWith('dhee_')
+  const [expanded, setExpanded] = useState<boolean>(!isdheeTool)
 
   const elapsed = status === 'executing' ? Math.round((Date.now() - startTime) / 1000) : undefined
   const duration = toolCall.duration ? Math.round((toolCall.duration - startTime) / 1000) : undefined
@@ -648,10 +648,10 @@ export function ToolCallCard({ toolCall, onEditPrompt, onRedoNode }: ToolCallCar
   // For content gen and assembly, streaming is handled in the body
   const showSeparateStreaming = !isContentGen && toolName !== 'assemble_final_video' && toolName !== 'extract_collections' && toolName !== 'scene_state'
 
-  // Header controls — when collapsed (kshana_* default), the whole header
+  // Header controls — when collapsed (dhee_* default), the whole header
   // is a button that expands the body. Always render the header + media so
   // image/video previews remain visible without clicking through.
-  const isCollapsible = isKshanaTool
+  const isCollapsible = isdheeTool
   const headerClass = `flex items-center justify-between px-3 py-2 ${expanded ? 'border-b border-line-soft' : ''} ${isCollapsible ? 'cursor-pointer select-none hover:bg-graphite-300/40' : ''}`
 
   return (

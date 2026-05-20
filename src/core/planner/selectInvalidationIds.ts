@@ -1,5 +1,5 @@
 /**
- * Pure selector for the unified `kshana_invalidate` operation.
+ * Pure selector for the unified `dhee_invalidate` operation.
  *
  * Three selection modes — `node`, `type`, `stage` — converge on a flat
  * list of node ids that the invalidate op then marks pending (or
@@ -11,13 +11,13 @@
  *   - `type`  — "redo every shot prompt across the project"
  *                (the type-level gap previously only filled by reset)
  *   - `stage` — "redo this stage and everything downstream by type"
- *                (the existing kshana_reset behavior — preserved)
+ *                (the existing dhee_reset behavior — preserved)
  *
  * The output of this function feeds two consumers:
  *   1. The invalidate op itself, which decides whether to mark each
  *      id pending or remove it (per-item nodes under stage mode → remove).
  *   2. `project.executorState.lastInvalidatedIds` — persisted so a
- *      later `kshana_run_to scope='last_invalidated'` runs only this
+ *      later `dhee_run_to scope='last_invalidated'` runs only this
  *      whitelist instead of every pending node in the graph.
  */
 import type { ExecutorState } from "../project/projectTypes.js";

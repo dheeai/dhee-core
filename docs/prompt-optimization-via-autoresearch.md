@@ -1,7 +1,7 @@
 # Optimizing a prompt with autoresearch + rubrics
 
 A generic recipe for hill-climbing any prompt that drives a stochastic
-LLM call. Pattern is what kshana-core uses for character image,
+LLM call. Pattern is what dhee-core uses for character image,
 setting image, scene breakdown, motion directives, etc. — see
 `scripts/autoresearch-*.ts` for working examples.
 
@@ -43,7 +43,7 @@ budget — whichever comes first.
 
 Identify the **single file** you want to optimize. It must be a static
 piece of text the runtime loads (not a string built by code at call
-time). In kshana-core these live under `prompts/skills/defaults/`,
+time). In dhee-core these live under `prompts/skills/defaults/`,
 `prompts/system/`, or `prompts/templates/<workflow>/`.
 
 Constraints:
@@ -63,7 +63,7 @@ first if that's the case.
 ## Step 2 — collect 4–6 real test cases
 
 Test cases are **real inputs the prompt will see in production** —
-not toy examples. Pull from existing `*.kshana` projects. Diversity
+not toy examples. Pull from existing `*.dhee` projects. Diversity
 beats volume: 4 cases that span genres / tones / styles uncover more
 failures than 20 near-duplicates.
 
@@ -281,7 +281,7 @@ When you're happy:
 ## Layout cheat-sheet
 
 ```
-kshana-core/
+dhee-core/
 ├── prompts/skills/defaults/<your-prompt>.md       ← target file (modified by autoresearch)
 ├── tests/autoresearch/rubrics/<your-rubric>.json  ← rubric spec
 ├── scripts/autoresearch-<thing>.ts                ← iteration loop

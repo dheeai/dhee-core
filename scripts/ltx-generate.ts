@@ -26,13 +26,13 @@ const DEFAULTS = {
     'Vikram at table, surges to his feet shoving chair backward scraping across floor, quick upward tilt from low angle, flickering torch atmosphere, cinematic tone, emphasis on rising motion and chair slide',
   image: resolve(
     REPO_ROOT,
-    'noir_detective_story_setup-3.kshana/assets/images/3EM5uGKF_4a8e0293e3a8d48aab3b3ff7da43b6792fd9c5b05f45aa595e116657ad4e8068.png',
+    'noir_detective_story_setup-3.dhee/assets/images/3EM5uGKF_4a8e0293e3a8d48aab3b3ff7da43b6792fd9c5b05f45aa595e116657ad4e8068.png',
   ),
   lastFrame: resolve(
     REPO_ROOT,
-    'noir_detective_story_setup-3.kshana/assets/images/jEVt3EYI_c480c09fc914c21debde5f83d54b44daed83fa98f723b8e5e4e4173aca6b1c6d.png',
+    'noir_detective_story_setup-3.dhee/assets/images/jEVt3EYI_c480c09fc914c21debde5f83d54b44daed83fa98f723b8e5e4e4173aca6b1c6d.png',
   ),
-  outDir: resolve(REPO_ROOT, 'noir_detective_story_setup-3.kshana/assets/videos/compare_seedance_vs_ltx'),
+  outDir: resolve(REPO_ROOT, 'noir_detective_story_setup-3.dhee/assets/videos/compare_seedance_vs_ltx'),
   outName: 'ltx_rerun_scene_1_shot_3.mp4',
   duration: 4,
   width: 848,

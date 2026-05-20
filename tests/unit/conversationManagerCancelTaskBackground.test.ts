@@ -4,7 +4,7 @@
  * the executor kept ploughing through every shot in the project.
  *
  * Root cause: `ConversationManager.cancelTask(sessionId)` only stopped
- * the pi-agent's own loop (`session.agent.stop()`) — but kshana_run_to
+ * the pi-agent's own loop (`session.agent.stop()`) — but dhee_run_to
  * is dispatched OUT of the chat's call stack into the
  * BackgroundTaskRunner. The runner has its own AbortController.
  * Stopping the agent left the runner alone, so the actual heavy work
@@ -26,7 +26,7 @@ import {
 } from '../../src/server/runners/BackgroundTaskRunner.js';
 import { __resetBackgroundTaskRunnerForTesting } from '../../src/server/runners/backgroundTaskRunnerSingleton.js';
 
-const SINGLETON_KEY = '__kshana_background_task_runner__';
+const SINGLETON_KEY = '__dhee_background_task_runner__';
 
 function installRunner(runner: BackgroundTaskRunner): void {
   (globalThis as unknown as Record<string, unknown>)[SINGLETON_KEY] = runner;
@@ -133,7 +133,7 @@ describe('ConversationManager.cancelTask — cancels dispatched background tasks
     internalSession.sessionContext = {
       sessionId,
       mode: 'local',
-      projectDir: 'ambient.kshana',
+      projectDir: 'ambient.dhee',
     } as never;
     internalSession.initialized = true;
     return internalSession;

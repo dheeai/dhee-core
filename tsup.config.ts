@@ -4,7 +4,7 @@ export default defineConfig([
   {
     entry: {
       index: 'src/index.ts',
-      // Embed entries — kshana-desktop (and other Electron hosts) load
+      // Embed entries — dhee-desktop (and other Electron hosts) load
       // these as ESM via dynamic `import()`. They MUST be ESM because
       // their transitive deps (`@mariozechner/pi-coding-agent`, `pi-ai`)
       // are ESM-only packages with no CJS `require` exports.
@@ -25,7 +25,7 @@ export default defineConfig([
     // a "Dynamic require not supported" stub. The banner reinstates a
     // working `require` via `createRequire(import.meta.url)`.
     banner: {
-      js: "import { createRequire as __kshana_createRequire } from 'module'; const require = __kshana_createRequire(import.meta.url);",
+      js: "import { createRequire as __dhee_createRequire } from 'module'; const require = __dhee_createRequire(import.meta.url);",
     },
   },
   {

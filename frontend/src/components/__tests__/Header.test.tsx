@@ -12,7 +12,7 @@ describe('Header', () => {
 
   it('renders brand name', () => {
     renderWithState(<Header {...defaultProps} />)
-    expect(screen.getByText('Kshana')).toBeInTheDocument()
+    expect(screen.getByText('dhee')).toBeInTheDocument()
   })
 
   it('shows selected project name', () => {

@@ -19,10 +19,10 @@ import { registerActiveJob, unregisterActiveJob, type CancellableComfyJob } from
 // Debug logging to file instead of console to avoid polluting Ink UI.
 //
 // Path is resolved per-call via getLogsDir() so a host that calls
-// setLogsDir after import (e.g. kshana-desktop in a packaged build,
+// setLogsDir after import (e.g. dhee-desktop in a packaged build,
 // pointing at app.getPath('userData')/logs) still wins. The previous
-// implementation anchored on findKshanaCoreRoot at module load — fine
-// for dev, broken in an asar bundle where the kshana-core package.json
+// implementation anchored on finddheeCoreRoot at module load — fine
+// for dev, broken in an asar bundle where the dhee-core package.json
 // lives in a read-only path.
 function debugLog(message: string): void {
   try {
@@ -45,7 +45,7 @@ function debugLog(message: string): void {
  */
 function enrichFetchError(err: unknown, url: string, method: string): Error {
   const cause = (err as { cause?: unknown })?.cause;
-  const causeCode = (cause as unknown as { code?: unknown } | null)?.code;
+  const causeCode = (cause as { code?: unknown } | null)?.code;
   const causeMsg =
     cause instanceof Error
       ? `${cause.name}: ${cause.message}${typeof causeCode === 'string' ? ` [${causeCode}]` : ''}`
@@ -73,6 +73,44 @@ export interface ComfyUIClientConfig {
 
 export interface QueueWorkflowOptions {
   workflowId?: string;
+  /**
+   * Optional cancellation signal. When fired mid-`queueAndWaitWS`, the
+   * client closes the active WebSocket, clears timers, and rejects the
+   * pending promise with `Error('aborted')`. Without this, callers
+   * blocked on a long-running ComfyUI workflow had no way to bail —
+   * stop() was advisory and the WS only exited on a server-side
+   * terminal frame, which often never arrived (502s, hung upstream).
+   *
+   * Independent of `ExecutorAgent.stop()`'s `interrupt()` RPC: that
+   * tells the ComfyUI server to abort, this tells the client to stop
+   * waiting. Both fire in parallel during a cancel.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * Module-level registry of active WebSocket workflows.
+ *
+ * `abortAllInFlightWorkflows()` lets a caller (typically
+ * `ExecutorAgent.stop()`) tear them down without having to thread
+ * AbortSignal through every workflow call site. Each `queueAndWaitWS`
+ * registers its WS on entry and unregisters in cleanup.
+ */
+const INFLIGHT_WS_REGISTRY = new Set<{
+  close: () => void;
+  abort: (reason: string) => void;
+}>();
+
+export function abortAllInFlightWorkflows(reason = 'aborted'): number {
+  const count = INFLIGHT_WS_REGISTRY.size;
+  for (const handle of [...INFLIGHT_WS_REGISTRY]) {
+    try {
+      handle.abort(reason);
+    } catch {
+      /* best-effort */
+    }
+  }
+  return count;
 }
 
 /**
@@ -81,7 +119,7 @@ export interface QueueWorkflowOptions {
  *
  * COMFYUI_BASE_URL is the canonical endpoint for both modes.
  * Local: COMFY_MODE=local/default, COMFYUI_BASE_URL defaults to localhost:8188.
- * Cloud: COMFY_MODE=cloud, COMFYUI_BASE_URL points at the Kshana Cloud route
+ * Cloud: COMFY_MODE=cloud, COMFYUI_BASE_URL points at the dhee Cloud route
  * or direct Comfy Cloud, and COMFY_CLOUD_API_KEY supplies auth.
  *
  */
@@ -155,8 +193,8 @@ export function isComfyCloudUrl(value: string): boolean {
  * Build the default config FRESH for each client instance.
  *
  * Why this isn't a top-level constant: the embedded desktop path loads
- * kshana-core via `require()` BEFORE setting `process.env['COMFY_MODE']`
- * etc. (the desktop sets those in `kshanaCoreManager.start()`, which
+ * dhee-core via `require()` BEFORE setting `process.env['COMFY_MODE']`
+ * etc. (the desktop sets those in `dheeCoreManager.start()`, which
  * runs after the module graph is loaded). If we cached `getComfyConfig()`
  * at module load, every embedded ComfyUIClient would silently fall
  * back to `http://localhost:8188` and try to talk to a non-existent
@@ -261,7 +299,7 @@ export class ComfyUIClient {
     searchParams?: URLSearchParams
   ): Promise<Response> {
     const url = this.buildUrl(pathname, searchParams);
-    const method = (init.method as string | undefined) ?? 'GET';
+    const method = (init.method) ?? 'GET';
     try {
       return await fetch(url, {
         ...init,
@@ -421,8 +459,9 @@ export class ComfyUIClient {
     if (this.apiKey) {
       const extraDataPayload: Record<string, unknown> = { api_key_comfy_org: this.apiKey };
       if (options.workflowId) {
-        // Back-compat: older/newer Kshana Cloud routes have accepted either field.
-        extraDataPayload['kshana_workflow_id'] = options.workflowId;
+        // Back-compat: routes accept legacy `dhee_*` and current `dhee_*` keys.
+        extraDataPayload['dhee_workflow_id'] = options.workflowId;
+        extraDataPayload['dhee_workflow_id'] = options.workflowId;
         extraDataPayload['workflowId'] = options.workflowId;
       }
       payload['extra_data'] = extraDataPayload;
@@ -607,7 +646,7 @@ export class ComfyUIClient {
             }
             // Cache any outputs found so getOutputImages can use them
             if (cloudHistory.outputs) {
-              this.cloudOutputs.set(promptId, cloudHistory.outputs as Record<string, unknown>);
+              this.cloudOutputs.set(promptId, cloudHistory.outputs);
             }
             return { status: 'completed', prompt_id: promptId };
           }
@@ -681,12 +720,38 @@ export class ComfyUIClient {
       const collectedOutputs: ImageInfo[] = [];
       let submitPromise: Promise<{ promptId: string; clientId: string }> | null = null;
       // Inactivity timeout — seconds from env COMFYUI_WS_TIMEOUT (default 60).
-      // Direct Comfy Cloud supports WS, but the Kshana Cloud route currently
+      // Direct Comfy Cloud supports WS, but the dhee Cloud route currently
       // relies on HTTP polling. Keep WS as the fast path and fall back quickly
       // when the socket is silent or unavailable.
       const INACTIVITY_TIMEOUT_MS =
         Math.max(30, parseInt(process.env['COMFYUI_WS_TIMEOUT'] || '60', 10)) * 1000;
       let ws: WebSocket;
+      // Cancellation hooks. Registered in INFLIGHT_WS_REGISTRY so an
+      // external stop() can fire them without threading AbortSignal
+      // through every call site. Also wired to options.signal when
+      // the caller passed one.
+      let aborted = false;
+      const abortHandler = (reason: string) => {
+        if (resolved) return;
+        aborted = true;
+        resolved = true;
+        clearInterval(inactivityCheck);
+        try { ws?.close(); } catch { /* */ }
+        debugLog(`[queueAndWaitWS] aborted: ${reason}`);
+        reject(new Error(`aborted: ${reason}`));
+      };
+      // Bail before doing any I/O if the signal fired pre-call.
+      if (options.signal?.aborted) {
+        reject(new Error('aborted: signal already aborted'));
+        return;
+      }
+      const handle = {
+        close: () => { try { ws?.close(); } catch { /* */ } },
+        abort: abortHandler,
+      };
+      INFLIGHT_WS_REGISTRY.add(handle);
+      const onSignalAbort = () => abortHandler('caller signal');
+      options.signal?.addEventListener('abort', onSignalAbort, { once: true });
 
       const inactivityCheck = setInterval(() => {
         if (resolved) return;
@@ -718,6 +783,8 @@ export class ComfyUIClient {
         } catch {
           /* */
         }
+        INFLIGHT_WS_REGISTRY.delete(handle);
+        options.signal?.removeEventListener('abort', onSignalAbort);
       };
       const finish = (result: CompletionResult) => {
         if (resolved) return;
@@ -781,6 +848,12 @@ export class ComfyUIClient {
       });
 
       ws.on('close', () => {
+        if (aborted) {
+          // Already handled by abortHandler — skip the polling fallback.
+          // Without this gate, an aborted close would re-enter the
+          // polling path and silently keep the call alive after stop().
+          return;
+        }
         if (!resolved) {
           resolved = true;
           // WS drops on cloud happen mid-allocation (idle proxy,
@@ -798,6 +871,7 @@ export class ComfyUIClient {
 
       ws.on('error', err => {
         debugLog(`[queueAndWaitWS] WS error: ${err}`);
+        if (aborted) return;
         if (!resolved) {
           resolved = true;
           cleanup();
@@ -806,6 +880,11 @@ export class ComfyUIClient {
       });
 
       ws.on('message', (raw: Buffer | string) => {
+        // Drop any straggling messages once aborted — `abortHandler`
+        // already rejected the outer promise and asked the WS to
+        // close, but messages already in the channel can still fire
+        // a callback or two before that lands.
+        if (aborted) return;
         // Skip binary messages (preview images)
         if (Buffer.isBuffer(raw) && raw.length > 0 && raw[0] !== 0x7b) {
           lastActivityTime = Date.now();
@@ -864,9 +943,9 @@ export class ComfyUIClient {
             // ("ServiceError"); node_id pins which workflow node blew up.
             const p = action.payload ?? {};
             const parts: string[] = [];
-            if (typeof p['exception_type'] === 'string') parts.push(p['exception_type'] as string);
+            if (typeof p['exception_type'] === 'string') parts.push(p['exception_type']);
             if (typeof p['exception_message'] === 'string')
-              parts.push(p['exception_message'] as string);
+              parts.push(p['exception_message']);
             const nodeId = p['node_id'] ?? p['node'];
             if (nodeId !== undefined && nodeId !== null) parts.push(`node=${String(nodeId)}`);
             const errorMessage = parts.length ? parts.join(' — ') : payloadStr;
@@ -945,7 +1024,7 @@ export class ComfyUIClient {
       let lastActivityTime = Date.now();
 
       // WS inactivity timeout before falling back to HTTP polling.
-      // When going through a Kshana proxy the WS isn't forwarded, so the
+      // When going through a dhee proxy the WS isn't forwarded, so the
       // socket goes silent immediately — use a short 30s timeout so we
       // kick to HTTP polling quickly.
       const WS_INACTIVITY_TIMEOUT_MS =

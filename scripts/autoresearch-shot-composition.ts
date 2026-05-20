@@ -13,7 +13,7 @@ import { execSync } from 'child_process';
 import { LLMClient } from '../src/core/llm/index.js';
 
 const MAX_ITERATIONS = parseInt(process.argv[2] || '3', 10);
-const PROJECT_DIR = process.argv[3] || 'noir_detective_story_setup-3.kshana';
+const PROJECT_DIR = process.argv[3] || 'noir_detective_story_setup-3.dhee';
 const GUIDE_PATH = 'prompts/skills/defaults/shot_composition_guide.md';
 const RUBRIC_PATH = 'tests/autoresearch/rubrics/shot-composition-binary.json';
 const OUTPUT_DIR = 'test-output/autoresearch-shot-comp';

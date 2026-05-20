@@ -57,7 +57,7 @@ export interface ProjectState {
 }
 
 // In-memory project state (would be persisted to DB in production)
-// Note: The workflow now uses file-based state in .kshana/ directory instead.
+// Note: The workflow now uses file-based state in .dhee/ directory instead.
 // These functions are kept for backwards compatibility but may be removed later.
 let currentProjectId: string | null = null;
 

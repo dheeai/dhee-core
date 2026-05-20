@@ -303,7 +303,7 @@ If this returns "File not found", call read_project or list_project_files to see
       return {
         status: 'error',
         error: `Absolute path is outside the active project root: ${filePath}`,
-        hint: 'In remote mode, read_file only supports project files under the active .kshana directory.',
+        hint: 'In remote mode, read_file only supports project files under the active .dhee directory.',
       };
     }
 

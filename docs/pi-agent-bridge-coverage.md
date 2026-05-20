@@ -36,23 +36,23 @@ ops, host integration, etc.).
 
 | Tool file | Tool name | Why not in bridge suite |
 |---|---|---|
-| `status.ts` | `kshana_status` | Reads `project.json` + calls `computeStatus`. No executor invocation. **Tested in `tests/unit/piAgentReadTools.test.ts`** (read-tool suite). |
-| `listItems.ts` | `kshana_list_items` | Reads `project.json` and filters node entries. **Tested in `tests/unit/piAgentReadTools.test.ts`**. |
-| `listProjects.ts` | `kshana_list_projects` | Lists folders in `getProjectsDir()`. **Tested in `tests/unit/piAgentReadTools.test.ts`**. |
-| `focusProject.ts` | `kshana_focus_project` | Invokes a host-supplied callback (Electron / TUI). Bridge target is the **host**, not ExecutorAgent. **Tested in `tests/unit/focusProjectTool.test.ts`**. |
-| `newProject.ts` | `kshana_new` | Creates a project folder + bootstrap `project.json`. **Ported in-process; tested in `tests/unit/createProjectInProcess.test.ts` + `newProjectTool.test.ts`**. |
-| `readArtifact.ts` | `kshana_read_artifact` | Reads a file from inside a project dir; rejects path traversal. **Tested in `tests/unit/piAgentReadTools.test.ts`**. |
-| `renderSceneBundle.ts` | `kshana_render_scene_bundle` | Placeholder — NOT YET IMPLEMENTED. |
-| `reset.ts` | `kshana_reset` | Clears project state from a given stage onwards. Mutates `project.json` in place; no executor invocation. **Ported in-process; tested in `tests/unit/resetProjectStage.test.ts` + `resetTool.test.ts`**. |
-| `showAsset.ts` | `kshana_show_first_frame` / etc | Reads manifest entries and emits media events directly. Tested in `tests/unit/showAssetFromSchema.test.ts` + `showAssetTools.test.ts`. |
-| `showShot.ts` | `kshana_show_shot` | Same as `showAsset` — manifest-only. Tested in `tests/unit/showShotTool.test.ts`. |
-| `auditFidelity.ts` | `kshana_audit_fidelity` | Runs the VLM judge against a project's images. Calls into the calibration/audit pipeline, not the executor bridge. Untested. |
+| `status.ts` | `dhee_status` | Reads `project.json` + calls `computeStatus`. No executor invocation. **Tested in `tests/unit/piAgentReadTools.test.ts`** (read-tool suite). |
+| `listItems.ts` | `dhee_list_items` | Reads `project.json` and filters node entries. **Tested in `tests/unit/piAgentReadTools.test.ts`**. |
+| `listProjects.ts` | `dhee_list_projects` | Lists folders in `getProjectsDir()`. **Tested in `tests/unit/piAgentReadTools.test.ts`**. |
+| `focusProject.ts` | `dhee_focus_project` | Invokes a host-supplied callback (Electron / TUI). Bridge target is the **host**, not ExecutorAgent. **Tested in `tests/unit/focusProjectTool.test.ts`**. |
+| `newProject.ts` | `dhee_new` | Creates a project folder + bootstrap `project.json`. **Ported in-process; tested in `tests/unit/createProjectInProcess.test.ts` + `newProjectTool.test.ts`**. |
+| `readArtifact.ts` | `dhee_read_artifact` | Reads a file from inside a project dir; rejects path traversal. **Tested in `tests/unit/piAgentReadTools.test.ts`**. |
+| `renderSceneBundle.ts` | `dhee_render_scene_bundle` | Placeholder — NOT YET IMPLEMENTED. |
+| `reset.ts` | `dhee_reset` | Clears project state from a given stage onwards. Mutates `project.json` in place; no executor invocation. **Ported in-process; tested in `tests/unit/resetProjectStage.test.ts` + `resetTool.test.ts`**. |
+| `showAsset.ts` | `dhee_show_first_frame` / etc | Reads manifest entries and emits media events directly. Tested in `tests/unit/showAssetFromSchema.test.ts` + `showAssetTools.test.ts`. |
+| `showShot.ts` | `dhee_show_shot` | Same as `showAsset` — manifest-only. Tested in `tests/unit/showShotTool.test.ts`. |
+| `auditFidelity.ts` | `dhee_audit_fidelity` | Runs the VLM judge against a project's images. Calls into the calibration/audit pipeline, not the executor bridge. Untested. |
 
 ## Tools that are dev-only
 
 | Tool file | Tool name | Why not in bridge suite |
 |---|---|---|
-| `runScript.ts` | `kshana_run_script` | Shells out to `pnpm exec tsx scripts/*.ts` — only works in dev/repo context, no-ops in the packaged desktop binary. The whole reason `runExecutor` exists is to replace this path; testing the legacy crutch isn't valuable. |
+| `runScript.ts` | `dhee_run_script` | Shells out to `pnpm exec tsx scripts/*.ts` — only works in dev/repo context, no-ops in the packaged desktop binary. The whole reason `runExecutor` exists is to replace this path; testing the legacy crutch isn't valuable. |
 
 ## Pure helpers (no tool surface)
 
@@ -99,4 +99,4 @@ Do **not** add a test here when:
 - You're testing what a tool does that doesn't go through
   `runExecutor` (use a tool-specific unit test).
 - You're testing the chat UI's rendering of the tool's output (use
-  the kshana-desktop e2e suite — `tests/e2e/` over there).
+  the dhee-desktop e2e suite — `tests/e2e/` over there).

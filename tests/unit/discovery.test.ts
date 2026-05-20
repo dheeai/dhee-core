@@ -14,7 +14,7 @@ describe('discovery — server discovery file for external agents', () => {
   let discoveryPath: string;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'kshana-discovery-'));
+    tmp = mkdtempSync(join(tmpdir(), 'dhee-discovery-'));
     discoveryPath = join(tmp, 'server.json');
   });
 
@@ -80,20 +80,20 @@ describe('discovery — server discovery file for external agents', () => {
     expect(readDiscoveryFile(discoveryPath)).toBeNull();
   });
 
-  it('defaultDiscoveryPath returns ~/.kshana/server.json on the user home', () => {
+  it('defaultDiscoveryPath returns ~/.dhee/server.json on the user home', () => {
     const path = defaultDiscoveryPath();
     expect(path.endsWith('server.json')).toBe(true);
-    expect(path.includes('.kshana')).toBe(true);
+    expect(path.includes('.dhee')).toBe(true);
   });
 
-  it('honours KSHANA_DISCOVERY_FILE env override', () => {
-    const prev = process.env['KSHANA_DISCOVERY_FILE'];
-    process.env['KSHANA_DISCOVERY_FILE'] = '/tmp/custom-discovery.json';
+  it('honours dhee_DISCOVERY_FILE env override', () => {
+    const prev = process.env['dhee_DISCOVERY_FILE'];
+    process.env['dhee_DISCOVERY_FILE'] = '/tmp/custom-discovery.json';
     try {
       expect(defaultDiscoveryPath()).toBe('/tmp/custom-discovery.json');
     } finally {
-      if (prev === undefined) delete process.env['KSHANA_DISCOVERY_FILE'];
-      else process.env['KSHANA_DISCOVERY_FILE'] = prev;
+      if (prev === undefined) delete process.env['dhee_DISCOVERY_FILE'];
+      else process.env['dhee_DISCOVERY_FILE'] = prev;
     }
   });
 

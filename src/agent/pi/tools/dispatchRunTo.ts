@@ -13,7 +13,7 @@ import { getBackgroundTaskRunner } from "../../../server/runners/backgroundTaskR
  *
  * If a task is already running, the dispatch is rejected and the
  * agent gets the active task's id + kind. The agent should ask the
- * user whether to cancel + start the new one (use kshana_task_cancel
+ * user whether to cancel + start the new one (use dhee_task_cancel
  * then dispatch again) or keep waiting.
  */
 
@@ -22,7 +22,7 @@ const Params = Type.Object({
   projectDir: Type.Optional(
     Type.String({
       description:
-        "Absolute path to the project folder. Pass when the host (e.g. kshana-desktop) created the project at a workspace path that doesn't follow the default `<name>.kshana` convention.",
+        "Absolute path to the project folder. Pass when the host (e.g. dhee-desktop) created the project at a workspace path that doesn't follow the default `<name>.dhee` convention.",
     }),
   ),
   stage: Type.Optional(
@@ -60,10 +60,10 @@ export function createDispatchRunToTool(opts: {
   sessionId: string;
 }): ToolDefinition {
   return defineTool({
-    name: "kshana_dispatch_run_to",
-    label: "kshana dispatch run-to",
+    name: "dhee_dispatch_run_to",
+    label: "dhee dispatch run-to",
     description:
-      "Start a kshana_run_to job in the background. Returns immediately so this chat stays responsive — progress streams in. If a task is already running, returns a structured rejection with the active task's metadata so you can ask the user whether to cancel it.",
+      "Start a dhee_run_to job in the background. Returns immediately so this chat stays responsive — progress streams in. If a task is already running, returns a structured rejection with the active task's metadata so you can ask the user whether to cancel it.",
     parameters: Params,
     async execute(_id, params: Static<typeof Params>): Promise<AgentToolResult<DispatchDetails>> {
       try {
@@ -88,7 +88,7 @@ export function createDispatchRunToTool(opts: {
         }
 
         // result.status === 'rejected'
-        const summary = `Cannot start: task ${result.activeTaskId} (${result.activeTaskKind}) is already running on project '${result.activeProjectName}'. Use kshana_task_cancel to abort it, or wait for it to finish.`;
+        const summary = `Cannot start: task ${result.activeTaskId} (${result.activeTaskKind}) is already running on project '${result.activeProjectName}'. Use dhee_task_cancel to abort it, or wait for it to finish.`;
         return {
           content: [{ type: "text", text: summary }],
           details: {

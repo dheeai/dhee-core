@@ -7,7 +7,7 @@ import * as path from 'path';
 import { getLogsDir } from './logsPath.js';
 
 // Resolve lazily so a host that calls setLogsDir after import (e.g.
-// kshana-desktop pointing at app.getPath('userData')/logs in a packaged
+// dhee-desktop pointing at app.getPath('userData')/logs in a packaged
 // build) still wins. getLogsDir() also ensures the directory exists.
 function uiLogPath(): string {
   return path.join(getLogsDir(), 'ui-output.log');
@@ -30,7 +30,7 @@ function writeLog(line: string): void {
 export function initUILog(): void {
   try {
     const header = `════════════════════════════════════════════════════════════════════════════════
- KSHANA SESSION LOG
+ dhee SESSION LOG
 ════════════════════════════════════════════════════════════════════════════════
 `;
     fs.writeFileSync(uiLogPath(), header);

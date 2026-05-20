@@ -1,7 +1,7 @@
 /**
  * Phase 5: backfill existing projects' manifest + executorState into the
  * new project.json scenes/shots tree so the new readers (Storyboard,
- * kshana_show_*) work without re-running the pipeline.
+ * dhee_show_*) work without re-running the pipeline.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
@@ -19,7 +19,7 @@ function setup(opts: {
   manifest?: Array<Record<string, unknown>>;
   executorNodes?: Record<string, Record<string, unknown>>;
 }): void {
-  dir = mkdtempSync(join(tmpdir(), "kshana-backfill-"));
+  dir = mkdtempSync(join(tmpdir(), "dhee-backfill-"));
   mkdirSync(join(dir, "assets"), { recursive: true });
   writeFileSync(
     join(dir, "project.json"),

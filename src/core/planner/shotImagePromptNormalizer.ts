@@ -154,7 +154,7 @@ export function injectMissingShotRefs(
     //     the frame's shot-specific numbering and would inject a stale
     //     tag like "Singh bungalow from image 5" into a frame where
     //     the setting is actually at local image 1.
-    const targetN = existingRef ? (existingRef.imageNumber as number) : ++maxN;
+    const targetN = existingRef ? (existingRef.imageNumber) : ++maxN;
 
     if (!hasAdjacentTag) {
       const insertAt = match.index + match[0].length;
@@ -347,7 +347,7 @@ export function alignFramesToFirstFrame(
 
   const firstFrame = p.frames['first_frame'];
   const firstRefs = Array.isArray(firstFrame?.references)
-    ? (firstFrame!.references as ShotImagePromptRef[])
+    ? (firstFrame.references)
     : [];
   if (firstRefs.length === 0) return;
 

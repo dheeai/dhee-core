@@ -15,7 +15,7 @@ import { recordSession, sessionFilePathFor, touchSession } from './sessionStore.
 import { getModel } from '@mariozechner/pi-ai';
 import type { Model } from '@mariozechner/pi-ai';
 import type { GenericAgentResult } from '../../core/agent/AgentResult.js';
-import { kshanaTools } from './tools/index.js';
+import { dheeTools } from './tools/index.js';
 import { createFocusProjectTool, type FocusProjectCallback } from './tools/focusProject.js';
 import { createRunToTool, type MediaCallback } from './tools/runTo.js';
 import { createShowShotTool } from './tools/showShot.js';
@@ -28,7 +28,7 @@ import {
 import { createDispatchRunToTool } from './tools/dispatchRunTo.js';
 import { loadOrchestratorPrompt } from './prompt.js';
 import { selectToolsForRole, type SessionRole } from './selectToolsForRole.js';
-import { ensureDir, getKshanaConfigDir, getProjectsDir, REPO_ROOT } from './paths.js';
+import { ensureDir, getdheeConfigDir, getProjectsDir, REPO_ROOT } from './paths.js';
 import { ensureOpenRouterApiKeyFromEnv } from './ensureOpenRouterKey.js';
 
 const REPO_ROOT_PROMPTS = join(REPO_ROOT, 'prompts');
@@ -108,7 +108,7 @@ export function resolvePiSessionModel(): Model<string> {
   // which bypasses LLMLogger — without this log line there is NO
   // observable signal of which baseUrl/model pi-agent is hitting.
   // Print to stdout so it lands in the desktop's electron-log capture.
-  // eslint-disable-next-line no-console
+   
   console.log(
     `[resolvePiSessionModel] api=${model.api} provider=${model.provider} ` +
       `id=${model.id} baseUrl=${(model as { baseUrl?: string }).baseUrl ?? '(default)'}`,
@@ -156,14 +156,14 @@ function resolvePiSessionModelInner(): Model<string> {
  * SessionAgent contract that ConversationManager expects.
  */
 export class PiSessionAgent extends TypedEventEmitter {
-  public readonly name = 'kshana-pi';
+  public readonly name = 'dhee-pi';
 
   private session?: AgentSession;
   private streaming = false;
   private currentResolve?: (result: GenericAgentResult) => void;
   private currentReject?: (err: Error) => void;
   private translationContext: TranslationContext = {
-    agentName: 'kshana-pi',
+    agentName: 'dhee-pi',
     finalAssistantText: '',
   };
   private unsubscribe?: () => void;
@@ -179,7 +179,7 @@ export class PiSessionAgent extends TypedEventEmitter {
     systemPrompt?: string;
     /**
      * Session role. `'interactive'` strips long-running pipeline tools
-     * (kshana_run_to, kshana_render_scene_bundle, kshana_audit_fidelity)
+     * (dhee_run_to, dhee_render_scene_bundle, dhee_audit_fidelity)
      * so a chat session can't be hijacked by a 1–4h blocking task.
      * `'background'` is the dedicated long-run session; it sees the
      * full toolkit. Defaults to `'interactive'` — the safer choice
@@ -191,7 +191,7 @@ export class PiSessionAgent extends TypedEventEmitter {
     /** Called whenever a long-running tool surfaces a newly-generated asset. */
     onMedia?: MediaCallback;
     /**
-     * Session id to embed in `kshana_dispatch_*` tools so the
+     * Session id to embed in `dhee_dispatch_*` tools so the
      * background task runner tags emitted events with this id, and
      * the host can route them back to the right chat.
      *
@@ -215,9 +215,9 @@ export class PiSessionAgent extends TypedEventEmitter {
   }) {
     super();
     const role: SessionRole = opts?.role ?? 'interactive';
-    let baseTools = opts?.tools ?? kshanaTools;
+    let baseTools = opts?.tools ?? dheeTools;
     // Tools that need to surface inline media in chat are factory-built when
-    // an onMedia callback is wired. Without onMedia, kshana_show_shot still
+    // an onMedia callback is wired. Without onMedia, dhee_show_shot still
     // returns a text summary but won't render image/video cards in the UI.
     if (opts?.onMedia) {
       const mediaRunTo = createRunToTool({
@@ -235,11 +235,11 @@ export class PiSessionAgent extends TypedEventEmitter {
       const showShotVideo = createShowShotVideoTool({ onMedia: opts.onMedia });
       const showFinalVideo = createShowFinalVideoTool({ onMedia: opts.onMedia });
       baseTools = baseTools.map(t => {
-        if (t.name === 'kshana_run_to') return mediaRunTo;
-        if (t.name === 'kshana_show_first_frame') return showFirstFrame;
-        if (t.name === 'kshana_show_last_frame') return showLastFrame;
-        if (t.name === 'kshana_show_shot_video') return showShotVideo;
-        if (t.name === 'kshana_show_final_video') return showFinalVideo;
+        if (t.name === 'dhee_run_to') return mediaRunTo;
+        if (t.name === 'dhee_show_first_frame') return showFirstFrame;
+        if (t.name === 'dhee_show_last_frame') return showLastFrame;
+        if (t.name === 'dhee_show_shot_video') return showShotVideo;
+        if (t.name === 'dhee_show_final_video') return showFinalVideo;
         return t;
       });
       baseTools = [...baseTools, showShot];
@@ -247,7 +247,7 @@ export class PiSessionAgent extends TypedEventEmitter {
       // No onMedia callback (rare in production) but we still want
       // to dispatch instead of block when we have a session id.
       const sessionRunTo = createRunToTool({ sessionId: opts.sessionId });
-      baseTools = baseTools.map(t => (t.name === 'kshana_run_to' ? sessionRunTo : t));
+      baseTools = baseTools.map(t => (t.name === 'dhee_run_to' ? sessionRunTo : t));
       baseTools = [...baseTools, createShowShotTool({})];
     } else {
       baseTools = [...baseTools, createShowShotTool({})];
@@ -258,7 +258,7 @@ export class PiSessionAgent extends TypedEventEmitter {
 
     // Add the per-session dispatch tools when we have a sessionId.
     // Without sessionId (legacy callers), they're omitted — the
-    // legacy synchronous kshana_run_to remains in the tool list as
+    // legacy synchronous dhee_run_to remains in the tool list as
     // a fallback, so behavior degrades gracefully.
     if (opts?.sessionId) {
       const dispatchRunTo = createDispatchRunToTool({ sessionId: opts.sessionId });
@@ -280,7 +280,7 @@ export class PiSessionAgent extends TypedEventEmitter {
     const model = resolvePiSessionModel();
 
     const cwd = ensureDir(getProjectsDir());
-    const agentDir = ensureDir(join(getKshanaConfigDir(), 'pi-agent'));
+    const agentDir = ensureDir(join(getdheeConfigDir(), 'pi-agent'));
 
     const authStorage = AuthStorage.create(join(agentDir, 'auth.json'));
     const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, 'models.json'));

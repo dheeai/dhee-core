@@ -2,13 +2,13 @@
  * `getLogsDir` / `setLogsDir` — single source of truth for where loggers
  * write. Each logger used to hardcode `./logs` relative to cwd, which
  * meant a packaged Electron app (cwd = .app bundle, read-only on macOS)
- * silently dropped logs. This module gives the host (kshana-desktop) a
+ * silently dropped logs. This module gives the host (dhee-desktop) a
  * single knob to point everything at `app.getPath('userData')/logs` or
  * any other writable dir.
  *
  * Resolution order (highest → lowest):
  *   1. value set via `setLogsDir(absPath)` at runtime
- *   2. `KSHANA_LOGS_DIR` env var (handy for tests / CI)
+ *   2. `dhee_LOGS_DIR` env var (handy for tests / CI)
  *   3. fallback: `<repoRoot>/logs` for dev (preserves today's behavior)
  *   4. ultimate fallback: `<cwd>/logs`
  */
@@ -26,14 +26,14 @@ import {
 let priorEnv: string | undefined;
 
 beforeEach(() => {
-  priorEnv = process.env['KSHANA_LOGS_DIR'];
-  delete process.env['KSHANA_LOGS_DIR'];
+  priorEnv = process.env['dhee_LOGS_DIR'];
+  delete process.env['dhee_LOGS_DIR'];
   resetLogsDirForTest();
 });
 
 afterEach(() => {
-  if (priorEnv === undefined) delete process.env['KSHANA_LOGS_DIR'];
-  else process.env['KSHANA_LOGS_DIR'] = priorEnv;
+  if (priorEnv === undefined) delete process.env['dhee_LOGS_DIR'];
+  else process.env['dhee_LOGS_DIR'] = priorEnv;
   resetLogsDirForTest();
 });
 
@@ -43,10 +43,10 @@ describe('getLogsDir', () => {
     expect(isAbsolute(dir)).toBe(true);
   });
 
-  it('honors KSHANA_LOGS_DIR when set and no runtime override is in place', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'kshana-logs-env-'));
+  it('honors dhee_LOGS_DIR when set and no runtime override is in place', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'dhee-logs-env-'));
     try {
-      process.env['KSHANA_LOGS_DIR'] = tmp;
+      process.env['dhee_LOGS_DIR'] = tmp;
       resetLogsDirForTest();
       expect(getLogsDir()).toBe(tmp);
     } finally {
@@ -54,20 +54,20 @@ describe('getLogsDir', () => {
     }
   });
 
-  it('expands a leading ~ in KSHANA_LOGS_DIR', () => {
-    process.env['KSHANA_LOGS_DIR'] = '~/kshana-test-logs';
+  it('expands a leading ~ in dhee_LOGS_DIR', () => {
+    process.env['dhee_LOGS_DIR'] = '~/dhee-test-logs';
     resetLogsDirForTest();
     const out = getLogsDir();
     expect(out.startsWith('~')).toBe(false);
     expect(isAbsolute(out)).toBe(true);
-    expect(out.endsWith('/kshana-test-logs')).toBe(true);
+    expect(out.endsWith('/dhee-test-logs')).toBe(true);
   });
 
   it('lets setLogsDir override the env var', () => {
-    const envDir = mkdtempSync(join(tmpdir(), 'kshana-logs-env-'));
-    const overrideDir = mkdtempSync(join(tmpdir(), 'kshana-logs-override-'));
+    const envDir = mkdtempSync(join(tmpdir(), 'dhee-logs-env-'));
+    const overrideDir = mkdtempSync(join(tmpdir(), 'dhee-logs-override-'));
     try {
-      process.env['KSHANA_LOGS_DIR'] = envDir;
+      process.env['dhee_LOGS_DIR'] = envDir;
       resetLogsDirForTest();
       setLogsDir(overrideDir);
       expect(getLogsDir()).toBe(overrideDir);

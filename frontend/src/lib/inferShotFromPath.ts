@@ -1,5 +1,5 @@
 /**
- * Pure parser for kshana-style asset filenames. Used by MediaWithOverlay
+ * Pure parser for dhee-style asset filenames. Used by MediaWithOverlay
  * to derive the scene/shot/frame triple needed for the Edit and Redo
  * overlay buttons. Returns null for filenames that don't match the
  * grammar (orphan/legacy entries, character/setting refs, final video).
@@ -27,17 +27,17 @@ export function inferShotFromPath(path: string): InferredShot | null {
   let m = FRAME_RE.exec(file)
   if (m) {
     return {
-      scene: parseInt(m[1]!, 10),
-      shot: parseInt(m[2]!, 10),
-      frame: m[3]!.toLowerCase() as 'first_frame' | 'last_frame' | 'mid_frame',
+      scene: parseInt(m[1], 10),
+      shot: parseInt(m[2], 10),
+      frame: m[3].toLowerCase() as 'first_frame' | 'last_frame' | 'mid_frame',
       isVideo: false,
     }
   }
   m = VIDEO_RE.exec(file)
   if (m) {
     return {
-      scene: parseInt(m[1]!, 10),
-      shot: parseInt(m[2]!, 10),
+      scene: parseInt(m[1], 10),
+      shot: parseInt(m[2], 10),
       frame: null,
       isVideo: true,
     }

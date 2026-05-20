@@ -33,7 +33,7 @@ export class TestContext {
 
     // Use custom base dir or system temp dir
     const baseDir = options.baseDir || tmpdir();
-    this.workspacePath = join(baseDir, `kshana_test_${this.workspaceId}`);
+    this.workspacePath = join(baseDir, `dhee_test_${this.workspaceId}`);
 
     // Create workspace directory
     this.setup();
@@ -64,10 +64,10 @@ export class TestContext {
   }
 
   /**
-   * Get the .kshana project directory path.
+   * Get the .dhee project directory path.
    */
   getProjectPath(): string {
-    return join(this.workspacePath, '.kshana');
+    return join(this.workspacePath, '.dhee');
   }
 
   /**
@@ -173,7 +173,7 @@ export class TestContext {
   }
 
   /**
-   * Create a .kshana project structure.
+   * Create a .dhee project structure.
    */
   createProjectStructure(): void {
     const projectDir = this.getProjectPath();

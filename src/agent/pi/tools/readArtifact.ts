@@ -17,13 +17,13 @@ export interface ReadArtifactDetails {
   bytes: number;
 }
 
-export const kshanaReadArtifact = defineTool({
-  name: "kshana_read_artifact",
-  label: "kshana read-artifact",
-  description: "Read a file inside a kshana project folder. Path is resolved against <project>.kshana/. Reads outside the project folder are rejected.",
+export const dheeReadArtifact = defineTool({
+  name: "dhee_read_artifact",
+  label: "dhee read-artifact",
+  description: "Read a file inside a dhee project folder. Path is resolved against <project>.dhee/. Reads outside the project folder are rejected.",
   parameters: Params,
   async execute(_id, params: Static<typeof Params>): Promise<AgentToolResult<ReadArtifactDetails>> {
-    const projectDir = resolve(getProjectsDir(), `${params.project}.kshana`);
+    const projectDir = resolve(getProjectsDir(), `${params.project}.dhee`);
     const target = resolve(projectDir, params.path);
     const rel = relative(projectDir, target);
     if (rel.startsWith("..") || rel.startsWith(`..${sep}`) || resolve(target) !== target) {

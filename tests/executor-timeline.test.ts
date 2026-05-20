@@ -101,7 +101,7 @@ function createAgent(projectDir: string, nodes: Record<string, Partial<Execution
 
 describe('Executor timeline lifecycle', () => {
   it('initializes and persists a scene timeline as soon as scenes exist', () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     const agent = createAgent(projectDir, {
       'scene:scene_1': {
         typeId: 'scene',
@@ -122,7 +122,7 @@ describe('Executor timeline lifecycle', () => {
   });
 
   it('splits a scene into shot segments and fills the matching shot segment on completion', () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     mkdirSync(join(projectDir, 'prompts', 'videos', 'scenes'), { recursive: true });
     const promptPath = join(projectDir, 'prompts', 'videos', 'scenes', 'scene-1.motion.json');
     writeFileSync(promptPath, JSON.stringify({
@@ -194,7 +194,7 @@ describe('Executor timeline lifecycle', () => {
   });
 
   it('does not replace an existing timeline video with a later image preview update', () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     const agent = createAgent(projectDir, {});
 
     let timeline = createTimelineSkeleton(6, [{ id: 'scene_1', label: 'Scene 1' }]);
@@ -224,7 +224,7 @@ describe('Executor timeline lifecycle', () => {
   });
 
   it('uses the freshly written scene breakdown path before node state is marked completed', () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     mkdirSync(join(projectDir, 'prompts', 'videos', 'scenes'), { recursive: true });
     const relPath = 'prompts/videos/scenes/scene-1.motion.json';
     writeFileSync(join(projectDir, relPath), JSON.stringify({
@@ -263,7 +263,7 @@ describe('Executor timeline lifecycle', () => {
   });
 
   it('throws when timeline sync still fails after deterministic repair', () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     const agent = createAgent(projectDir, {});
 
     let attempts = 0;
@@ -292,7 +292,7 @@ describe('Executor timeline lifecycle', () => {
   });
 
   it('repairs timeline sync on second deterministic attempt', () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     const agent = createAgent(projectDir, {});
 
     let attempts = 0;
@@ -318,7 +318,7 @@ describe('Executor timeline lifecycle', () => {
   });
 
   it('reconciles a completed scene prompt against a stale scene-only timeline on resume', () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     mkdirSync(join(projectDir, 'prompts', 'videos', 'scenes'), { recursive: true });
     const promptPath = join(projectDir, 'prompts', 'videos', 'scenes', 'scene-1.motion.json');
     writeFileSync(promptPath, JSON.stringify({
@@ -358,7 +358,7 @@ describe('Executor timeline lifecycle', () => {
   });
 
   it('does not fall back to node-based assembly when timeline exists but is unresolved', async () => {
-    const projectDir = mkdtempSync(join(tmpdir(), 'kshana-executor-timeline-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'dhee-executor-timeline-'));
     const agent = createAgent(projectDir, {
       'scene:scene_1': {
         typeId: 'scene',

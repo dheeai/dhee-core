@@ -1,5 +1,5 @@
 /**
- * Tests for the pi-agent `kshana_focus_project` tool.
+ * Tests for the pi-agent `dhee_focus_project` tool.
  *
  * focusProject is structurally different from every other pi-agent
  * tool: it doesn't read or write the filesystem and doesn't invoke
@@ -36,7 +36,7 @@ function executeFocus(
   );
 }
 
-describe('pi-agent kshana_focus_project tool', () => {
+describe('pi-agent dhee_focus_project tool', () => {
   it('invokes the host callback with the requested project name', async () => {
     const callback = vi.fn(
       async (name: string): Promise<FocusProjectResult> => ({

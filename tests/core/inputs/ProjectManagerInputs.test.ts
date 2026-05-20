@@ -18,7 +18,7 @@ import {
 } from '../../../src/tasks/video/workflow/ProjectManager.js';
 import type { ProjectInput } from '../../../src/tasks/video/workflow/types.js';
 
-const TEST_BASE_PATH = '/tmp/kshana-input-test-' + Date.now();
+const TEST_BASE_PATH = '/tmp/dhee-input-test-' + Date.now();
 
 describe('ProjectManager Input Functions', () => {
   beforeEach(() => {

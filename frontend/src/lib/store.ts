@@ -43,7 +43,7 @@ export interface ChatMessage {
   /** Set on `type: 'media'` messages — frontend renders the image/video inline. */
   media?: {
     kind: 'image' | 'video'
-    /** Path relative to <project>.kshana/. URL is built as /api/v1/assets/<project>/<path>. */
+    /** Path relative to <project>.dhee/. URL is built as /api/v1/assets/<project>/<path>. */
     path: string
     project: string
     /** Tool name that produced the asset, for the small caption above the media. */

@@ -13,7 +13,7 @@
  *     independently with first + last frame anchors and a motion
  *     directive, then the per-shot mp4s are concatenated by FFmpeg.
  *
- * Selection: `KSHANA_VIDEO_STRATEGY=per_shot` opts out of the default.
+ * Selection: `dhee_VIDEO_STRATEGY=per_shot` opts out of the default.
  * Anything else (including the empty string and typos) resolves to
  * prompt_relay so a stray env value never crashes the pipeline.
  */
@@ -23,7 +23,7 @@ export type VideoStrategy = 'prompt_relay' | 'per_shot';
 const DEFAULT_STRATEGY: VideoStrategy = 'prompt_relay';
 
 export function getVideoStrategy(env: Record<string, string | undefined> = process.env as Record<string, string | undefined>): VideoStrategy {
-  const raw = env['KSHANA_VIDEO_STRATEGY'];
+  const raw = env['dhee_VIDEO_STRATEGY'];
   if (!raw) return DEFAULT_STRATEGY;
   const normalized = raw.trim().toLowerCase();
   if (normalized === 'per_shot') return 'per_shot';

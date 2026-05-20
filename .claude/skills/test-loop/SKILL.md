@@ -2,7 +2,7 @@
 name: test-loop
 version: 1.0.0
 description: |
-  Add tests for kshana-core runners, pi-agent tools, or in-process ports.
+  Add tests for dhee-core runners, pi-agent tools, or in-process ports.
   Use when the user wants to "test X", "add coverage for Y", "pin the
   contract for Z", or "port script-N in-process and test it." Walks
   through the three established loops we use here: bridge-contract
@@ -18,7 +18,7 @@ allowed-tools:
   - Glob
 ---
 
-# kshana-core test loop
+# dhee-core test loop
 
 This skill exists so future Claude doesn't reinvent the test patterns
 we already established. Read these notes BEFORE writing test code.
@@ -39,7 +39,7 @@ The user said something like:
 - "Make sure auditFidelity actually runs the right thing."
 
 If the request is about UI rendering / chat-panel behavior, that
-testing loop lives in kshana-desktop (`.claude/skills/test-loop/`
+testing loop lives in dhee-desktop (`.claude/skills/test-loop/`
 over there). This skill is for everything below the IPC boundary.
 
 ## Three loops, pick one
@@ -82,8 +82,8 @@ behavior is correct.
 
 **Pattern:**
 
-1. `mkdtempSync(join(tmpdir(), 'kshana-...'))` per test, set
-   `process.env.KSHANA_PROJECTS_DIR` to that.
+1. `mkdtempSync(join(tmpdir(), 'dhee-...'))` per test, set
+   `process.env.dhee_PROJECTS_DIR` to that.
 2. Build project fixtures via `mkdirSync` + `writeFileSync` directly
    — don't go through the production project loaders unless the test
    IS about the loader.
@@ -188,8 +188,8 @@ convention without a reason.
 - **Mock the world.** If you're stubbing more than the one boundary
   you're testing, you've drifted into Loop A by accident. Pick the
   layer and stub only at that line.
-- **Test on the user's real `~/Kshana` projects directory.** Always
-  set `KSHANA_PROJECTS_DIR` to a `mkdtempSync` directory and tear
+- **Test on the user's real `~/dhee` projects directory.** Always
+  set `dhee_PROJECTS_DIR` to a `mkdtempSync` directory and tear
   down in `afterEach`.
 - **Test the implementation, not the contract.** "Calls
   `setActiveProjectDir` once" is implementation. "After this, the
@@ -219,15 +219,15 @@ bubble" and a sibling test that fires a second `agent_response`
 manually and asserts "now there are 2." If the first assertion
 were trivially passing, the second couldn't pass too.
 
-This caught a real test-shape bug during the kshana-desktop e2e
+This caught a real test-shape bug during the dhee-desktop e2e
 work.
 
 ## Always run before reporting "done"
 
 1. `pnpm test` — full suite green.
 2. If you ported a script: a tmpdir smoke run of the CLI, e.g.
-   `KSHANA_PROJECTS_DIR=$(mktemp -d) tsx scripts/<name>.ts <args>`
-   and `cat <tmp>/<name>.kshana/project.json | head` (or the
+   `dhee_PROJECTS_DIR=$(mktemp -d) tsx scripts/<name>.ts <args>`
+   and `cat <tmp>/<name>.dhee/project.json | head` (or the
    relevant artifact).
 3. Update `docs/pi-agent-bridge-coverage.md` if you changed the
    tested-tools list.

@@ -109,7 +109,7 @@ describe('ProjectManager', () => {
       expect(projectExists(TEST_BASE_PATH)).toBe(false);
     });
 
-    it('removes entire .kshana directory', () => {
+    it('removes entire .dhee directory', () => {
       createProject('Test story', TEST_BASE_PATH);
       const projectDir = getProjectDir(TEST_BASE_PATH);
 

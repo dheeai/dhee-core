@@ -27,7 +27,7 @@ function findCompletedCheckpoint(): string | null {
   const fs = require('fs');
   const tmpDir = tmpdir();
   const dirs = fs.readdirSync(tmpDir)
-    .filter((d: string) => d.startsWith('kshana-e2e-'))
+    .filter((d: string) => d.startsWith('dhee-e2e-'))
     .map((d: string) => join(tmpDir, d))
     .sort()
     .reverse();
@@ -98,7 +98,7 @@ describe('Shot Image Prompt References', () => {
     console.log(`Using checkpoint: ${checkpoint}`);
 
     // Copy checkpoint to a fresh dir so we don't mutate the original
-    projectDir = join(tmpdir(), `kshana-shotref-${Date.now()}`);
+    projectDir = join(tmpdir(), `dhee-shotref-${Date.now()}`);
     cpSync(checkpoint, projectDir, { recursive: true });
 
     // Invalidate only 2 shot_image_prompt nodes — enough to verify the fix

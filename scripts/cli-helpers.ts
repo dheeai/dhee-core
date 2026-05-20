@@ -30,7 +30,7 @@ export function loadProjectStrict(name: string, basePath: string = process.cwd()
 } {
   const result = loadProject(name, basePath);
   if (!result) {
-    console.error(`Project not found: ${name}.kshana under ${basePath}`);
+    console.error(`Project not found: ${name}.dhee under ${basePath}`);
     process.exit(1);
   }
   return result;

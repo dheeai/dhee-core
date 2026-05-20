@@ -13,7 +13,7 @@ import 'dotenv/config';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ComfyUIClient } from '../src/services/comfyui/ComfyUIClient.js';
-import { findKshanaCoreRoot } from '../src/agent/pi/paths.js';
+import { finddheeCoreRoot } from '../src/agent/pi/paths.js';
 
 const COMFY_URL = process.env['COMFYUI_BASE_URL'] || 'http://127.0.0.1:8188';
 const PROJECT = 'noir_detective_story_setup-3';
@@ -31,8 +31,8 @@ const PROMPT = `Medium shot over Vikram's shoulder from image1, his broad should
 const NEGATIVE_PROMPT = `blurry, low resolution, deformed, ugly, mutated hands, extra limbs, poorly drawn face, bad anatomy, watermark, text, signature, cartoon, anime, painting, illustration, extra fingers, fused fingers, oversaturated, underexposed, grainy, distorted proportions, floating limbs`;
 
 async function main() {
-  const root = findKshanaCoreRoot(import.meta.url);
-  const projectDir = join(root, `${PROJECT}.kshana`);
+  const root = finddheeCoreRoot(import.meta.url);
+  const projectDir = join(root, `${PROJECT}.dhee`);
   if (!existsSync(projectDir)) {
     console.error(`No project: ${projectDir}`);
     process.exit(1);

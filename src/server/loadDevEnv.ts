@@ -1,12 +1,12 @@
 /**
- * Surface a kshana-core `.env` file into `process.env` at runtime.
- * Used by embedded hosts (kshana-desktop's Electron main process)
+ * Surface a dhee-core `.env` file into `process.env` at runtime.
+ * Used by embedded hosts (dhee-desktop's Electron main process)
  * in development so the user's existing dev keys, ComfyUI URL, and
  * tier-routing config are picked up without copying anything.
  *
  * Behavior:
- *   - Reads `.env` from the kshana-core package root (auto-detected
- *     via `findKshanaCoreRoot`, or pass an explicit `root` for
+ *   - Reads `.env` from the dhee-core package root (auto-detected
+ *     via `finddheeCoreRoot`, or pass an explicit `root` for
  *     testing).
  *   - Skips keys that are already present in `process.env`. Callers
  *     who want explicit overrides set the env var BEFORE calling.
@@ -21,7 +21,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseDotenv } from "dotenv";
-import { findKshanaCoreRoot, getProjectsDir } from "../agent/pi/paths.js";
+import { finddheeCoreRoot, getProjectsDir } from "../agent/pi/paths.js";
 
 export interface LoadDevEnvResult {
   loaded: boolean;
@@ -30,20 +30,20 @@ export interface LoadDevEnvResult {
   /** Keys this call wrote to process.env (excludes pre-existing keys). */
   vars: string[];
   /**
-   * The kshana-core package root — i.e. where this very module lives.
+   * The dhee-core package root — i.e. where this very module lives.
    * Static resources (prompts, schemas) hang off here. Returned for
    * debugging; embedded hosts usually don't need it because the
-   * prompt loader resolves it independently via `findKshanaCoreRoot`.
+   * prompt loader resolves it independently via `finddheeCoreRoot`.
    */
   root: string;
   /**
-   * The directory kshana-core expects projects to live under. Resolves
+   * The directory dhee-core expects projects to live under. Resolves
    * to:
-   *   - `KSHANA_PROJECTS_DIR` env override, if set
-   *   - `~/Kshana` when running packaged (KSHANA_PACKAGED=1)
-   *   - the kshana-core repo root, otherwise (dev mode)
+   *   - `dhee_PROJECTS_DIR` env override, if set
+   *   - `~/dhee` when running packaged (dhee_PACKAGED=1)
+   *   - the dhee-core repo root, otherwise (dev mode)
    *
-   * Embedded hosts (kshana-desktop) chdir to this so kshana-core's
+   * Embedded hosts (dhee-desktop) chdir to this so dhee-core's
    * filesystem helpers — which default `basePath` to `process.cwd()`
    * — find the right projects on both dev machines and packaged
    * end-user machines.
@@ -52,7 +52,7 @@ export interface LoadDevEnvResult {
 }
 
 export function loadDevEnv(root?: string): LoadDevEnvResult {
-  const r = root ?? findKshanaCoreRoot(import.meta.url);
+  const r = root ?? finddheeCoreRoot(import.meta.url);
   const projectsDir = getProjectsDir();
   const envPath = join(r, ".env");
   if (!existsSync(envPath)) {

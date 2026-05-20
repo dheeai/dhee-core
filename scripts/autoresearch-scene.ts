@@ -19,7 +19,7 @@ import { execSync } from 'child_process';
 import { LLMClient } from '../src/core/llm/index.js';
 
 const MAX_ITERATIONS = parseInt(process.argv[2] || '3', 10);
-const PROJECT_DIR = process.argv[3] || 'story_begins_girl_sprinting-2.kshana';
+const PROJECT_DIR = process.argv[3] || 'story_begins_girl_sprinting-2.dhee';
 const GUIDE_PATH = 'prompts/skills/defaults/scene_guide.md';
 const RUBRIC_PATH = 'tests/autoresearch/rubrics/scene-binary.json';
 const OUTPUT_DIR = 'test-output/autoresearch-scene';

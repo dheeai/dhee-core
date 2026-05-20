@@ -1,7 +1,7 @@
 /**
  * Regressions: `WorkflowModeRegistry` must work when the host's cwd
- * is NOT the kshana-core repo and when COMFY_MODE is set AFTER
- * kshana-core is loaded.
+ * is NOT the dhee-core repo and when COMFY_MODE is set AFTER
+ * dhee-core is loaded.
  *
  * Two separate bugs lived here, both surfaced when the embedded
  * desktop tried to render Klein-edit shots on cloud:
@@ -12,14 +12,14 @@
  *      (e.g. `flux2_klein_edit_cloud`) failed with "Workflow ... not
  *      found".
  *   2. `projectRoot` defaulted to `process.cwd()`. The desktop runs
- *      from `kshana-desktop/`, which has no `workflows/` directory.
+ *      from `dhee-desktop/`, which has no `workflows/` directory.
  *      Even if cloud scanning had been on, no manifests would have
  *      been found.
  *
  * Earlier fix:
  *   - hoisted `WORKFLOW_DIRS` evaluation into `refresh()` so env
  *     reads are fresh
- *   - resolved `projectRoot` via `findKshanaCoreRoot(import.meta.url)`
+ *   - resolved `projectRoot` via `finddheeCoreRoot(import.meta.url)`
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -52,8 +52,8 @@ describe('WorkflowModeRegistry — embedded host integration', () => {
   let savedComfyMode: string | undefined;
 
   beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), 'kshana-wfmr-'));
-    // Build a fake kshana-core layout: workflows/cloud/<manifest+wf>
+    tmpRoot = mkdtempSync(join(tmpdir(), 'dhee-wfmr-'));
+    // Build a fake dhee-core layout: workflows/cloud/<manifest+wf>
     const cloudDir = join(tmpRoot, 'workflows', 'cloud');
     mkdirSync(cloudDir, { recursive: true });
     writeFileSync(
@@ -80,11 +80,11 @@ describe('WorkflowModeRegistry — embedded host integration', () => {
   it('discovers workflows/cloud/* manifests when COMFY_MODE is set after registry construction', () => {
     // Construct registry FIRST, with a custom root, while COMFY_MODE
     // is unset — mimics the desktop's load order. Pass the explicit
-    // root so we don't depend on the real kshana-core repo.
+    // root so we don't depend on the real dhee-core repo.
     const reg = new WorkflowModeRegistry(tmpRoot);
 
     // Host now flips into cloud mode, just like
-    // kshanaCoreManager.applyEnvFromSettings does.
+    // dheeCoreManager.applyEnvFromSettings does.
     process.env['COMFY_MODE'] = 'cloud';
 
     reg.refresh();
@@ -102,7 +102,7 @@ describe('WorkflowModeRegistry — embedded host integration', () => {
   });
 
   it('scans BOTH workflows/built-in and workflows/cloud regardless of COMFY_MODE — survives env flips after construction (Fix 3a 2026-05-04)', () => {
-    // Build a fake kshana-core layout with manifests in BOTH directories.
+    // Build a fake dhee-core layout with manifests in BOTH directories.
     // Built-in declares mode='local', cloud manifest leaves it unset
     // (registry must infer 'cloud' from the directory).
     const builtInDir = join(tmpRoot, 'workflows', 'built-in');
@@ -148,20 +148,20 @@ describe('WorkflowModeRegistry — embedded host integration', () => {
     expect(reg.getMode('flux2_klein_edit_cloud')).toBeDefined();
   });
 
-  it('default constructor (no projectRoot arg) lands on the kshana-core package, not process.cwd()', () => {
+  it('default constructor (no projectRoot arg) lands on the dhee-core package, not process.cwd()', () => {
     // Switch cwd to /tmp — anywhere that has NO `workflows/` directory.
-    // The default-construct should still find the real kshana-core
-    // shipped manifests via findKshanaCoreRoot(import.meta.url).
+    // The default-construct should still find the real dhee-core
+    // shipped manifests via finddheeCoreRoot(import.meta.url).
     const savedCwd = process.cwd();
     try {
       process.chdir(tmpdir());
       process.env['COMFY_MODE'] = 'cloud';
       const reg = new WorkflowModeRegistry();
       reg.refresh();
-      // The real kshana-core ships workflows/cloud/zimage_standard_cloud.
+      // The real dhee-core ships workflows/cloud/zimage_standard_cloud.
       // If the registry rooted at cwd, it'd find nothing because we
       // chdir'd into /tmp. So this only passes when projectRoot is
-      // resolved via findKshanaCoreRoot.
+      // resolved via finddheeCoreRoot.
       expect(reg.getMode('zimage_cloud')).toBeDefined();
     } finally {
       process.chdir(savedCwd);

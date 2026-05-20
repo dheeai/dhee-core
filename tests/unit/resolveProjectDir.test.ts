@@ -18,16 +18,16 @@ afterEach(() => {
 });
 
 describe('resolveProjectDir', () => {
-  it('finds <name>.kshana when present (canonical convention)', () => {
-    mkdirSync(join(basePath, 'my_proj.kshana'));
+  it('finds <name>.dhee when present (canonical convention)', () => {
+    mkdirSync(join(basePath, 'my_proj.dhee'));
     expect(resolveProjectDir({ name: 'my_proj', basePath })).toBe(
-      join(basePath, 'my_proj.kshana'),
+      join(basePath, 'my_proj.dhee'),
     );
   });
 
-  it('finds <name> (no suffix) when present (kshana-desktop convention)', () => {
+  it('finds <name> (no suffix) when present (dhee-desktop convention)', () => {
     // The desktop's NewProjectDialog creates `<workspace>/<name>`,
-    // no `.kshana` suffix. Earlier versions failed here, leading
+    // no `.dhee` suffix. Earlier versions failed here, leading
     // pi-agent to `mv` the folder. The fallback now handles it.
     mkdirSync(join(basePath, 'BurgerEating'));
     expect(resolveProjectDir({ name: 'BurgerEating', basePath })).toBe(
@@ -35,37 +35,37 @@ describe('resolveProjectDir', () => {
     );
   });
 
-  it('prefers <name>.kshana over <name> when both exist (regression pin)', () => {
+  it('prefers <name>.dhee over <name> when both exist (regression pin)', () => {
     // If a user has both for some reason, the canonical form wins so
-    // existing kshana projects don't suddenly resolve to something
+    // existing dhee projects don't suddenly resolve to something
     // else.
-    mkdirSync(join(basePath, 'p.kshana'));
+    mkdirSync(join(basePath, 'p.dhee'));
     mkdirSync(join(basePath, 'p'));
     expect(resolveProjectDir({ name: 'p', basePath })).toBe(
-      join(basePath, 'p.kshana'),
+      join(basePath, 'p.dhee'),
     );
   });
 
   it('uses an explicit projectDir when it exists, ignoring the convention probe', () => {
     const custom = join(basePath, 'totally', 'custom', 'place');
     mkdirSync(custom, { recursive: true });
-    // Also create the conventional <name>.kshana to confirm
+    // Also create the conventional <name>.dhee to confirm
     // projectDir wins over it.
-    mkdirSync(join(basePath, 'p.kshana'));
+    mkdirSync(join(basePath, 'p.dhee'));
     expect(
       resolveProjectDir({ name: 'p', basePath, projectDir: custom }),
     ).toBe(custom);
   });
 
   it('falls back to convention probe when projectDir is given but does not exist', () => {
-    mkdirSync(join(basePath, 'p.kshana'));
+    mkdirSync(join(basePath, 'p.dhee'));
     expect(
       resolveProjectDir({
         name: 'p',
         basePath,
         projectDir: '/nope/missing',
       }),
-    ).toBe(join(basePath, 'p.kshana'));
+    ).toBe(join(basePath, 'p.dhee'));
   });
 
   it('resolves relative projectDir against basePath', () => {
@@ -89,7 +89,7 @@ describe('resolveProjectDir', () => {
       // Must include both probe paths so the agent (or human) can see
       // exactly what was checked, instead of guessing.
       expect(e.attempted).toEqual([
-        join(basePath, 'ghost.kshana'),
+        join(basePath, 'ghost.dhee'),
         join(basePath, 'ghost'),
       ]);
     }
@@ -106,7 +106,7 @@ describe('resolveProjectDir', () => {
     } catch (err) {
       const e = err as ProjectDirNotFoundError;
       expect(e.attempted).toContain('/nope/missing');
-      expect(e.attempted).toContain(join(basePath, 'ghost.kshana'));
+      expect(e.attempted).toContain(join(basePath, 'ghost.dhee'));
       expect(e.attempted).toContain(join(basePath, 'ghost'));
     }
   });

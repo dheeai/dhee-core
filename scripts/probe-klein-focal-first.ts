@@ -30,7 +30,7 @@ const PROJECT = 'sun_hadnt_yet_cleared-2';
 const SCENE = 1;
 const SHOT = 6;
 const SEEDS = [13, 2027, 441, 98765, 1234567, 88888];
-const projectRoot = resolve(process.cwd(), `${PROJECT}.kshana`);
+const projectRoot = resolve(process.cwd(), `${PROJECT}.dhee`);
 
 // ── Hand-written focal-first prose ──────────────────────────────────────
 // Same shot content (s1 shot 6), same refs, same atmosphere — the ONLY

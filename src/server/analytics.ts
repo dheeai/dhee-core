@@ -173,7 +173,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kshana Tool Analytics</title>
+<title>dhee Tool Analytics</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
@@ -226,7 +226,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <body>
 <div style="display: flex; justify-content: space-between; align-items: center;">
   <div>
-    <h1>Kshana Tool Analytics</h1>
+    <h1>dhee Tool Analytics</h1>
     <div class="subtitle">Tool usage insights for data-driven optimization</div>
   </div>
   <button class="refresh-btn" onclick="loadAll()">Refresh</button>

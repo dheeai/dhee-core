@@ -3,11 +3,13 @@
  */
 import type { WebSocket } from '@fastify/websocket';
 import { join } from 'path';
-import { ConversationManager, type ConversationEvents } from './ConversationManager.js';
+import type { ConversationManager} from './ConversationManager.js';
+import type { ConversationEvents } from './ConversationManager.js';
 import { LocalFileSystem } from '../core/fs/LocalFileSystem.js';
 import { RemoteClientFileSystem } from '../core/fs/RemoteClientFileSystem.js';
 import { ProjectStateCache, type ProjectSnapshot } from '../core/fs/ProjectStateCache.js';
-import { ApiKeyAuth, shouldSkipAuth } from './auth.js';
+import type { ApiKeyAuth} from './auth.js';
+import { shouldSkipAuth } from './auth.js';
 import type { ExpandableTodoItem } from '../core/todo/index.js';
 import type { AgentStatus } from '../core/agent/index.js';
 import {
@@ -628,7 +630,7 @@ export class WebSocketHandler {
       // Send fresh todos from the reset project.json so UI updates immediately
       try {
         const { readFileSync, existsSync } = await import('fs');
-        const projectPath = join(basePath, `${projectName}.kshana`, 'project.json');
+        const projectPath = join(basePath, `${projectName}.dhee`, 'project.json');
         const project = JSON.parse(readFileSync(projectPath, 'utf-8'));
         const nodes = project.executorState?.nodes ?? {};
         const todos = Object.values(nodes).map((n: any) => ({
@@ -643,7 +645,7 @@ export class WebSocketHandler {
         // Push fresh assets so the storyboard clears anything cleared by reset.
         // The reset script clears each cleared node's `outputPath` but leaves the
         // file on disk; filterLiveAssets drops those stale entries.
-        const manifestPath = join(basePath, `${projectName}.kshana`, 'assets', 'manifest.json');
+        const manifestPath = join(basePath, `${projectName}.dhee`, 'assets', 'manifest.json');
         if (existsSync(manifestPath)) {
           try {
             const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
@@ -683,7 +685,7 @@ export class WebSocketHandler {
     socket: WebSocket,
     projectName: string,
   ): Promise<void> {
-    const projectDirName = `${projectName}.kshana`;
+    const projectDirName = `${projectName}.dhee`;
     const projectFile = join(process.cwd(), projectDirName, 'project.json');
     const timelineFile = join(process.cwd(), projectDirName, 'timeline.json');
 
@@ -829,7 +831,7 @@ export class WebSocketHandler {
       });
 
       const toolNames = this.conversationManager.getSessionToolNames(sessionId);
-      const projectName = projectDirName.replace('.kshana', '');
+      const projectName = projectDirName.replace('.dhee', '');
       this.sendMessage(socket, createServerMessage<StatusData>('status', sessionId, {
         status: 'ready',
         message: `Project "${data.title}" created`,
@@ -969,7 +971,7 @@ export class WebSocketHandler {
           todos: todos.map((t) => ({
             id: t.id,
             task: t.content, // ExpandableTodoItem uses 'content' not 'task'
-            status: t.status === 'expanded' ? 'completed' : t.status as 'pending' | 'in_progress' | 'completed' | 'cancelled',
+            status: t.status === 'expanded' ? 'completed' : t.status,
             depth: t.depth,
             hasSubtasks: false, // Current implementation doesn't track subtasks as property
           })),

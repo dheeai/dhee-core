@@ -85,7 +85,7 @@ function collectTrackedAssetPaths(project: ProjectFile | null): string[] {
 }
 
 /**
- * List project files tool - returns the directory structure of the .kshana project.
+ * List project files tool - returns the directory structure of the .dhee project.
  */
 export const listProjectFilesTool: ToolDefinition = createTool(
   'list_project_files',

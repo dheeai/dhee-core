@@ -57,8 +57,8 @@ export function synthesizeNodesFromAssets(
     if (a.type === "scene_image") {
       const m = SHOT_NODE_RE.exec(a.nodeId);
       if (!m) continue;
-      const sceneNum = m[1]!;
-      const shotNum = m[2]!;
+      const sceneNum = m[1];
+      const shotNum = m[2];
       const frame = frameOf(a);
       if (!frame) continue;
       const node = upsert(a.nodeId, () => ({
@@ -79,8 +79,8 @@ export function synthesizeNodesFromAssets(
     } else if (a.type === "scene_video") {
       const m = VIDEO_NODE_RE.exec(a.nodeId);
       if (!m) continue;
-      const sceneNum = m[1]!;
-      const shotNum = m[2]!;
+      const sceneNum = m[1];
+      const shotNum = m[2];
       const node = upsert(a.nodeId, () => ({
         id: a.nodeId!,
         typeId: "shot_video",

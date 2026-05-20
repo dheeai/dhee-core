@@ -1,6 +1,6 @@
 /**
- * WebSocket message types for kshana-core server.
- * Follows the same pattern as the Python kshana project.
+ * WebSocket message types for dhee-core server.
+ * Follows the same pattern as the Python dhee project.
  */
 
 /**
@@ -460,7 +460,7 @@ export function isRedoNodeMessage(msg: ClientMessage): msg is ClientMessage<Redo
 }
 
 export interface ResetProjectData {
-  /** Project name (without .kshana suffix) */
+  /** Project name (without .dhee suffix) */
   projectName: string;
   /** Stage to reset to (e.g., "characters", "shot_image_prompt") */
   stage: string;

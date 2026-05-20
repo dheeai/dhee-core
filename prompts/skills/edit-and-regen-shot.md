@@ -8,7 +8,7 @@ description: Apply a creative change to a single shot or frame by editing its pr
 Use this when the user asks for a creative change to **one specific
 shot or frame** — not for project-wide stylistic changes (those need
 `scene_video_prompt` resets) and not for fresh starts (those use
-`kshana_run_to`).
+`dhee_run_to`).
 
 ## Steps
 
@@ -53,7 +53,13 @@ shot or frame** — not for project-wide stylistic changes (those need
 4. **Write the file back** with `write` (or `edit` if it's a small
    targeted change). The new JSON must remain valid.
 
-5. **Trigger the regen** with `kshana_invalidate` + `kshana_run_to`.
+5. **Trigger the regen** with `dhee_invalidate` + `dhee_run_to`:
+   - `dhee_invalidate node=shot_image:scene_<N>_shot_<M>` then
+     `dhee_run_to scope='last_invalidated'` — regenerates just that
+     image (uses the new prompt; produces fresh first+last frames).
+   - `dhee_invalidate node=shot_video:scene_<N>_shot_<M>` then
+     `dhee_run_to scope='last_invalidated'` — regenerates the video
+     (uses the new motion directive over the existing frames).
 
    **Principle: you wrote it → don't invalidate it. Invalidate the
    consumer instead.** Every node represents an LLM call that produces
@@ -71,9 +77,9 @@ shot or frame** — not for project-wide stylistic changes (those need
    | `prompts/motion/scene_N_shot_M.json`               | `shot_video:scene_N_shot_M`            | `shot_motion_directive:scene_N_shot_M`     |
    | A first / last / mid frame PNG (hand-replaced)     | `shot_video:scene_N_shot_M`            | `shot_image:…` / `shot_image_last_frame:…` |
 
-   After invalidating, run `kshana_run_to scope='last_invalidated'`.
+   After invalidating, run `dhee_run_to scope='last_invalidated'`.
    The regenerated asset surfaces as a media card in the chat as it
-   lands on disk — you don't need to call `kshana_show_*` after.
+   lands on disk — you don't need to call `dhee_show_*` after.
 
 ## What NOT to do
 
@@ -99,9 +105,9 @@ shot or frame** — not for project-wide stylistic changes (those need
   on disk no one wired in.
 - Don't rewrite the entire prompt file from scratch — preserve the
   scaffolding (references, generationMode, schema fields).
-- Don't run `kshana_run_to <stage>` for a single-shot change — that
+- Don't run `dhee_run_to <stage>` for a single-shot change — that
   re-executes every shot.
-- Don't call `kshana_invalidate stage=<upstream>` (plot, story,
+- Don't call `dhee_invalidate stage=<upstream>` (plot, story,
   characters, setting, scene, world_style, scene_video_prompt) — that
   wipes wide swaths of generated content. Always invalidate the
   smallest scope that gets the job done; for a single shot edit that
@@ -109,9 +115,9 @@ shot or frame** — not for project-wide stylistic changes (those need
 
 ## Confirming the result
 
-After `kshana_run_to scope='last_invalidated'` finishes:
+After `dhee_run_to scope='last_invalidated'` finishes:
 
-1. **Call `kshana_describe_image`** on the regenerated frame, passing
+1. **Call `dhee_describe_image`** on the regenerated frame, passing
    the prompt you just edited as `expectedPrompt`. The VLM tells you
    whether the new image actually reflects the edit (or whether the
    regen drifted, lost a reference, etc.).
@@ -122,6 +128,6 @@ After `kshana_run_to scope='last_invalidated'` finishes:
 3. If the user wants another iteration, repeat steps 1–4 of this
    skill with their next change.
 
-Skip step 1 only if `kshana_describe_image` returns "VLM not
-configured" — in that case fall back to `kshana_show_*` + asking
+Skip step 1 only if `dhee_describe_image` returns "VLM not
+configured" — in that case fall back to `dhee_show_*` + asking
 the user.

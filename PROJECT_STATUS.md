@@ -1,8 +1,8 @@
-# Kshana - Project Progress Report
+# dhee - Project Progress Report
 
-## What is Kshana?
+## What is dhee?
 
-Kshana is a **CLI-based AI video generation pipeline** that transforms text stories into fully produced videos through an automated 8-phase workflow.
+dhee is a **CLI-based AI video generation pipeline** that transforms text stories into fully produced videos through an automated 8-phase workflow.
 
 ### The Problem
 
@@ -17,7 +17,7 @@ The result: hours of manual orchestration, inconsistent characters across scenes
 
 ### The Solution
 
-Kshana orchestrates the entire pipeline automatically:
+dhee orchestrates the entire pipeline automatically:
 
 **Input**: A text story or idea (e.g., "A boy wakes up alone on a mysterious island...")
 
@@ -53,7 +53,7 @@ The core pipeline is functional and generating real video output. Active daily d
 
 - All 8 phases implemented and functional
 - ComfyUI integration (ZImage, Qwen Edit Lightning, WAN Video)
-- Project state persistence in `.kshana/project.json`
+- Project state persistence in `.dhee/project.json`
 - Per-item approval workflow
 - Reference-based scene generation for character consistency
 - Real-time streaming display in CLI
@@ -143,7 +143,7 @@ The core pipeline is functional and generating real video output. Active daily d
 ## Repository Structure
 
 ```
-kshana-core/
+dhee-core/
 ├── src/
 │   ├── App.tsx                 # Main CLI application
 │   ├── components/             # React Ink UI components
@@ -154,7 +154,7 @@ kshana-core/
 │       └── workflow/           # 8-phase state machine
 ├── prompts/workflow/           # Phase-specific prompts
 ├── workflows/                  # ComfyUI workflow JSON files
-└── .kshana/                    # Project data (created per-project)
+└── .dhee/                    # Project data (created per-project)
     ├── project.json            # Project state
     ├── plans/                  # Generated plans (plot, story, etc.)
     ├── characters/             # Character profiles

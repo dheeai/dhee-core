@@ -11,7 +11,7 @@ ONE source of truth for project state — `executorState.nodes` in `project.json
 | # | Subsystem | Approx LOC | Why retiring |
 |---|---|---|---|
 | **A** | Phase state machine (`project.phases`, `currentPhase`, `PlannerStage`) | ~1,400 | Graph deps already enforce order |
-| **B** | Approval CRUD (`approvalStatus`, `regenerationCount` on flat objects) | ~600 | DELETED — approval is pi-agent's domain, not kshana-core's |
+| **B** | Approval CRUD (`approvalStatus`, `regenerationCount` on flat objects) | ~600 | DELETED — approval is pi-agent's domain, not dhee-core's |
 | **C** | Content registry (`project.content` with `itemFiles`) | ~700 | Already duplicated by `node.outputPath` |
 | **D** | Flat file manifest (`project.files[]`) | ~250 | Derivable from `node.outputPath` across nodes |
 | **E** | Flat arrays (`project.characters[]`, `project.settings[]`, `project.scenes[]`) | ~500 | Replaced by graph queries |
@@ -31,7 +31,7 @@ metadata?: {
 };
 ```
 
-**Approvals are out of scope for kshana-core.** Per founder direction (2026-04-28): all approval / regeneration / feedback flows live in pi-agent (the external orchestrator). Do NOT reintroduce approval fields here without explicit go-ahead.
+**Approvals are out of scope for dhee-core.** Per founder direction (2026-04-28): all approval / regeneration / feedback flows live in pi-agent (the external orchestrator). Do NOT reintroduce approval fields here without explicit go-ahead.
 
 ## Persistence cadence — the bug behind today's mess
 
@@ -62,7 +62,7 @@ Identified by Plan agent. Verifying file paths — see in-progress audit.
 ## Risk callouts (add tests BEFORE deleting)
 
 1. **Reference image resolution** (`src/tasks/video/tools.ts:1300-1570`). Three lookup priorities, no direct unit test. Add fixture test before PR2.
-2. ~~Approval flow round-trip~~. Approvals leaving kshana-core entirely; no new tests needed.
+2. ~~Approval flow round-trip~~. Approvals leaving dhee-core entirely; no new tests needed.
 3. **Resume from disk after redo**. Add scenario test before PR3.
 4. **`expandCollection` persistence gap**. Watchdog test in PR1.
 5. **`run-to <stage>` semantics**. Verify `stages.ts:resolveStageToTypeIds` doesn't read `PHASE_CONFIGS`. Add integration test before PR5.

@@ -7,14 +7,14 @@ import { atomicWriteFileSync } from '../../../utils/atomicWrite.js';
 
 /**
  * Default basePath for project filesystem helpers. Reads
- * `KSHANA_PROJECTS_DIR` first so embedded hosts (kshana-desktop's
- * Electron main process) can point kshana-core at the right dir
+ * `dhee_PROJECTS_DIR` first so embedded hosts (dhee-desktop's
+ * Electron main process) can point dhee-core at the right dir
  * without chdir-ing process-globally — that breaks unrelated
  * `process.cwd()` callers in the host. Falls back to process.cwd()
  * for the standalone CLI (where cwd IS the projects dir).
  */
 export function defaultBasePath(): string {
-  const override = process.env['KSHANA_PROJECTS_DIR'];
+  const override = process.env['dhee_PROJECTS_DIR'];
   return override && override.length > 0 ? override : process.cwd();
 }
 

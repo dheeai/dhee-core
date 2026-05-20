@@ -45,7 +45,7 @@ function readProject(): { scenes?: Array<{ sceneNumber: number; shots: Array<{ s
 }
 
 beforeEach(() => {
-  basePath = mkdtempSync(join(tmpdir(), "kshana-backfill-stale-"));
+  basePath = mkdtempSync(join(tmpdir(), "dhee-backfill-stale-"));
   mkdirSync(join(basePath, "assets", "images"), { recursive: true });
 });
 

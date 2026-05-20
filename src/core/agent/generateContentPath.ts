@@ -103,7 +103,7 @@ export function resolveGenerateContentOutputFile({
     return outputFile;
   }
 
-  let resolved = CONTENT_TYPE_OUTPUT_FILES[contentType] || `plans/${contentType}.md`;
+  const resolved = CONTENT_TYPE_OUTPUT_FILES[contentType] || `plans/${contentType}.md`;
   const structuredPath = resolveStructuredContentOutputFile(contentType, resolved, {
     name,
     sceneNumber: sceneNumber ?? inferSceneNumberFromInstruction(instruction),

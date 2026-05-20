@@ -307,6 +307,13 @@ export class LLMClient {
 
     const response = await this.client.chat.completions.create({
       model: this.model,
+      // `reasoning.exclude: true` tells reasoning models (qwen3.5, deepseek-r1,
+      // etc.) on OpenRouter not to emit a chain-of-thought. Without it, reasoning
+      // tokens consume the entire `max_tokens` budget and `content` comes back
+      // null → false-fail → unnecessary regeneration. Harmless on non-reasoning
+      // models (silently ignored). Same fix as `chatWithImage` below.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...({ reasoning: { exclude: true } } as any),
       messages: [
         {
           role: 'system',
@@ -348,7 +355,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
         },
       ],
       temperature: 0.1,
-      max_tokens: 200,
+      max_tokens: 20000,
     }, opts?.signal ? { signal: opts.signal } : undefined);
 
     const text = response.choices[0]?.message?.content ?? '';
@@ -533,7 +540,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
 
     // Accumulate for final logging
     let fullContent = '';
-    let fullReasoning = '';
+    const fullReasoning = '';
     const reasoningDetails: unknown[] = [];
     const toolCallAccumulators: Map<number, { id: string; name: string; arguments: string }> =
       new Map();
@@ -828,7 +835,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
   private cleanContent(content: string | null): string | null {
     if (!content) return null;
     // Remove <think> tags from reasoning models
-    let cleaned = content
+    const cleaned = content
       .replace(/<think>.*?<\/think>/gs, '') // Complete think blocks
       .replace(/<think>.*$/gs, '') // Orphan opening tag (no closing)
       .replace(/<\/think>/g, ''); // Orphan closing tag (no opening)

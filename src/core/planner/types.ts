@@ -354,7 +354,7 @@ export interface ExecutionNodeMetadata {
   summary?: string;
   // NOTE: approval / regeneration / feedback state is intentionally
   // NOT modeled here. Approval lives in pi-agent (the external
-  // orchestrator); kshana-core just runs the executor. Don't
+  // orchestrator); dhee-core just runs the executor. Don't
   // reintroduce approval fields without explicit direction.
 }
 

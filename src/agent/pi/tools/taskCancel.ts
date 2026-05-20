@@ -24,9 +24,9 @@ export interface CancelDetails {
   log: string;
 }
 
-export const kshanaTaskCancel = defineTool({
-  name: "kshana_task_cancel",
-  label: "kshana task cancel",
+export const dheeTaskCancel = defineTool({
+  name: "dhee_task_cancel",
+  label: "dhee task cancel",
   description:
     "Cancel the active background task. Returns immediately — the abort signal still takes a moment to propagate through the executor and any in-flight ComfyUI / LLM calls. Subscribers to the runner's events will see a 'cancelled' notification when the task actually winds down.",
   parameters: Params,

@@ -6,7 +6,7 @@ Runtime app configuration (`LLM_*`, `OPENAI_*`, `COMFYUI_*`, `POSTHOG_*`, `ANALY
 
 ## Files
 
-- `docker-compose.yml`: runs `kshana-core-prod`, `kshana-core-dev`, and `nginx`
+- `docker-compose.yml`: runs `dhee-core-prod`, `dhee-core-dev`, and `nginx`
 - `nginx.conf`: routes `/` to prod and `/dev/` to dev
 - `deploy.sh`: updates only one branch service at a time
 - `.env.example`: required runtime environment keys

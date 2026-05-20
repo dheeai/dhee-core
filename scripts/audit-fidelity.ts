@@ -297,7 +297,7 @@ async function main(): Promise<void> {
     console.error('Usage: pnpm audit-fidelity <project-name> [--limit=N] [--per-scene=N] [--concurrency=N]');
     process.exit(1);
   }
-  const projectDir = join(projectRoot, projectName.endsWith('.kshana') ? projectName : `${projectName}.kshana`);
+  const projectDir = join(projectRoot, projectName.endsWith('.dhee') ? projectName : `${projectName}.dhee`);
   if (!existsSync(projectDir)) {
     console.error(`Project not found: ${projectDir}`);
     process.exit(1);

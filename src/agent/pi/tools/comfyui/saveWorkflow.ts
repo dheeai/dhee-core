@@ -62,9 +62,9 @@ function failure(message: string): { content: { type: "text"; text: string }[]; 
   };
 }
 
-export const kshanaSaveComfyWorkflow = defineTool({
-  name: "kshana_save_comfy_workflow",
-  label: "kshana save-comfy-workflow",
+export const dheeSaveComfyWorkflow = defineTool({
+  name: "dhee_save_comfy_workflow",
+  label: "dhee save-comfy-workflow",
   description:
     "Persist a user-confirmed ComfyUI workflow + manifest under the user workflows directory and refresh the registry. Run only AFTER the user has explicitly confirmed the proposed mappings, name, and defaults. Returns the final id (which may differ from the requested id if on_conflict='rename' was used).",
   parameters: Params,

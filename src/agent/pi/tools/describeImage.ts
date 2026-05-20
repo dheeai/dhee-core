@@ -1,5 +1,5 @@
 /**
- * `kshana_describe_image` — pi-agent's on-demand vision tool.
+ * `dhee_describe_image` — pi-agent's on-demand vision tool.
  *
  * The auto-described asset events (the `[SYSTEM EVENT]` messages with
  * a `vlm_description`) cover assets *as they're generated*. This tool
@@ -34,7 +34,7 @@ import { getProjectsDir } from "../paths.js";
 const Params = Type.Object({
   project: Type.String({
     description:
-      "Project name as it appears in the projects folder (no .kshana suffix needed).",
+      "Project name as it appears in the projects folder (no .dhee suffix needed).",
   }),
   path: Type.String({
     description:
@@ -59,11 +59,11 @@ export interface DescribeImageDetails {
   vlmConfigured: boolean;
 }
 
-export const kshanaDescribeImage = defineTool({
-  name: "kshana_describe_image",
-  label: "kshana describe-image",
+export const dheeDescribeImage = defineTool({
+  name: "dhee_describe_image",
+  label: "dhee describe-image",
   description:
-    "Ask the VLM to describe an image inside a kshana project. Returns plain-text description plus an artifact assessment. Use to validate generated frames against intent, cross-check continuity, or answer 'what's actually in this image?' questions. Optional expectedPrompt anchors the VLM to do a match-or-miss assessment instead of generic captioning.",
+    "Ask the VLM to describe an image inside a dhee project. Returns plain-text description plus an artifact assessment. Use to validate generated frames against intent, cross-check continuity, or answer 'what's actually in this image?' questions. Optional expectedPrompt anchors the VLM to do a match-or-miss assessment instead of generic captioning.",
   parameters: Params,
   async execute(
     _id,
@@ -79,7 +79,7 @@ export const kshanaDescribeImage = defineTool({
       ? resolve(params.path)
       : resolve(projectDir, params.path);
 
-    // Path-traversal guard — same shape as kshana_read_artifact. We
+    // Path-traversal guard — same shape as dhee_read_artifact. We
     // don't want pi-agent to point the VLM at arbitrary host files.
     const rel = relative(projectDir, target);
     if (rel.startsWith("..") || rel.startsWith(`..${sep}`)) {
@@ -99,7 +99,7 @@ export const kshanaDescribeImage = defineTool({
     if (description === null) {
       const text =
         "VLM not configured or call failed. Set VLM_PROVIDER / VLM_API_KEY / " +
-        "VLM_MODEL in Settings → Connection → VLM (or in kshana-core/.env for " +
+        "VLM_MODEL in Settings → Connection → VLM (or in dhee-core/.env for " +
         "dev mode), then retry. The vlmJudge toggle in Settings → Appearance " +
         "must also be on.";
       return {

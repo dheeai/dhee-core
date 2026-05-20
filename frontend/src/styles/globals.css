@@ -2,8 +2,8 @@
 @plugin "@tailwindcss/typography";
 
 /*
- * Kshana-Core Design Tokens
- * Derived from kshana-website design system.
+ * dhee-Core Design Tokens
+ * Derived from dhee-website design system.
  * Dark-first, cyan + green accents, glassmorphic depth.
  */
 
@@ -12,7 +12,7 @@
   --background: #030508;
   --foreground: #f0f4f8;
   --signal-cyan: #6bb3e8;
-  --kshana-green: #4ae8b0;
+  --dhee-green: #4ae8b0;
 
   /* ── Surfaces (glassmorphic) ───────────────────────────── */
   --panel: rgba(10, 13, 19, 0.72);
@@ -72,7 +72,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-cyan: var(--signal-cyan);
-  --color-green: var(--kshana-green);
+  --color-green: var(--dhee-green);
   --color-panel: var(--panel);
   --color-panel-strong: var(--panel-strong);
   --color-line-soft: var(--line-soft);

@@ -2,7 +2,7 @@
  * Pick the workflow for image_editing.
  *
  * Default: the built-in FLUX 2 Klein edit workflow shipped with
- * kshana-core. Selection is mode-aware — `flux2_klein_edit_local`
+ * dhee-core. Selection is mode-aware — `flux2_klein_edit_local`
  * when running against a local ComfyUI, `flux2_klein_edit_cloud`
  * when targeting ComfyUI Cloud.
  *

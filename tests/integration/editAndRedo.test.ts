@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 function createTestProject(nodes: Record<string, any>) {
-  const projectDir = join(testDir, 'test.kshana');
+  const projectDir = join(testDir, 'test.dhee');
   mkdirSync(projectDir, { recursive: true });
   mkdirSync(join(projectDir, 'assets', 'images'), { recursive: true });
   mkdirSync(join(projectDir, 'prompts', 'images', 'characters'), { recursive: true });

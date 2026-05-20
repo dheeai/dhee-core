@@ -43,11 +43,11 @@ function statusMatches(filter: string | undefined, status: string): boolean {
   return status === filter;
 }
 
-export const kshanaListItems = defineTool({
-  name: "kshana_list_items",
-  label: "kshana list-items",
+export const dheeListItems = defineTool({
+  name: "dhee_list_items",
+  label: "dhee list-items",
   description:
-    "List nodes in a kshana project's dependency graph. Optionally filter by typeId, status, or a regex over node ids.",
+    "List nodes in a dhee project's dependency graph. Optionally filter by typeId, status, or a regex over node ids.",
   parameters: Params,
   async execute(_id, params: Static<typeof Params>) {
     let projectDir: string;

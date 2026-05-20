@@ -1,73 +1,73 @@
-import { kshanaStatus } from "./status.js";
-import { kshanaListItems } from "./listItems.js";
-import { kshanaListProjects } from "./listProjects.js";
-import { kshanaNew } from "./newProject.js";
-import { kshanaRunTo } from "./runTo.js";
-import { kshanaInvalidate } from "./invalidate.js";
-import { kshanaReadArtifact } from "./readArtifact.js";
-import { kshanaDescribeImage } from "./describeImage.js";
-import { kshanaRenderSceneBundle } from "./renderSceneBundle.js";
-import { kshanaTaskStatus } from "./taskStatus.js";
-import { kshanaTaskCancel } from "./taskCancel.js";
+import { dheeStatus } from "./status.js";
+import { dheeListItems } from "./listItems.js";
+import { dheeListProjects } from "./listProjects.js";
+import { dheeNew } from "./newProject.js";
+import { dheeRunTo } from "./runTo.js";
+import { dheeInvalidate } from "./invalidate.js";
+import { dheeReadArtifact } from "./readArtifact.js";
+import { dheeDescribeImage } from "./describeImage.js";
+import { dheeRenderSceneBundle } from "./renderSceneBundle.js";
+import { dheeTaskStatus } from "./taskStatus.js";
+import { dheeTaskCancel } from "./taskCancel.js";
 import {
-  kshanaShowFirstFrame,
-  kshanaShowLastFrame,
-  kshanaShowShotVideo,
-  kshanaShowFinalVideo,
+  dheeShowFirstFrame,
+  dheeShowLastFrame,
+  dheeShowShotVideo,
+  dheeShowFinalVideo,
 } from "./showAsset.js";
 import {
-  kshanaValidateComfyWorkflow,
-  kshanaAnalyzeComfyWorkflow,
-  kshanaSaveComfyWorkflow,
-  kshanaListComfyWorkflows,
-  kshanaUpdateComfyWorkflow,
-  kshanaDeleteComfyWorkflow,
+  dheeValidateComfyWorkflow,
+  dheeAnalyzeComfyWorkflow,
+  dheeSaveComfyWorkflow,
+  dheeListComfyWorkflows,
+  dheeUpdateComfyWorkflow,
+  dheeDeleteComfyWorkflow,
 } from "./comfyui/index.js";
 
-export const kshanaTools = [
-  kshanaListProjects,
-  kshanaStatus,
-  kshanaListItems,
-  kshanaNew,
-  kshanaRunTo,
-  kshanaInvalidate,
-  kshanaReadArtifact,
-  kshanaDescribeImage,
-  kshanaRenderSceneBundle,
-  kshanaTaskStatus,
-  kshanaTaskCancel,
-  kshanaShowFirstFrame,
-  kshanaShowLastFrame,
-  kshanaShowShotVideo,
-  kshanaShowFinalVideo,
-  kshanaValidateComfyWorkflow,
-  kshanaAnalyzeComfyWorkflow,
-  kshanaSaveComfyWorkflow,
-  kshanaListComfyWorkflows,
-  kshanaUpdateComfyWorkflow,
-  kshanaDeleteComfyWorkflow,
+export const dheeTools = [
+  dheeListProjects,
+  dheeStatus,
+  dheeListItems,
+  dheeNew,
+  dheeRunTo,
+  dheeInvalidate,
+  dheeReadArtifact,
+  dheeDescribeImage,
+  dheeRenderSceneBundle,
+  dheeTaskStatus,
+  dheeTaskCancel,
+  dheeShowFirstFrame,
+  dheeShowLastFrame,
+  dheeShowShotVideo,
+  dheeShowFinalVideo,
+  dheeValidateComfyWorkflow,
+  dheeAnalyzeComfyWorkflow,
+  dheeSaveComfyWorkflow,
+  dheeListComfyWorkflows,
+  dheeUpdateComfyWorkflow,
+  dheeDeleteComfyWorkflow,
 ];
 
 export {
-  kshanaStatus,
-  kshanaListItems,
-  kshanaListProjects,
-  kshanaNew,
-  kshanaRunTo,
-  kshanaInvalidate,
-  kshanaReadArtifact,
-  kshanaDescribeImage,
-  kshanaRenderSceneBundle,
-  kshanaTaskStatus,
-  kshanaTaskCancel,
-  kshanaShowFirstFrame,
-  kshanaShowLastFrame,
-  kshanaShowShotVideo,
-  kshanaShowFinalVideo,
-  kshanaValidateComfyWorkflow,
-  kshanaAnalyzeComfyWorkflow,
-  kshanaSaveComfyWorkflow,
-  kshanaListComfyWorkflows,
-  kshanaUpdateComfyWorkflow,
-  kshanaDeleteComfyWorkflow,
+  dheeStatus,
+  dheeListItems,
+  dheeListProjects,
+  dheeNew,
+  dheeRunTo,
+  dheeInvalidate,
+  dheeReadArtifact,
+  dheeDescribeImage,
+  dheeRenderSceneBundle,
+  dheeTaskStatus,
+  dheeTaskCancel,
+  dheeShowFirstFrame,
+  dheeShowLastFrame,
+  dheeShowShotVideo,
+  dheeShowFinalVideo,
+  dheeValidateComfyWorkflow,
+  dheeAnalyzeComfyWorkflow,
+  dheeSaveComfyWorkflow,
+  dheeListComfyWorkflows,
+  dheeUpdateComfyWorkflow,
+  dheeDeleteComfyWorkflow,
 };

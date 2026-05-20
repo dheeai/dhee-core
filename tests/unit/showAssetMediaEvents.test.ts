@@ -1,16 +1,16 @@
 /**
  * Two combined regressions in `showAsset.ts`:
  *
- *  1. `loadProject` hardcoded `<projectsDir>/<name>.kshana`. Bare-name
- *     project folders (kshana-desktop's NewProjectDialog default —
+ *  1. `loadProject` hardcoded `<projectsDir>/<name>.dhee`. Bare-name
+ *     project folders (dhee-desktop's NewProjectDialog default —
  *     `<workspace>/<name>` with no suffix) returned null from
  *     loadProject and the tools fell through to the manifest-only
  *     path. Same family of bug as status / listItems / showShot,
  *     fixed there but missed here.
  *
- *  2. The four show-asset tools (`kshana_show_first_frame`,
- *     `kshana_show_last_frame`, `kshana_show_shot_video`,
- *     `kshana_show_final_video`) had NO `onMedia` plumbing. They
+ *  2. The four show-asset tools (`dhee_show_first_frame`,
+ *     `dhee_show_last_frame`, `dhee_show_shot_video`,
+ *     `dhee_show_final_video`) had NO `onMedia` plumbing. They
  *     returned `{ details: { file_path } }` and nothing in the
  *     pipeline converted that to a `media_generated` chat event. So
  *     pi-agent calls returned a checkmark + path text but no inline
@@ -45,8 +45,8 @@ let originalEnv: string | undefined;
 let mediaCalls: MediaCall[];
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), "kshana-show-media-"));
-  // Bare-name folder (no .kshana suffix) — mirrors kshana-desktop's
+  projectsDir = mkdtempSync(join(tmpdir(), "dhee-show-media-"));
+  // Bare-name folder (no .dhee suffix) — mirrors dhee-desktop's
   // NewProjectDialog default.
   const proj = join(projectsDir, "TheVillage");
   mkdirSync(join(proj, "assets"), { recursive: true });
@@ -86,14 +86,14 @@ beforeEach(() => {
     ),
     "utf8",
   );
-  originalEnv = process.env["KSHANA_PROJECTS_DIR"];
-  process.env["KSHANA_PROJECTS_DIR"] = projectsDir;
+  originalEnv = process.env["dhee_PROJECTS_DIR"];
+  process.env["dhee_PROJECTS_DIR"] = projectsDir;
   mediaCalls = [];
 });
 
 afterEach(() => {
-  if (originalEnv === undefined) delete process.env["KSHANA_PROJECTS_DIR"];
-  else process.env["KSHANA_PROJECTS_DIR"] = originalEnv;
+  if (originalEnv === undefined) delete process.env["dhee_PROJECTS_DIR"];
+  else process.env["dhee_PROJECTS_DIR"] = originalEnv;
   rmSync(projectsDir, { recursive: true, force: true });
 });
 
@@ -108,7 +108,7 @@ async function exec(tool: any, params: unknown): Promise<{ details: Record<strin
 }
 
 describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
-  it("kshana_show_first_frame finds the file under a bare-name folder AND emits an image media event", async () => {
+  it("dhee_show_first_frame finds the file under a bare-name folder AND emits an image media event", async () => {
     const tool = createShowFirstFrameTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/images/s1shot1_first.png");
@@ -117,12 +117,12 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
         kind: "image",
         path: "assets/images/s1shot1_first.png",
         project: "TheVillage",
-        source: "kshana_show_first_frame",
+        source: "dhee_show_first_frame",
       },
     ]);
   });
 
-  it("kshana_show_last_frame emits an image media event", async () => {
+  it("dhee_show_last_frame emits an image media event", async () => {
     const tool = createShowLastFrameTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/images/s1shot1_last.png");
@@ -131,12 +131,12 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
         kind: "image",
         path: "assets/images/s1shot1_last.png",
         project: "TheVillage",
-        source: "kshana_show_last_frame",
+        source: "dhee_show_last_frame",
       },
     ]);
   });
 
-  it("kshana_show_shot_video emits a video media event", async () => {
+  it("dhee_show_shot_video emits a video media event", async () => {
     const tool = createShowShotVideoTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/videos/shots/s1shot1.mp4");
@@ -145,12 +145,12 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
         kind: "video",
         path: "assets/videos/shots/s1shot1.mp4",
         project: "TheVillage",
-        source: "kshana_show_shot_video",
+        source: "dhee_show_shot_video",
       },
     ]);
   });
 
-  it("kshana_show_final_video emits a video media event", async () => {
+  it("dhee_show_final_video emits a video media event", async () => {
     const tool = createShowFinalVideoTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage" });
     expect(r.details["file_path"]).toBe("assets/videos/final/final.mp4");
@@ -159,7 +159,7 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
         kind: "video",
         path: "assets/videos/final/final.mp4",
         project: "TheVillage",
-        source: "kshana_show_final_video",
+        source: "dhee_show_final_video",
       },
     ]);
   });

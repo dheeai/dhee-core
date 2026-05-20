@@ -34,7 +34,7 @@ function warnOnce(key: string, message: string): void {
   const last = recentWarnings.get(key) ?? 0;
   if (now - last < WARNING_DEDUPE_MS) return;
   recentWarnings.set(key, now);
-  // eslint-disable-next-line no-console
+   
   console.warn(message);
 }
 
@@ -95,7 +95,7 @@ async function extractFromStory(
       const band = checkDurationBand(result.totalEstimatedDuration, dur);
       // Log the band status — telemetry only, we don't block on it since
       // the user explicitly chose time-as-guidance over time-as-cap.
-      // eslint-disable-next-line no-console
+       
       console.log(
         `[duration-first] ${result.beats.length} beats → ${result.scenes.length} scenes, ` +
         `total ~${result.totalEstimatedDuration.toFixed(0)}s (target ${dur}s, ratio ${band.ratio.toFixed(2)}, ${band.status})`,

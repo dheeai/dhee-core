@@ -17,12 +17,12 @@ describe('Project version compatibility', () => {
   let testBasePath: string;
 
   beforeEach(() => {
-    testBasePath = fs.mkdtempSync(join(os.tmpdir(), 'kshana-version-'));
+    testBasePath = fs.mkdtempSync(join(os.tmpdir(), 'dhee-version-'));
     initializeTemplates();
   });
 
   afterEach(() => {
-    setActiveProjectDir('default.kshana');
+    setActiveProjectDir('default.dhee');
     if (fs.existsSync(testBasePath)) {
       fs.rmSync(testBasePath, { recursive: true, force: true });
     }
@@ -42,7 +42,7 @@ describe('Project version compatibility', () => {
   });
 
   it('uses the current version in the generic manager incompatibility error', async () => {
-    setActiveProjectDir('generic-version-test.kshana');
+    setActiveProjectDir('generic-version-test.dhee');
     const manager = new GenericProjectManager(testBasePath);
 
     await manager.createProject({
@@ -51,7 +51,7 @@ describe('Project version compatibility', () => {
       inputContent: 'A short story seed.',
     });
 
-    const projectFile = join(testBasePath, 'generic-version-test.kshana', 'project.json');
+    const projectFile = join(testBasePath, 'generic-version-test.dhee', 'project.json');
     const project = JSON.parse(fs.readFileSync(projectFile, 'utf-8'));
     project.version = '1.0';
     fs.writeFileSync(projectFile, JSON.stringify(project, null, 2));

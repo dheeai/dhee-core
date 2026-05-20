@@ -287,6 +287,52 @@ describe('DependencyGraphExecutor', () => {
     });
   });
 
+  describe('getSummary', () => {
+    it('GIVEN one failed node WHEN getSummary runs THEN summary surfaces the node displayName and its error message', () => {
+      // Why this matters: getSummary() is one of two paths through which
+      // executor failure reaches the user's chat. When story_essence
+      // fails with "402 Credits exhausted", a generic "Status: Blocked"
+      // line tells the user nothing actionable. The displayName + error
+      // pair is the minimum information needed to diagnose.
+      const executor = buildExecutor(template);
+      executor.markStarted('plot');
+      executor.markFailed(
+        'plot',
+        'LLM generate failed (model=Qwen3.5-9B-HighIQ-Heretic): 402 "Credits exhausted"',
+      );
+
+      const summary = executor.getSummary();
+
+      // Failed-count rollup line still present.
+      expect(summary).toContain('Failed: 1 node(s)');
+      // Node identity (displayName) + the actual error string.
+      expect(summary).toContain('Plot');
+      expect(summary).toContain('402');
+      expect(summary).toContain('Credits exhausted');
+    });
+
+    it('GIVEN multiple failed nodes WHEN getSummary runs THEN every failure is listed with its own error', () => {
+      const executor = buildExecutor(template);
+      executor.markStarted('plot');
+      executor.markFailed('plot', 'plot LLM 402');
+      // story depends on plot but markFailed allows independent failures
+      // for collection items; emulate by failing plot and a sibling.
+      executor.markStarted('story');
+      executor.markFailed('story', 'story timeout after 90s');
+
+      const summary = executor.getSummary();
+
+      expect(summary).toContain('plot LLM 402');
+      expect(summary).toContain('story timeout after 90s');
+    });
+
+    it('GIVEN no failed nodes WHEN getSummary runs THEN no failure listing appears', () => {
+      const executor = buildExecutor(template);
+      const summary = executor.getSummary();
+      expect(summary).not.toMatch(/Failed:/);
+    });
+  });
+
   describe('invalidateNode (redo)', () => {
     it('resets the target node and all downstream dependents', () => {
       const executor = buildExecutor(template);

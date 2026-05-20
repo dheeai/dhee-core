@@ -6,7 +6,7 @@
  * Regenerate clicks did nothing visible.
  *
  * The fallback shells out to scripts/regen-node.ts (same path
- * kshana_regen uses) so pi-era projects get the same behavior as
+ * dhee_regen uses) so pi-era projects get the same behavior as
  * legacy executor projects.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -19,10 +19,10 @@ let tmpRoot: string;
 let originalProjectsDir: string | undefined;
 
 beforeEach(() => {
-  tmpRoot = mkdtempSync(join(tmpdir(), "kshana-redo-fallback-"));
-  originalProjectsDir = process.env["KSHANA_PROJECTS_DIR"];
-  // Layout: <tmpRoot>/test.kshana/project.json + assets/manifest.json
-  const proj = join(tmpRoot, "test.kshana");
+  tmpRoot = mkdtempSync(join(tmpdir(), "dhee-redo-fallback-"));
+  originalProjectsDir = process.env["dhee_PROJECTS_DIR"];
+  // Layout: <tmpRoot>/test.dhee/project.json + assets/manifest.json
+  const proj = join(tmpRoot, "test.dhee");
   mkdirSync(join(proj, "assets"), { recursive: true });
   writeFileSync(
     join(proj, "project.json"),
@@ -38,8 +38,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (originalProjectsDir === undefined) delete process.env["KSHANA_PROJECTS_DIR"];
-  else process.env["KSHANA_PROJECTS_DIR"] = originalProjectsDir;
+  if (originalProjectsDir === undefined) delete process.env["dhee_PROJECTS_DIR"];
+  else process.env["dhee_PROJECTS_DIR"] = originalProjectsDir;
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -75,7 +75,7 @@ describe("ConversationManager.redoNode pi-era fallback", () => {
     }).sessions;
     const s = internal.get(session.id)!;
     s.agent = fakeAgent;
-    s.sessionContext = { projectDir: "test.kshana" };
+    s.sessionContext = { projectDir: "test.dhee" };
     s.initialized = true;
 
     const events: ConversationEvents = {};

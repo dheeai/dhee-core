@@ -64,7 +64,7 @@ async function main() {
   }
 
   // Find project
-  const projectDir = resolve(`${projectName}.kshana`);
+  const projectDir = resolve(`${projectName}.dhee`);
   if (!existsSync(projectDir)) {
     console.error(`Project not found: ${projectDir}`);
     process.exit(1);

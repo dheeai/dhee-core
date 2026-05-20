@@ -1,10 +1,10 @@
 /**
- * Pure selection function for the unified `kshana_invalidate` op.
+ * Pure selection function for the unified `dhee_invalidate` op.
  *
  * Given a project's executor state and a selection mode (one of
  * `node`, `type`, or `stage`), returns the set of node ids that
  * should be invalidated. Three modes converge into one whitelist —
- * the same whitelist later picked up by `kshana_run_to scope=
+ * the same whitelist later picked up by `dhee_run_to scope=
  * 'last_invalidated'` so the user can choose between "continue from
  * here" (no whitelist) and "run only what I just invalidated" (this
  * whitelist).
@@ -125,7 +125,7 @@ describe("selectInvalidationIds — stage mode", () => {
     );
   });
 
-  it("throws for an unknown stage (mirrors kshana_reset's error contract)", () => {
+  it("throws for an unknown stage (mirrors dhee_reset's error contract)", () => {
     expect(() =>
       selectInvalidationIds(state, { stage: "no_such_stage" as never }),
     ).toThrow(/unknown stage/i);

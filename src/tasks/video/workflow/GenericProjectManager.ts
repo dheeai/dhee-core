@@ -320,7 +320,7 @@ export class GenericProjectManager {
     const sfs = getSessionFs();
 
     // Sync context store files
-    for (const [, entry] of Object.entries(this.project.contextStore) as [string, ContextStoreEntry][]) {
+    for (const [, entry] of Object.entries(this.project.contextStore)) {
       if (entry.filePath) {
         const fullPath = path.join(this.projectPath, entry.filePath);
         if (await sfs.exists(fullPath)) {
@@ -331,8 +331,8 @@ export class GenericProjectManager {
     }
 
     // Sync artifact files
-    for (const [, artifacts] of Object.entries(this.project.artifacts) as [string, Record<string, ArtifactInstance>][]) {
-      for (const [, artifact] of Object.entries(artifacts) as [string, ArtifactInstance][]) {
+    for (const [, artifacts] of Object.entries(this.project.artifacts)) {
+      for (const [, artifact] of Object.entries(artifacts)) {
         if (artifact.filePath) {
           const fullPath = path.join(this.projectPath, artifact.filePath);
           if (!(await sfs.exists(fullPath))) {

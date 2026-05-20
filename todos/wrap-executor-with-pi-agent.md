@@ -17,7 +17,7 @@ embedding. Evaluation done 2026-04-27:
 
 - `npm install @mariozechner/pi-coding-agent` (or `@mariozechner/pi-agent-core`
   for the lower-level loop without sessions/auth)
-- `createAgentSession({ noTools: 'all', customTools: kshanaTools })` —
+- `createAgentSession({ noTools: 'all', customTools: dheeTools })` —
   disables pi's default 7 file/shell tools (`read`, `write`, `edit`,
   `bash`, `grep`, `find`, `ls`) and registers ours instead. Public API,
   no fork.
@@ -32,7 +32,7 @@ embedding. Evaluation done 2026-04-27:
 
 - streaming token output per assistant turn
 - tool-call lifecycle events (started, streaming partial output,
-  completed, errored) — the kshana executor's existing progress events
+  completed, errored) — the dhee executor's existing progress events
   map to these
 - session management, branching, compaction
 - multi-provider auth (Anthropic, OpenAI, Gemini, OpenRouter, xAI,
@@ -41,18 +41,18 @@ embedding. Evaluation done 2026-04-27:
 - four runtime modes: interactive TUI, print, JSON, RPC for IPC, plus
   the SDK for in-process embedding
 
-## What kshana exposes as tools
+## What dhee exposes as tools
 
 Each maps to existing scripts/functions; the LLM picks based on user intent:
 
-- `kshana_new(name, style, duration, input)` → `scripts/new-project.ts`
-- `kshana_run_to(project, stage)` → `scripts/run-to.ts` (long-running)
-- `kshana_reset(project, stage)` → `scripts/reset-project.ts`
-- `kshana_status(project)` → `scripts/project-status.ts`
-- `kshana_audit_fidelity(project)` → `scripts/audit-fidelity.ts`
-- `kshana_list_items(project, type)` → `scripts/list-items.ts`
-- `kshana_read_artifact(project, path)` — safe read of project files
-- `kshana_render_scene_bundle(project, scene)` — explicit prompt-relay
+- `dhee_new(name, style, duration, input)` → `scripts/new-project.ts`
+- `dhee_run_to(project, stage)` → `scripts/run-to.ts` (long-running)
+- `dhee_reset(project, stage)` → `scripts/reset-project.ts`
+- `dhee_status(project)` → `scripts/project-status.ts`
+- `dhee_audit_fidelity(project)` → `scripts/audit-fidelity.ts`
+- `dhee_list_items(project, type)` → `scripts/list-items.ts`
+- `dhee_read_artifact(project, path)` — safe read of project files
+- `dhee_render_scene_bundle(project, scene)` — explicit prompt-relay
   scene render trigger
 
 Long-running tools (`run_to`, `audit_fidelity`, `render_scene_bundle`)
@@ -62,7 +62,7 @@ tool-cancellation contract.
 
 ## Desktop UI shape
 
-User goal: a desktop app where the user talks to a kshana agent that
+User goal: a desktop app where the user talks to a dhee agent that
 drives the executor. Three integration paths, ranked by effort:
 
 | | path | tradeoff |
@@ -78,7 +78,7 @@ explicitly built for path C.
 
 End-to-end **1-2 weeks** for a working desktop app:
 
-  - **~2 days** — npm-install pi, define the kshana tool surface,
+  - **~2 days** — npm-install pi, define the dhee tool surface,
     write the orchestrator system prompt, smoke-test in pi's
     interactive TUI mode (no UI yet).
   - **~3 days** — long-running tool plumbing: thread the executor's
@@ -86,10 +86,10 @@ End-to-end **1-2 weeks** for a working desktop app:
     handle the prompt_relay scene-bundle case (one tool call covers
     N shots).
   - **~5-7 days** — desktop shell (Electron or Tauri), embedding pi
-    via path A, B, or C, plus UX polish for the kshana-specific
+    via path A, B, or C, plus UX polish for the dhee-specific
     flows (project picker, asset previews, scene bundle progress).
 
-Pi side stays small; the kshana-specific glue is the main work.
+Pi side stays small; the dhee-specific glue is the main work.
 
 ## Key decisions to make before starting
 
@@ -98,7 +98,7 @@ Pi side stays small; the kshana-specific glue is the main work.
      process is simpler; out-of-process gives crash isolation and
      restart-without-app-restart. Probably out-of-process for safety
      given long renders.
-  2. **Where the executor runs.** The kshana executor is currently
+  2. **Where the executor runs.** The dhee executor is currently
      sync(ish) within Node — long renders in the same process as
      the agent are fine if cancellable. If we move the agent
      out-of-process, the executor goes with it.

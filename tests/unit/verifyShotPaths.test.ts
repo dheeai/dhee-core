@@ -28,7 +28,7 @@ function setProject(data: Record<string, unknown>): void {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "kshana-verify-"));
+  dir = mkdtempSync(join(tmpdir(), "dhee-verify-"));
 });
 
 afterEach(() => {

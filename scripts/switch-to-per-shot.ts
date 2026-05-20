@@ -19,7 +19,7 @@
  *      need to be regenerated from the new last_frames.
  *
  * After running this, the user needs to:
- *   - Set `KSHANA_VIDEO_STRATEGY=per_shot` in .env (uncomment it)
+ *   - Set `dhee_VIDEO_STRATEGY=per_shot` in .env (uncomment it)
  *   - `pnpm run-to <project> final_video`
  *
  * The executor will:
@@ -43,7 +43,7 @@ if (!projectArg) {
 
 const projectDir = resolve(
   process.cwd(),
-  projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`,
+  projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`,
 );
 const projectPath = join(projectDir, 'project.json');
 if (!existsSync(projectPath)) {
@@ -135,7 +135,7 @@ console.log(`shot_video: ${videoReset} reset to pending`);
 console.log(`final_video: ${finalReset} reset to pending`);
 console.log('');
 console.log('Next:');
-console.log('  1. Edit .env: uncomment KSHANA_VIDEO_STRATEGY=per_shot');
-console.log(`  2. pnpm run-to ${projectArg.replace(/\.kshana$/, '')} final_video`);
+console.log('  1. Edit .env: uncomment dhee_VIDEO_STRATEGY=per_shot');
+console.log(`  2. pnpm run-to ${projectArg.replace(/\.dhee$/, '')} final_video`);
 console.log('');
 console.log('The executor will skip first_frame regen on each shot_image and only generate the missing last_frame, then per-shot FLFV will render new videos.');

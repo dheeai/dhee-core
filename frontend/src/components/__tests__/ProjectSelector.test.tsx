@@ -12,13 +12,13 @@ globalThis.fetch = mockFetch
 const mockProjects = {
   projects: [
     {
-      dirName: 'old-project.kshana',
+      dirName: 'old-project.dhee',
       title: 'Old Project',
       currentPhase: 'scene_breakdown',
       templateId: 'narrative',
     },
     {
-      dirName: 'next-project.kshana',
+      dirName: 'next-project.dhee',
       title: 'Next Project',
       currentPhase: 'story',
       templateId: 'documentary',

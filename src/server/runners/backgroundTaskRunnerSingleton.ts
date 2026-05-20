@@ -1,10 +1,10 @@
 /**
  * Process-wide singleton instance of `BackgroundTaskRunner`.
  *
- * The runner is the single source of truth for "what long kshana
+ * The runner is the single source of truth for "what long dhee
  * operation is currently running" across the host. The pi-agent
- * dispatch tools (`kshana_dispatch_run_to`, etc.) talk to this
- * instance; the kshanaCoreManager subscribes to its events and
+ * dispatch tools (`dhee_dispatch_run_to`, etc.) talk to this
+ * instance; the dheeCoreManager subscribes to its events and
  * forwards them to the originating chat session's IPC stream.
  *
  * The singleton's `executor` understands every supported `TaskKind`
@@ -39,7 +39,7 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
      * 'all' (default) → drain everything pending in the graph
      * 'last_invalidated' → run ONLY the ids stored on
      *   `executorState.lastInvalidatedIds` by the most-recent
-     *   `kshana_invalidate` call. Honors the user's "redo this and
+     *   `dhee_invalidate` call. Honors the user's "redo this and
      *   stop, don't auto-cascade" rule.
      */
     scope?: 'all' | 'last_invalidated';
@@ -76,7 +76,7 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
       .executorState;
     if (!state) {
       throw new Error(
-        `Cannot resolve alias '${classified.alias}' — project has no executorState yet. Run kshana_run_to without a target first to bootstrap.`,
+        `Cannot resolve alias '${classified.alias}' — project has no executorState yet. Run dhee_run_to without a target first to bootstrap.`,
       );
     }
     const resolved = resolveNodeId(state, classified.alias);
@@ -169,10 +169,10 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
 // this module — so a per-module `let singleton` would create one
 // runner instance per bundle. ConversationManager would subscribe
 // to instance A; the desktop's IPC cancel handler (which loads
-// `kshana-core/runners`) would call .cancel() on instance B and the
+// `dhee-core/runners`) would call .cancel() on instance B and the
 // running task would never abort. Pin on `globalThis` so all bundles
 // resolve to the same instance.
-const SINGLETON_KEY = '__kshana_background_task_runner__';
+const SINGLETON_KEY = '__dhee_background_task_runner__';
 
 interface SingletonHolder {
   [SINGLETON_KEY]?: BackgroundTaskRunner;

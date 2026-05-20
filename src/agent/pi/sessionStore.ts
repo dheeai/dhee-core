@@ -9,12 +9,12 @@
  *
  * One global index file:
  *
- *   ~/.kshana/pi-sessions/sessions-index.json
+ *   ~/.dhee/pi-sessions/sessions-index.json
  *     Keyed by sessionId. Per-project lookups filter on `projectSlug`.
  *
  * The transcripts themselves live at:
  *
- *   ~/.kshana/pi-sessions/<projectSlug>/<sessionId>.jsonl
+ *   ~/.dhee/pi-sessions/<projectSlug>/<sessionId>.jsonl
  *
  * (`projectSlug` for ambient sessions before a project is focused is
  * the literal string `_default`.) Rewritten atomically (write tmp +
@@ -135,7 +135,7 @@ export function findSession(sessionId: string): SessionRecord | null {
   const record = global.sessions[sessionId];
   if (!record) return null;
   // Defensive: if the JSONL has been wiped manually (e.g. user
-  // cleared ~/.kshana), don't pretend we can resume.
+  // cleared ~/.dhee), don't pretend we can resume.
   if (!existsSync(record.sessionFile)) return null;
   return record;
 }

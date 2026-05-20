@@ -61,7 +61,7 @@ export interface RunExecutorTarget {
    * loop runs ONLY these node ids (filtered against `getNextReady`)
    * and exits when all are terminal. Other pending work in the graph
    * is left alone — the explicit "run only what was just invalidated"
-   * mode used by `kshana_run_to scope='last_invalidated'`.
+   * mode used by `dhee_run_to scope='last_invalidated'`.
    */
   runOnly?: string[];
 }

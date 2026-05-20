@@ -110,6 +110,13 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Serve favicon and other root-level static files
+    app.get('/favicon.png', async (_request: FastifyRequest, reply: FastifyReply) => {
+      const faviconPath = join(reactDistDir, 'favicon.png');
+      if (existsSync(faviconPath)) {
+        return reply.type('image/png').send(readFileSync(faviconPath));
+      }
+      return reply.status(404).send();
+    });
     app.get('/favicon.svg', async (_request: FastifyRequest, reply: FastifyReply) => {
       const faviconPath = join(reactDistDir, 'favicon.svg');
       if (existsSync(faviconPath)) {
@@ -140,7 +147,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/projects/:name',
     async (request: FastifyRequest<{ Params: { name: string } }>, reply: FastifyReply) => {
       const { name } = request.params;
-      const projectDir = join(process.cwd(), `${name}.kshana`);
+      const projectDir = join(process.cwd(), `${name}.dhee`);
       const projectFile = join(projectDir, 'project.json');
 
       if (!existsSync(projectFile)) {
@@ -161,7 +168,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/projects/:name/assets',
     async (request: FastifyRequest<{ Params: { name: string } }>, reply: FastifyReply) => {
       const { name } = request.params;
-      const manifestPath = join(process.cwd(), `${name}.kshana`, 'assets', 'manifest.json');
+      const manifestPath = join(process.cwd(), `${name}.dhee`, 'assets', 'manifest.json');
 
       if (!existsSync(manifestPath)) {
         return reply.send({ assets: [] });
@@ -175,7 +182,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
         // by any node's outputPath/outputPaths (e.g. cleared by a reset), and
         // attach `nodeId`/`frame` for storyboard grouping + redo. See
         // `filterLiveAssets` for the full rationale.
-        const projectPath = join(process.cwd(), `${name}.kshana`, 'project.json');
+        const projectPath = join(process.cwd(), `${name}.dhee`, 'project.json');
         let assets = allAssets;
         if (existsSync(projectPath)) {
           try {
@@ -198,7 +205,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/projects/:name/node-prompt/:nodeId',
     async (request: FastifyRequest<{ Params: { name: string; nodeId: string } }>, reply: FastifyReply) => {
       const { name, nodeId } = request.params;
-      const projectPath = join(process.cwd(), `${name}.kshana`, 'project.json');
+      const projectPath = join(process.cwd(), `${name}.dhee`, 'project.json');
 
       if (!existsSync(projectPath)) {
         return reply.status(404).send({ error: 'Project not found' });
@@ -221,7 +228,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
             // Fall back to the synthesized minimal shape otherwise.
             let prompt: Record<string, unknown> = synthesized.prompt;
             if (synthesized.promptFilePath) {
-              const absPath = join(process.cwd(), `${name}.kshana`, synthesized.promptFilePath);
+              const absPath = join(process.cwd(), `${name}.dhee`, synthesized.promptFilePath);
               if (existsSync(absPath)) {
                 try {
                   const raw = readFileSync(absPath, 'utf-8');
@@ -246,7 +253,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
         let prompt: Record<string, unknown> = {};
 
         if (promptPath) {
-          const absPath = join(process.cwd(), `${name}.kshana`, promptPath);
+          const absPath = join(process.cwd(), `${name}.dhee`, promptPath);
           if (existsSync(absPath)) {
             try {
               const raw = readFileSync(absPath, 'utf-8');
@@ -293,7 +300,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Invalid path' });
       }
 
-      const fullPath = join(process.cwd(), `${project}.kshana`, filePath);
+      const fullPath = join(process.cwd(), `${project}.dhee`, filePath);
 
       if (!existsSync(fullPath) || !statSync(fullPath).isFile()) {
         return reply.status(404).send({ error: 'Asset not found' });
@@ -374,7 +381,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/projects/:name/images',
     async (request: FastifyRequest<{ Params: { name: string } }>, reply: FastifyReply) => {
       const { name } = request.params;
-      const imagesDir = join(process.cwd(), `${name}.kshana`, 'assets', 'images');
+      const imagesDir = join(process.cwd(), `${name}.dhee`, 'assets', 'images');
 
       if (!existsSync(imagesDir)) {
         return reply.send({ images: [] });

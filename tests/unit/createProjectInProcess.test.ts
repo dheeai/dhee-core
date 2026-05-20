@@ -25,7 +25,7 @@ import {
 let basePath: string;
 
 beforeEach(() => {
-  basePath = mkdtempSync(join(tmpdir(), 'kshana-create-proj-'));
+  basePath = mkdtempSync(join(tmpdir(), 'dhee-create-proj-'));
 });
 
 afterEach(() => {
@@ -70,7 +70,7 @@ describe('createProjectInProcess', () => {
       basePath,
     });
 
-    const projectDir = join(basePath, 'noir.kshana');
+    const projectDir = join(basePath, 'noir.dhee');
     expect(result.projectDir).toBe(projectDir);
     expect(existsSync(projectDir)).toBe(true);
     expect(existsSync(join(projectDir, 'project.json'))).toBe(true);
@@ -257,18 +257,18 @@ describe('createProjectInProcess', () => {
         basePath,
       }),
     ).toThrow();
-    expect(existsSync(join(basePath, 'p.kshana'))).toBe(false);
+    expect(existsSync(join(basePath, 'p.dhee'))).toBe(false);
   });
 
-  // ── existingDir path (kshana-desktop integration) ──────────────────
+  // ── existingDir path (dhee-desktop integration) ──────────────────
   // The desktop's NewProjectDialog pre-creates the project folder and
   // writes a stub project.json + assets/manifest.json before the chat-
   // embedded wizard runs. With `existingDir` set, createProjectInProcess
   // initializes that folder in place rather than creating a new
-  // <name>.kshana sibling.
+  // <name>.dhee sibling.
 
   describe('with existingDir', () => {
-    it('uses existingDir verbatim as the projectDir (no .kshana suffix)', () => {
+    it('uses existingDir verbatim as the projectDir (no .dhee suffix)', () => {
       const customDir = join(basePath, 'my_workspace_folder');
       mkdirSync(customDir, { recursive: true });
 
@@ -282,8 +282,8 @@ describe('createProjectInProcess', () => {
       });
 
       expect(result.projectDir).toBe(customDir);
-      // No sibling <name>.kshana folder was created.
-      expect(existsSync(join(basePath, 'whatever.kshana'))).toBe(false);
+      // No sibling <name>.dhee folder was created.
+      expect(existsSync(join(basePath, 'whatever.dhee'))).toBe(false);
     });
 
     it('overwrites a stub project.json with the v2.0 templated schema', () => {

@@ -126,7 +126,7 @@ console.log();
 if (writeBack) {
   console.log(`✓ Wrote ${reports.length} file(s) back to disk.`);
   console.log(`  Next: reset downstream stages so the new durations propagate through shot_video generation:`);
-  console.log(`    pnpm reset ${projectDir.replace(/\.kshana$/, '')} shot_video`);
+  console.log(`    pnpm reset ${projectDir.replace(/\.dhee$/, '')} shot_video`);
 } else {
   console.log(`(dry run — pass --write to save changes to disk)`);
 }

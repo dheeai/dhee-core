@@ -2,7 +2,7 @@
  * Regression: runTask must populate session.activeEvents so the
  * onMedia closure that PiSessionAgent fires can reach onMediaGenerated.
  *
- * Without this, kshana_show_shot runs successfully, the agent says
+ * Without this, dhee_show_shot runs successfully, the agent says
  * "you should see the first frame" — but no media cards arrive in
  * the chat because the closure can't find the events callback to
  * forward to.
@@ -50,7 +50,7 @@ describe("ConversationManager runTask wires activeEvents for media events", () =
     internalSession.sessionContext = {
       sessionId: session.id,
       mode: "local",
-      projectDir: "ambient.kshana",
+      projectDir: "ambient.dhee",
     } as never;
     internalSession.initialized = true;
 

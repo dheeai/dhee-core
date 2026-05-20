@@ -2,7 +2,7 @@
 /**
  * Probe `extractStoryEssence` on a project's source story.
  *
- * Reads `<project>.kshana/original_input.md` (or chapters/.../story.md if
+ * Reads `<project>.dhee/original_input.md` (or chapters/.../story.md if
  * the input was an idea), calls the focused essence extractor, and
  * prints the resulting JSON. Does NOT modify any project state.
  *
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   const durIdx = process.argv.indexOf('--duration');
   const targetDurationSec = durIdx >= 0 ? parseInt(process.argv[durIdx + 1] ?? '', 10) : NaN;
 
-  const dirName = projectName.endsWith('.kshana') ? projectName : `${projectName}.kshana`;
+  const dirName = projectName.endsWith('.dhee') ? projectName : `${projectName}.dhee`;
   const projectDir = resolve(dirName);
   if (!existsSync(projectDir)) {
     console.error(`Project not found: ${projectDir}`);

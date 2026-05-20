@@ -157,7 +157,7 @@ function writeRawTimeline(projectRoot: string, timeline: Timeline): void {
 }
 
 afterEach(() => {
-  setActiveProjectDir('default.kshana');
+  setActiveProjectDir('default.dhee');
 });
 
 describe('timeline ref preservation', () => {

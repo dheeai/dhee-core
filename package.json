@@ -1,5 +1,5 @@
 {
-  "name": "kshana-core",
+  "name": "dhee-core",
   "version": "0.1.0",
   "description": "AI video generation engine — story → screenplay → shots → keyframes → clips → final assembly.",
   "type": "module",
@@ -32,14 +32,14 @@
     "README.md"
   ],
   "bin": {
-    "kshana-core": "./dist/index.js",
-    "kshana-core-server": "./dist/server/cli.cjs"
+    "dhee-core": "./dist/index.js",
+    "dhee-core-server": "./dist/server/cli.cjs"
   },
   "scripts": {
     "start": "pnpm -C frontend run build && NODE_OPTIONS='--max-old-space-size=8192' tsx src/server/cli.ts",
     "dev": "pnpm -C frontend run build && NODE_OPTIONS='--max-old-space-size=8192' tsx watch src/server/cli.ts",
     "cli": "NODE_OPTIONS='--max-old-space-size=8192' tsx src/index.ts",
-    "kill": "pkill -f 'tsx.*src/server/cli.ts' || true; pkill -f 'tsx.*src/index.ts' || true; echo 'All kshana processes killed'",
+    "kill": "pkill -f 'tsx.*src/server/cli.ts' || true; pkill -f 'tsx.*src/index.ts' || true; echo 'All dhee processes killed'",
     "test:client": "tsx src/server/testClient.ts",
     "reset": "tsx scripts/reset-project.ts",
     "run-to": "tsx scripts/run-to.ts",

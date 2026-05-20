@@ -1,6 +1,6 @@
 /**
  * HTTP control surface for external agents (pi-agent, openclaw, etc.)
- * to drive a kshana project end-to-end without spawning child
+ * to drive a dhee project end-to-end without spawning child
  * processes or having Node installed on the user's machine.
  *
  * The endpoints mirror the per-script semantics:
@@ -54,7 +54,7 @@ export interface RunnerContext {
 export type AgentRunner = (ctx: RunnerContext) => Promise<RunFnResult>;
 
 export interface AgentRoutesConfig {
-  /** Base path where `<name>.kshana/` directories live. Defaults to cwd. */
+  /** Base path where `<name>.dhee/` directories live. Defaults to cwd. */
   basePath?: string;
   jobs: JobManager;
   runner: AgentRunner;

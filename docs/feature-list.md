@@ -1,8 +1,8 @@
-# Kshana-Core Feature List
+# dhee-Core Feature List
 
 ## Smart Video Creation Engine
 
-- **Automatic Step-by-Step Execution** — Kshana figures out all the steps needed to make your video and runs them in the right order automatically. _Uses a dependency graph executor that processes tasks by dependency order._
+- **Automatic Step-by-Step Execution** — dhee figures out all the steps needed to make your video and runs them in the right order automatically. _Uses a dependency graph executor that processes tasks by dependency order._
 - **Intelligent Planning** — Just describe what you want, and the system works backward from the final video to determine every piece of content it needs to create. _Backward planner resolves all required dependencies from target artifacts._
 - **Automatic Content Splitting** — When a story has 5 characters, the system automatically creates separate tasks for each one — no manual setup needed. _Collection expansion splits type-level nodes into per-item nodes based on extracted content._
 - **Choose Your Speed** — Run in serial mode (finish all writing before generating images) or parallel mode (start generating images while still writing) depending on your preference. _Serial mode completes LLM content before media generation; parallel mode runs both concurrently._
@@ -114,5 +114,5 @@
 - **Asset Serving** — Access any generated image or video by project and path. _`GET /api/v1/assets/:project/:path`_
 - **Real-Time Communication** — Full bidirectional streaming between the UI and the server. _WebSocket at `/api/v1/ws/chat`._
 - **Agent-Control Endpoints** — External agents (pi-agent, openclaw, anything that can hit HTTP) can drive a project end-to-end without spawning child processes or having Node installed. _`POST /api/v1/projects/:name/run-to`, `POST .../stop`, `GET .../status`, `GET .../nodes/:alias`, `POST .../regen`, `POST .../override`._
-- **Server Discovery File** — Server writes `~/.kshana/server.json` (mode 0600) with its URL, port, and pid on launch so external agents can find it without knowing the random port the desktop allocated. Removed on graceful shutdown; clients verify pid is alive to detect stale files. _`KSHANA_DISCOVERY_FILE` env var to override path._
+- **Server Discovery File** — Server writes `~/.dhee/server.json` (mode 0600) with its URL, port, and pid on launch so external agents can find it without knowing the random port the desktop allocated. Removed on graceful shutdown; clients verify pid is alive to detect stale files. _`dhee_DISCOVERY_FILE` env var to override path._
 - **OpenRouter Provider Pinning for DeepSeek** — DeepSeek models on OpenRouter pin upstream providers (DeepSeek → SiliconFlow → NovitaAI by default) instead of the lottery default pool. Eliminates empty-0-char responses and 2-5x latency variance from slow upstreams. Other model families unaffected. _`OPENROUTER_DEEPSEEK_PROVIDERS` env to override the order._

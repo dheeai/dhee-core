@@ -115,7 +115,7 @@ describe('run-to CLI — parseArgs', () => {
  * active project via the global `getProjectDir()` (which reads the session
  * projectDir). Before the fix, the CLI bootstrap only put the project path
  * into ExecutorAgent's config but never called `setActiveProjectDir`, so
- * every media helper would fall back to `default.kshana` and images leaked
+ * every media helper would fall back to `default.dhee` and images leaked
  * into the wrong folder — surfaces as "Base image not found" on the next
  * pipeline step that reads them from the correct project. The UI sets it
  * in App.tsx; the CLI must do the same.
@@ -124,8 +124,8 @@ describe('run-to CLI — session projectDir scoping', () => {
   it('setActiveProjectDir routes getActiveProjectDir to the project folder', async () => {
     const { setActiveProjectDir, getActiveProjectDir } =
       await import('../../src/tasks/video/workflow/activeProject.js');
-    setActiveProjectDir('noir_detective_story_setup-3.kshana');
-    expect(getActiveProjectDir()).toBe('noir_detective_story_setup-3.kshana');
+    setActiveProjectDir('noir_detective_story_setup-3.dhee');
+    expect(getActiveProjectDir()).toBe('noir_detective_story_setup-3.dhee');
   });
 
   it('getProjectDir resolves session projectDir against cwd for relative names', async () => {
@@ -133,7 +133,7 @@ describe('run-to CLI — session projectDir scoping', () => {
       await import('../../src/tasks/video/workflow/activeProject.js');
     const { getProjectDir } =
       await import('../../src/tasks/video/workflow/ProjectManager.js');
-    setActiveProjectDir('noir_detective_story_setup-3.kshana');
-    expect(getProjectDir('/tmp/repo')).toBe('/tmp/repo/noir_detective_story_setup-3.kshana');
+    setActiveProjectDir('noir_detective_story_setup-3.dhee');
+    expect(getProjectDir('/tmp/repo')).toBe('/tmp/repo/noir_detective_story_setup-3.dhee');
   });
 });

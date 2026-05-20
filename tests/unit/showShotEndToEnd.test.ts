@@ -14,10 +14,10 @@ let projectsDir: string;
 let originalProjectsDir: string | undefined;
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), "kshana-show-e2e-"));
-  originalProjectsDir = process.env["KSHANA_PROJECTS_DIR"];
-  process.env["KSHANA_PROJECTS_DIR"] = projectsDir;
-  const proj = join(projectsDir, "demo.kshana");
+  projectsDir = mkdtempSync(join(tmpdir(), "dhee-show-e2e-"));
+  originalProjectsDir = process.env["dhee_PROJECTS_DIR"];
+  process.env["dhee_PROJECTS_DIR"] = projectsDir;
+  const proj = join(projectsDir, "demo.dhee");
   mkdirSync(join(proj, "assets"), { recursive: true });
   writeFileSync(
     join(proj, "project.json"),
@@ -43,8 +43,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (originalProjectsDir === undefined) delete process.env["KSHANA_PROJECTS_DIR"];
-  else process.env["KSHANA_PROJECTS_DIR"] = originalProjectsDir;
+  if (originalProjectsDir === undefined) delete process.env["dhee_PROJECTS_DIR"];
+  else process.env["dhee_PROJECTS_DIR"] = originalProjectsDir;
   rmSync(projectsDir, { recursive: true, force: true });
 });
 
@@ -55,8 +55,8 @@ describe("PiSessionAgent registers a media-aware show_shot when constructed with
       systemPrompt: "test",
       onMedia: (e) => events.push(e),
     });
-    const showShot = agent.getToolNames().includes("kshana_show_shot")
-      ? (agent as unknown as { tools: Array<{ name: string; execute: Function }> }).tools.find((t) => t.name === "kshana_show_shot")
+    const showShot = agent.getToolNames().includes("dhee_show_shot")
+      ? (agent as unknown as { tools: Array<{ name: string; execute: Function }> }).tools.find((t) => t.name === "dhee_show_shot")
       : null;
     expect(showShot).toBeTruthy();
     await showShot!.execute("test", { project: "demo", scene: 1, shot: 1 }, undefined, undefined, {});
@@ -66,6 +66,6 @@ describe("PiSessionAgent registers a media-aware show_shot when constructed with
 
   it("show_shot is registered even when no onMedia is provided (text-only)", () => {
     const agent = new PiSessionAgent({ systemPrompt: "test" });
-    expect(agent.getToolNames()).toContain("kshana_show_shot");
+    expect(agent.getToolNames()).toContain("dhee_show_shot");
   });
 });

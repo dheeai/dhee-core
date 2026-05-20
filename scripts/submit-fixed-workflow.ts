@@ -20,7 +20,7 @@ import { ComfyUIClient } from '../src/services/comfyui/ComfyUIClient.js';
 process.env['COMFY_MODE'] = 'local';
 
 const SRC = '/Users/ganaraj/Downloads/custom_3shot_17775662202_api74_00001.json';
-const projectRoot = resolve(process.cwd(), 'sun_hadnt_yet_cleared-2.kshana');
+const projectRoot = resolve(process.cwd(), 'sun_hadnt_yet_cleared-2.dhee');
 const outputDir = join(projectRoot, 'assets/videos/promptrelay_probe');
 mkdirSync(outputDir, { recursive: true });
 

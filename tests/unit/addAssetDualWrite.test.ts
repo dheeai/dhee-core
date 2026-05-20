@@ -4,7 +4,7 @@
  * `addAsset` is the only writer for assets/manifest.json. We dual-write
  * the same information into project.json's new scenes/shots/frames
  * tree (defined in src/core/project/projectSchema.ts) so the Storyboard,
- * kshana_show_*, and reset paths can read from one place.
+ * dhee_show_*, and reset paths can read from one place.
  *
  * One red test per case, implementation follows.
  */
@@ -17,10 +17,10 @@ import { setActiveProjectDir } from "../../src/tasks/video/workflow/activeProjec
 
 let dir: string;
 let basePath: string;
-const PROJECT_DIR_NAME = "test.kshana";
+const PROJECT_DIR_NAME = "test.dhee";
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "kshana-add-asset-"));
+  dir = mkdtempSync(join(tmpdir(), "dhee-add-asset-"));
   basePath = dir;
   setActiveProjectDir(PROJECT_DIR_NAME);
   const projectRoot = join(basePath, PROJECT_DIR_NAME);

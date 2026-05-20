@@ -456,7 +456,7 @@ export interface InfographicSkillSelection {
 }
 
 const INFOGRAPHIC_GENERATION_GUARDRAILS = `
-### kshana-required-infographic-guardrails
+### dhee-required-infographic-guardrails
 
 - NEVER render \`{prompt}\` or \`{infographicType}\` as visible text. Extract a short, meaningful title from the prompt topic and use \`data\` fields for display content.
 - If \`data\` is provided and non-empty, render at least one label/value derived from \`data\`.

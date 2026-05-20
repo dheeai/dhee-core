@@ -167,7 +167,7 @@ export class ArtifactGraph {
    */
   private buildGraph(): void {
     // Create nodes for each artifact type
-    for (const [typeId, definition] of Object.entries(this.template.artifactTypes) as [string, ArtifactTypeDefinition][]) {
+    for (const [typeId, definition] of Object.entries(this.template.artifactTypes)) {
       const dependsOn = definition.dependencies
         .filter((d: ArtifactDependency) => d.required)
         .map((d: ArtifactDependency) => d.artifactTypeId);
@@ -415,7 +415,7 @@ export class ArtifactGraph {
 
     // For singular artifacts, just check if it exists and is approved
     if (!definition.isCollection) {
-      const artifactValues = Object.values(artifacts) as ArtifactInstance[];
+      const artifactValues = Object.values(artifacts);
       const artifact = artifactValues[0];
       if (!artifact) {
         return {
@@ -434,7 +434,7 @@ export class ArtifactGraph {
 
     // For collections, check based on scope
     const scope = dep.scope || 'all';
-    const allArtifacts = Object.values(artifacts) as ArtifactInstance[];
+    const allArtifacts = Object.values(artifacts);
     const approvedArtifacts = allArtifacts.filter((a: ArtifactInstance) => a.status === 'approved');
 
     switch (scope) {
@@ -506,7 +506,7 @@ export class ArtifactGraph {
       const artifacts = project.artifacts[currentTypeId];
       if (!artifacts) return;
 
-      for (const artifact of Object.values(artifacts) as ArtifactInstance[]) {
+      for (const artifact of Object.values(artifacts)) {
         // Skip if this is the source artifact
         if (currentTypeId === typeId && instanceId && artifact.id === instanceId) {
           continue;

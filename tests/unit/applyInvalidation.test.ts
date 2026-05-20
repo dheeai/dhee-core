@@ -1,19 +1,19 @@
 /**
- * Pure invalidation op for `kshana_invalidate`.
+ * Pure invalidation op for `dhee_invalidate`.
  *
  * Given a list of node ids (typically from `selectInvalidationIds`),
  * mutate `project.executorState`:
  *   - Mark each node pending; clear outputPath / promptPath /
  *     completedAt / startedAt / artifactId / error.
  *   - Set `executorState.lastInvalidatedIds` to the list, so
- *     `kshana_run_to scope='last_invalidated'` can read it later.
+ *     `dhee_run_to scope='last_invalidated'` can read it later.
  *
  * Pure: mutates the passed-in object, no I/O. Caller persists.
  *
  * Mark-pending (not remove-and-rebuild) is the default because
  * invalidate's contract is "regen existing nodes" — the graph
  * topology stays intact. The remove-and-rebuild semantic of the old
- * `kshana_reset` is reachable later via an explicit `clean: true`
+ * `dhee_reset` is reachable later via an explicit `clean: true`
  * opt-in if the user changed something upstream that might alter
  * which per-items exist.
  */

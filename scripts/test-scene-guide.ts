@@ -11,7 +11,7 @@ import { LLMClient } from '../src/core/llm/index.js';
 import { resolveGuide } from '../src/core/prompts/loader.js';
 
 
-const PROJECT_DIR = process.argv[2] || 'story_begins_girl_sprinting-2.kshana';
+const PROJECT_DIR = process.argv[2] || 'story_begins_girl_sprinting-2.dhee';
 const SCENE_NUM = parseInt(process.argv[3] || '1', 10);
 const OUTPUT_DIR = 'test-output/scene-guide-test';
 

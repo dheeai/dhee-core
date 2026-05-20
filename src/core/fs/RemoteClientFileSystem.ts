@@ -2,7 +2,7 @@
  * RemoteClientFileSystem - IFileSystem implementation that proxies file operations
  * over WebSocket to a remote client.
  *
- * Used in remote mode when the kshana server runs separately from the client.
+ * Used in remote mode when the dhee server runs separately from the client.
  * Each file operation sends a request message and awaits a matching response.
  */
 

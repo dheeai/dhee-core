@@ -35,7 +35,7 @@ describe('resolvePiSessionModel', () => {
     previous.clear();
   });
 
-  it('uses the Kshana website OpenAI-compatible proxy instead of defaulting to OpenRouter', () => {
+  it('uses the dhee website OpenAI-compatible proxy instead of defaulting to OpenRouter', () => {
     process.env['LLM_PROVIDER'] = 'openai';
     process.env['LLM_CONTEXT_TOKENS'] = '160000';
     process.env['OPENAI_API_KEY'] = 'desktop-token';

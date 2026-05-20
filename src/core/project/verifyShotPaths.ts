@@ -53,7 +53,7 @@ export function verifyShotPaths(basePath: string): VerifyResult {
         // Archive as 'missing_file' — extends the shot.history reason vocab.
         // Reuse retireShotSlots to keep history-shape consistent, then patch the reason.
         retireShotSlots(shot, missing, "regenerated");
-        const last = shot.history?.[shot.history.length - 1] as ShotHistoryEntry | undefined;
+        const last = shot.history?.[shot.history.length - 1];
         if (last) (last as unknown as { reason: string }).reason = "missing_file";
         for (const slot of missing) delete shot[slot];
         dropped += missing.length;

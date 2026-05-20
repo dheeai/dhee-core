@@ -142,11 +142,11 @@ describe('WebSocketHandler tool event forwarding', () => {
     expect(desktopAssemblyBroker.canAssemble(sessionId)).toBe(true);
 
     const pending = desktopAssemblyBroker.requestTimelineAssembly(sessionId, {
-      projectDir: '/tmp/demo.kshana',
+      projectDir: '/tmp/demo.dhee',
       timelineItems: [
         {
           type: 'video',
-          path: '/tmp/demo.kshana/assets/videos/scene-1.mp4',
+          path: '/tmp/demo.dhee/assets/videos/scene-1.mp4',
           duration: 5,
           startTime: 0,
           endTime: 5,
@@ -163,7 +163,7 @@ describe('WebSocketHandler tool event forwarding', () => {
       sessionId,
       type: 'timeline_assembly_request',
       data: {
-        projectDir: '/tmp/demo.kshana',
+        projectDir: '/tmp/demo.dhee',
         outputIntent: 'final_video',
         outputName: 'final_video',
       },
@@ -176,7 +176,7 @@ describe('WebSocketHandler tool event forwarding', () => {
         data: {
           requestId: outbound.data.requestId,
           status: 'completed',
-          outputPath: '/tmp/demo.kshana/assets/final_video/final_video.mp4',
+          outputPath: '/tmp/demo.dhee/assets/final_video/final_video.mp4',
           duration: 5,
           artifactId: 'final-video-1',
           manifestRelativePath: 'assets/final_video/final_video.mp4',
@@ -214,11 +214,11 @@ describe('WebSocketHandler tool event forwarding', () => {
     const pending = desktopAssemblyBroker.requestTimelineAssembly(
       sessionId,
       {
-        projectDir: '/tmp/demo.kshana',
+        projectDir: '/tmp/demo.dhee',
         timelineItems: [
           {
             type: 'video',
-            path: '/tmp/demo.kshana/assets/videos/scene-1.mp4',
+            path: '/tmp/demo.dhee/assets/videos/scene-1.mp4',
             duration: 5,
             startTime: 0,
             endTime: 5,

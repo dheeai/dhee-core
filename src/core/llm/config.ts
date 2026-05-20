@@ -1,6 +1,6 @@
 /**
  * LLM configuration from environment variables.
- * Supports the same env vars as the Python kshana project.
+ * Supports the same env vars as the Python dhee project.
  */
 
 // Load .env when this module is used directly (CLI, scripts)

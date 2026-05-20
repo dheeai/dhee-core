@@ -25,7 +25,7 @@ import type { VideoTemplate } from '../../src/core/templates/types.js';
 // Helpers
 // ============================================================================
 
-const TMP_DIR = join(tmpdir(), `kshana-error-tests-${Date.now()}`);
+const TMP_DIR = join(tmpdir(), `dhee-error-tests-${Date.now()}`);
 
 /** Minimal template for building executors directly from state. */
 function makeMinimalTemplate(): VideoTemplate {

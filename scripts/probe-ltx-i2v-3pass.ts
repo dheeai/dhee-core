@@ -45,8 +45,8 @@ if (!Number.isFinite(scene) || !Number.isFinite(shot)) {
   process.exit(1);
 }
 
-// Resolve project dir (accepts name or name.kshana)
-const projectRoot = resolve(process.cwd(), projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`);
+// Resolve project dir (accepts name or name.dhee)
+const projectRoot = resolve(process.cwd(), projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`);
 if (!existsSync(projectRoot)) {
   console.error(`Project not found: ${projectRoot}`);
   process.exit(1);

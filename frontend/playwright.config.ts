@@ -16,7 +16,7 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: [
-    // Start the kshana backend (assumes pnpm dev is configured)
+    // Start the dhee backend (assumes pnpm dev is configured)
     {
       command: 'cd .. && pnpm dev',
       port: 3000,

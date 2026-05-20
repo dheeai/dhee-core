@@ -35,7 +35,7 @@ After the prompt tweak:
 ```
 pnpm reset sun_hadnt_yet_cleared-2 scene
 pnpm run-to sun_hadnt_yet_cleared-2 scene
-grep -c "NARRATION (V.O." sun_hadnt_yet_cleared-2.kshana/chapters/chapter_1/scenes/scene_*.md
+grep -c "NARRATION (V.O." sun_hadnt_yet_cleared-2.dhee/chapters/chapter_1/scenes/scene_*.md
 ```
 
 Expect ≥3 narration blocks total across the 3 scenes (vs the current 1). Spot-check that the new blocks correspond to interior content (not duplicating what dialogue or visuals already carry).

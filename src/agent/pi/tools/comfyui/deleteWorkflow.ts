@@ -19,9 +19,9 @@ function failure(message: string): { content: { type: "text"; text: string }[]; 
   };
 }
 
-export const kshanaDeleteComfyWorkflow = defineTool({
-  name: "kshana_delete_comfy_workflow",
-  label: "kshana delete-comfy-workflow",
+export const dheeDeleteComfyWorkflow = defineTool({
+  name: "dhee_delete_comfy_workflow",
+  label: "dhee delete-comfy-workflow",
   description:
     "Permanently delete a user-uploaded workflow's manifest and JSON. Refuses to delete built-ins. Always confirm with the user before calling — there's no undo.",
   parameters: Params,

@@ -1,8 +1,8 @@
-# kshana-core
+# Dhee Core (`dhee-core` package)
 
 An AI video generation engine. Give it a story idea; it produces a finished video — screenplay, characters, shots, keyframes, video clips, and final assembly with transitions.
 
-`kshana-core` is the headless engine. It runs as a CLI, an embedded library, or an HTTP/WebSocket server. It also powers [`kshana-desktop`](https://github.com/...) (the Electron app), which embeds it in-process for the local-mode experience.
+This repository is the headless engine (npm package **`dhee-core`**). It runs as a CLI, an embedded library, or an HTTP/WebSocket server. It also powers [`dhee-desktop`](https://github.com/dheeai/dhee-desktop) (the Electron app), which embeds it in-process for the local-mode experience.
 
 ## What it does
 
@@ -53,14 +53,14 @@ Workflows are user-uploadable — both ComfyUI LiteGraph and API formats are aut
 
 ```bash
 git clone <repo>
-cd kshana-core
+cd dhee-core
 pnpm install
 cp .env.example .env
 # Edit .env, then:
 pnpm start
 ```
 
-`pnpm start` builds the React frontend and runs the HTTP/WebSocket server at `http://127.0.0.1:3000` by default. Open the URL to use the web UI; or drive it from `kshana-desktop`, `pi-agent`, or any HTTP client.
+`pnpm start` builds the React frontend and runs the HTTP/WebSocket server at `http://127.0.0.1:3000` by default. Open the URL to use the web UI; or drive it from `dhee-desktop`, `pi-agent`, or any HTTP client.
 
 Requirements:
 - Node ≥ 20
@@ -137,11 +137,11 @@ All endpoints under `/api/v1`. WebSocket at `/api/v1/ws/chat` for streaming.
 **Assets**
 - `GET /assets/:project/:path`
 
-On launch the server writes `~/.kshana/server.json` (mode 0600) with its URL, port, and pid so external drivers can find a desktop-launched core without knowing its random port.
+On launch the server writes `~/.dhee/server.json` (mode 0600) with its URL, port, and pid so external drivers can find a desktop-launched core without knowing its random port.
 
 ## Project format
 
-Every project is a self-contained directory: `<name>.kshana/`. Inside:
+Every project is a self-contained directory: `<name>.dhee/`. Inside:
 
 ```
 project.json        Graph state, node statuses, content, manifests
@@ -183,4 +183,4 @@ Calibrated VLM judging means regressions are visible. Without measurement, "did 
 
 [GNU Affero General Public License v3.0](./LICENSE) (AGPL-3.0).
 
-If you run a modified version of `kshana-core` as a network service, AGPL requires you to make the complete corresponding source available to users of that service. See `LICENSE` for the full terms.
+If you run a modified version of `dhee-core` as a network service, AGPL requires you to make the complete corresponding source available to users of that service. See `LICENSE` for the full terms.

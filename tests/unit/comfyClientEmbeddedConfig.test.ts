@@ -1,8 +1,8 @@
 /**
  * Regression: `ComfyUIClient` must read env at *construction* time, not
  * at module load. The embedded desktop path requires the host
- * (kshanaCoreManager) to set COMFY_MODE/COMFY_CLOUD_API_KEY into
- * process.env, but it does so AFTER kshana-core is imported. A
+ * (dheeCoreManager) to set COMFY_MODE/COMFY_CLOUD_API_KEY into
+ * process.env, but it does so AFTER dhee-core is imported. A
  * module-load `DEFAULT_CONFIG` froze `baseUrl='http://localhost:8188'`
  * before the host could speak — every embedded ComfyUI call then
  * silently fell into HTTP polling against a non-existent local server
@@ -59,7 +59,7 @@ describe('ComfyUIClient — env read at construction time', () => {
     expect((client as unknown as { apiKey?: string }).apiKey).toBe('test-key-from-host');
   });
 
-  it('treats the Kshana website Comfy route as cloud when COMFY_MODE=cloud', async () => {
+  it('treats the dhee website Comfy route as cloud when COMFY_MODE=cloud', async () => {
     const { ComfyUIClient } = await import('../../src/services/comfyui/ComfyUIClient.js');
 
     process.env['COMFY_MODE'] = 'cloud';

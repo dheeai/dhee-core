@@ -1,6 +1,6 @@
 /**
  * Fake tool handlers for generation tools.
- * When KSHANA_FAKE_MODE=1, these replace the real ComfyUI-based handlers.
+ * When dhee_FAKE_MODE=1, these replace the real ComfyUI-based handlers.
  * Each creates a placeholder PNG with sharp showing all parameters passed.
  */
 import * as fs from 'fs';
@@ -573,21 +573,21 @@ export function getFakeVideoGenerationTools(): ToolDefinition[] {
   const fakeGenerateImage = createTool(
     generateImageTool.name,
     generateImageTool.description,
-    generateImageTool.parameters as ToolParameterSchema,
+    generateImageTool.parameters,
     fakeGenerateImageHandler,
   );
 
   const fakeGenerateVideo = createTool(
     generateVideoFromImageTool.name,
     generateVideoFromImageTool.description,
-    generateVideoFromImageTool.parameters as ToolParameterSchema,
+    generateVideoFromImageTool.parameters,
     fakeGenerateVideoHandler,
   );
 
   const fakeEditImage = createTool(
     editImageTool.name,
     editImageTool.description,
-    editImageTool.parameters as ToolParameterSchema,
+    editImageTool.parameters,
     fakeEditImageHandler,
   );
 

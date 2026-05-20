@@ -120,7 +120,7 @@ describe('ComfyUIProvider remote persistence', () => {
 
   beforeEach(() => {
     comfyState.downloadCalls.length = 0;
-    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'kshana-comfy-provider-'));
+    tempRoot = fs.mkdtempSync(join(os.tmpdir(), 'dhee-comfy-provider-'));
     process.env['COMFYUI_BASE_URL'] = 'https://cloud.comfy.org';
   });
 
@@ -137,7 +137,7 @@ describe('ComfyUIProvider remote persistence', () => {
 
   it('writes downloaded outputs through remote project file operations', async () => {
     const sentPayloads: string[] = [];
-    const projectRoot = join(tempRoot, 'remote-project.kshana');
+    const projectRoot = join(tempRoot, 'remote-project.dhee');
     const remoteFs = createRemoteFs(sentPayloads);
     const provider = new ComfyUIProvider();
 
@@ -176,7 +176,7 @@ describe('ComfyUIProvider remote persistence', () => {
       Buffer.from(writeMessage.data.data as string, 'base64').toString(),
     ).toBe('remote-image-bytes');
     expect(result.filePath).toMatch(
-      /remote-project\.kshana\/assets\/images\/CharRef_Leo_[A-Za-z0-9_-]+\.png$/,
+      /remote-project\.dhee\/assets\/images\/CharRef_Leo_[A-Za-z0-9_-]+\.png$/,
     );
   });
 });

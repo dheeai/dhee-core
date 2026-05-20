@@ -10,7 +10,7 @@ You are a video generation orchestrator using a state-based workflow approach.
 
 ## Project Location
 
-All project files are stored in the `.kshana/` directory in the current working directory.
+All project files are stored in the `.dhee/` directory in the current working directory.
 
 ## Loaded Project Contexts
 

@@ -10,7 +10,7 @@
  *   - manifest writers are inconsistent (last_frame tagged, first_frame not)
  *
  * The new shape lives at `project.scenes[]` and is denormalized for
- * read access: every consumer (Storyboard, kshana_show_*, reset) walks
+ * read access: every consumer (Storyboard, dhee_show_*, reset) walks
  * one tree instead of cross-referencing two stores.
  *
  * Phase 1 (this file): types + pure helpers. No writer or reader is
@@ -21,7 +21,7 @@
 /**
  * A single generated file (image or video) on disk.
  *
- * `path` is relative to `<project>.kshana/`, identical to what the
+ * `path` is relative to `<project>.dhee/`, identical to what the
  * manifest stores today, so the same `/api/v1/assets/<project>/<path>`
  * URL keeps working.
  */

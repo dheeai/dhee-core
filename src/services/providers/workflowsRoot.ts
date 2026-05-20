@@ -1,11 +1,11 @@
 /**
  * Host-supplied user workflows directory.
  *
- * Purpose: when kshana-core is embedded in a host like kshana-desktop,
+ * Purpose: when dhee-core is embedded in a host like dhee-desktop,
  * the host wants user-uploaded workflows to live in a writable
  * location it controls (e.g. `app.getPath('userData')/workflows/user/`)
- * rather than inside the kshana-core checkout. Built-in / cloud
- * workflows still come from kshana-core's `workflows/built-in/` and
+ * rather than inside the dhee-core checkout. Built-in / cloud
+ * workflows still come from dhee-core's `workflows/built-in/` and
  * `workflows/cloud/` — this only adds an additional scan target for
  * user-owned manifests.
  *
@@ -25,7 +25,7 @@ let registryInitialized = false;
 
 export function setUserWorkflowsDir(path: string): void {
   // Idempotent on the same path — hosts that restart on settings
-  // changes (kshana-desktop calls KshanaCoreManager.restart() →
+  // changes (dhee-desktop calls dheeCoreManager.restart() →
   // start() → setUserWorkflowsDir() again) must not crash on the
   // second call with the same value. Only throw if the host tries
   // to point us at a *different* directory after init, which is a

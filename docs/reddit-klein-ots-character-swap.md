@@ -153,4 +153,4 @@ Cheers.
 13. `s3shot3_first_frame_klein_*.png` — the working case, Parvati + Mrs. Singh
 14. `s1shot6_grok_ots_seed13.png` — Grok output (correct composition, wrong style)
 
-Source files all live under `sun_hadnt_yet_cleared-2.kshana/assets/images/probe_klein_seed_variance/s1shot6/` and `assets/images/probe_grok_ots/`. Upload to imgur or similar before posting.
+Source files all live under `sun_hadnt_yet_cleared-2.dhee/assets/images/probe_klein_seed_variance/s1shot6/` and `assets/images/probe_grok_ots/`. Upload to imgur or similar before posting.

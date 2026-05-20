@@ -3,17 +3,17 @@
  * `project.json` reliably regardless of the host's process.cwd().
  *
  * The original code did `loadProject(projectDirName)`, which passes
- * the project DIR NAME (e.g. "chhaya_60s_anime.kshana") into
+ * the project DIR NAME (e.g. "chhaya_60s_anime.dhee") into
  * loadProject's `basePath` argument — semantically wrong. It only
  * happened to work in the standalone CLI when cwd was already
- * /Users/.../kshana-core AND a session context was set up with
+ * /Users/.../dhee-core AND a session context was set up with
  * matching projectDir. Embedded in the desktop, neither held, and
  * focusSessionProject failed with
  *   "project.json not found or empty for 'chhaya_60s_anime'".
  *
  * Fix: read project.json directly from
- *   `<defaultBasePath>/<projectName>.kshana/project.json`
- * where defaultBasePath honours `KSHANA_PROJECTS_DIR` (set by the
+ *   `<defaultBasePath>/<projectName>.dhee/project.json`
+ * where defaultBasePath honours `dhee_PROJECTS_DIR` (set by the
  * embedded host) and falls back to process.cwd() (CLI).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -22,15 +22,15 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ConversationManager } from "../../src/server/ConversationManager.js";
 
-describe("ConversationManager.focusSessionProject reads project.json from KSHANA_PROJECTS_DIR", () => {
+describe("ConversationManager.focusSessionProject reads project.json from dhee_PROJECTS_DIR", () => {
   let projectsDir: string;
   let originalEnv: string | undefined;
 
   beforeEach(() => {
-    projectsDir = mkdtempSync(join(tmpdir(), "kshana-focus-"));
-    mkdirSync(join(projectsDir, "demo.kshana"), { recursive: true });
+    projectsDir = mkdtempSync(join(tmpdir(), "dhee-focus-"));
+    mkdirSync(join(projectsDir, "demo.dhee"), { recursive: true });
     writeFileSync(
-      join(projectsDir, "demo.kshana", "project.json"),
+      join(projectsDir, "demo.dhee", "project.json"),
       JSON.stringify({
         version: "3.0",
         name: "demo",
@@ -39,17 +39,17 @@ describe("ConversationManager.focusSessionProject reads project.json from KSHANA
         targetDuration: 30,
       }),
     );
-    originalEnv = process.env["KSHANA_PROJECTS_DIR"];
-    process.env["KSHANA_PROJECTS_DIR"] = projectsDir;
+    originalEnv = process.env["dhee_PROJECTS_DIR"];
+    process.env["dhee_PROJECTS_DIR"] = projectsDir;
   });
 
   afterEach(() => {
-    if (originalEnv === undefined) delete process.env["KSHANA_PROJECTS_DIR"];
-    else process.env["KSHANA_PROJECTS_DIR"] = originalEnv;
+    if (originalEnv === undefined) delete process.env["dhee_PROJECTS_DIR"];
+    else process.env["dhee_PROJECTS_DIR"] = originalEnv;
     rmSync(projectsDir, { recursive: true, force: true });
   });
 
-  it("loads the project even when process.cwd() is unrelated to KSHANA_PROJECTS_DIR", async () => {
+  it("loads the project even when process.cwd() is unrelated to dhee_PROJECTS_DIR", async () => {
     const cm = new ConversationManager({
       llmConfig: { baseUrl: "x", apiKey: "x", model: "x" } as never,
     });
@@ -73,7 +73,7 @@ describe("ConversationManager.focusSessionProject reads project.json from KSHANA
   });
 
   /**
-   * GIVEN the desktop opens project "demo" — kshanaCoreManager calls
+   * GIVEN the desktop opens project "demo" — dheeCoreManager calls
    *       `manager.focusSessionProject(sessionId, "demo")` BEFORE the
    *       user types any task.
    *
@@ -82,7 +82,7 @@ describe("ConversationManager.focusSessionProject reads project.json from KSHANA
    *  THEN `applyProjectAnnouncement` must still inject the
    *       "(Active project: demo. …)" prefix so pi-agent reads the
    *       active project in its prompt — otherwise pi falls back to
-   *       `kshana_list_projects`, only sees `.kshana`-suffixed dirs,
+   *       `dhee_list_projects`, only sees `.dhee`-suffixed dirs,
    *       and confidently picks the wrong one (the BurgerEating-vs-
    *       The-Village bug from the field).
    *

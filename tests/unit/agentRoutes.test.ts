@@ -40,14 +40,14 @@ function mkProjectFile(over: Partial<ProjectFile> = {}): ProjectFile {
 }
 
 function writeProject(basePath: string, name: string, project: ProjectFile): string {
-  const dir = join(basePath, `${name}.kshana`);
+  const dir = join(basePath, `${name}.dhee`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'project.json'), JSON.stringify(project, null, 2));
   return dir;
 }
 
 async function setup(over: Partial<AgentRoutesConfig> = {}): Promise<TestSetup> {
-  const basePath = mkdtempSync(join(tmpdir(), 'kshana-routes-'));
+  const basePath = mkdtempSync(join(tmpdir(), 'dhee-routes-'));
   const jobs = new JobManager();
   const app = Fastify({ logger: false });
   await registerAgentRoutes(app, {

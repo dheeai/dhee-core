@@ -6,7 +6,7 @@
  * shared client websocket. The handler already filters foreign
  * `executed` and `execution_success` payloads via prompt_id (see
  * "Noir potter" comment), but `execution_error` was unfiltered —
- * any other user's job blowing up resolved every concurrent kshana
+ * any other user's job blowing up resolved every concurrent dhee
  * cloud submission as `status: error`. During the BurgerEating run
  * this surfaced as: 17/17 shots failing within ~75s of submission,
  * with the misleading message "ComfyUI job did not complete (status:

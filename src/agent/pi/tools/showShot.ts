@@ -34,10 +34,10 @@ async function loadProject(projectName: string): Promise<Record<string, unknown>
 
 export function createShowShotTool(opts: { onMedia?: MediaCallback }): ToolDefinition {
   return defineTool({
-    name: "kshana_show_shot",
-    label: "kshana show shot",
+    name: "dhee_show_shot",
+    label: "dhee show shot",
     description:
-      "Show all generated media for a specific shot — first frame, last frame, and rendered video — in one call. Each piece appears as its own media card in chat. Use this when the user says 'show me s1 shot 1', 'let me see scene 2 shot 4', or anything that doesn't specify which frame they want. Prefer kshana_show_first_frame / kshana_show_last_frame / kshana_show_shot_video when the user asks for a specific piece.",
+      "Show all generated media for a specific shot — first frame, last frame, and rendered video — in one call. Each piece appears as its own media card in chat. Use this when the user says 'show me s1 shot 1', 'let me see scene 2 shot 4', or anything that doesn't specify which frame they want. Prefer dhee_show_first_frame / dhee_show_last_frame / dhee_show_shot_video when the user asks for a specific piece.",
     parameters: Params,
     async execute(_id, params: Static<typeof Params>): Promise<AgentToolResult<ShownDetails | { found: false }>> {
       // Same defense-in-depth as showAsset's frame tools — reject calls
@@ -67,7 +67,7 @@ export function createShowShotTool(opts: { onMedia?: MediaCallback }): ToolDefin
 
       const shown: ShownDetails["shown"] = {};
       const emit = (kind: "image" | "video", path: string) =>
-        opts.onMedia?.({ kind, project: params.project, path, source: "kshana_show_shot" });
+        opts.onMedia?.({ kind, project: params.project, path, source: "dhee_show_shot" });
 
       if (shot.firstFrame?.path) {
         emit("image", shot.firstFrame.path);

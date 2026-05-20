@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import * as store from '../../src/agent/pi/sessionStore.js';
 import { buildHistoryFromFile } from '../../src/server/historyReplay.js';
 
-const ENV_KEY = 'KSHANA_PI_SESSIONS_DIR';
+const ENV_KEY = 'DHEE_PI_SESSIONS_DIR';
 let tempRoot: string;
 
 beforeEach(() => {

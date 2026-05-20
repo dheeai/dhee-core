@@ -68,7 +68,7 @@ export function computeStatus(project: ProjectFile): StatusSummary {
       : node.status === 'pending' ? 'pending'
       : node.status === 'failed' ? 'failed'
       : node.status === 'running' ? 'running'
-      : 'skipped') as keyof Omit<StatusCounts, 'total'>;
+      : 'skipped');
 
     overall[bucket] += 1;
     t[bucket] += 1;
@@ -78,7 +78,7 @@ export function computeStatus(project: ProjectFile): StatusSummary {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const { total: _total, ...counts } = overall;
   return {
     title: project.title,

@@ -1,5 +1,5 @@
 /**
- * HTTP and WebSocket routes for kshana-core server.
+ * HTTP and WebSocket routes for dhee-core server.
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
@@ -230,12 +230,12 @@ export async function registerRoutes(
 
   // ── Workflow management endpoints ──────────────────────────────────────────
   //
-  // NOTE: these endpoints serve the legacy kshana-core frontend
+  // NOTE: these endpoints serve the legacy dhee-core frontend
   // (`frontend/src/components/WorkflowManager.tsx`). The same
   // operations are also available as pi-agent tools and as direct
-  // function calls via `kshana-core/manager` — see
+  // function calls via `dhee-core/manager` — see
   // `src/services/comfyui/workflowIntegration.ts` for the canonical
-  // helpers. New consumers (kshana-desktop) call those helpers
+  // helpers. New consumers (dhee-desktop) call those helpers
   // directly. When this file gets refactored, replace the inline
   // file IO + LLM-router logic below with calls to:
   //   - validateWorkflowFile / analyzeWorkflowFile (upload)
@@ -256,7 +256,7 @@ export async function registerRoutes(
     for (const mode of all) {
       const key = mode.pipeline;
       if (!grouped[key]) grouped[key] = [];
-      grouped[key]!.push(mode);
+      grouped[key].push(mode);
     }
 
     return reply.send({ workflows: grouped });
@@ -506,7 +506,7 @@ export async function registerRoutes(
       const workflow = parameterizeGeneric(template, mode, resolvedParams);
 
       // Queue workflow
-      const result = await client.queueWorkflow(workflow as Record<string, unknown>, undefined, true);
+      const result = await client.queueWorkflow(workflow, undefined, true);
       const promptId = result.promptId;
 
       // Track this test

@@ -58,7 +58,7 @@ export function useMessageHandler(dispatch: React.Dispatch<AppAction>) {
         const toolCallId = data.toolCallId as string
         const status = data.status as string
         const args = data.arguments as Record<string, unknown> | undefined
-        const result = data.result as unknown
+        const result = data.result
         const agentName = data.agentName as string | undefined
 
         if (status === 'started' || (!status && !result)) {

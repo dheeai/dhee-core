@@ -9,7 +9,7 @@ export function getWebUIHtml(): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kshana</title>
+<title>dhee</title>
 <style>
 ${getStyles()}
 </style>
@@ -18,7 +18,7 @@ ${getStyles()}
 <div id="app">
   <header id="header">
     <div class="header-left">
-      <span class="logo">Kshana</span>
+      <span class="logo">dhee</span>
       <select id="project-select">
         <option value="">Select Project...</option>
         <option value="__new__">+ New Project</option>
@@ -1865,7 +1865,7 @@ async function loadProjects() {
     sel.appendChild(newOpt);
     projects.forEach(function(p) {
       const opt = document.createElement('option');
-      var name = (p.dirName || '').replace('.kshana', '');
+      var name = (p.dirName || '').replace('.dhee', '');
       var phase = p.currentPhase || 'unknown';
       opt.value = name;
       opt.textContent = name + ' (' + phase + ')';

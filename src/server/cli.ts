@@ -74,10 +74,10 @@ function printHelp(): void {
   const currentProvider = getLLMProvider();
 
   console.log(`
-kshana-core Server - HTTP/WebSocket API for Generic Agent
+dhee-core Server - HTTP/WebSocket API for Generic Agent
 
 Usage:
-  kshana-core-server [options]
+  dhee-core-server [options]
 
 Options:
   -h, --help            Show this help message
@@ -118,9 +118,9 @@ WebSocket Message Types (Server -> Client):
   error           Error message
 
 Examples:
-  kshana-core-server                    # Start server on default port
-  kshana-core-server --port 8080        # Start on port 8080
-  kshana-core-server --host 0.0.0.0     # Listen on all interfaces
+  dhee-core-server                    # Start server on default port
+  dhee-core-server --port 8080        # Start on port 8080
+  dhee-core-server --host 0.0.0.0     # Listen on all interfaces
 `);
 }
 

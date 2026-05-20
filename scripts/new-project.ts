@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Create a new kshana-core project from a text input.
+ * Create a new dhee-core project from a text input.
  *
  * Required flags:
  *   --style <s>      `live` (cinematic_realism) or `anime` (animation)
@@ -191,7 +191,7 @@ async function main() {
     printUsageAndExit();
   }
 
-  console.log(`Creating project: ${args.projectName}.kshana`);
+  console.log(`Creating project: ${args.projectName}.dhee`);
   console.log(`  Source:     ${inputSource} (${inputContent.length} bytes)`);
   console.log(`  Style:      ${args.style!}`);
   console.log(`  Duration:   ${args.duration!}s`);

@@ -1,10 +1,10 @@
-# TODO: Migrate UI "Redo this shot" button onto `kshana_invalidate`
+# TODO: Migrate UI "Redo this shot" button onto `dhee_invalidate`
 
 ## Background
 
-The unified `kshana_invalidate` + `kshana_run_to scope='last_invalidated'`
-pair (commits `f00c7bc` + `f1c0f8e`) collapsed pi-agent's `kshana_regen`
-and `kshana_reset` into one operation. The LLM-driven path is migrated
+The unified `dhee_invalidate` + `dhee_run_to scope='last_invalidated'`
+pair (commits `f00c7bc` + `f1c0f8e`) collapsed pi-agent's `dhee_regen`
+and `dhee_reset` into one operation. The LLM-driven path is migrated
 and the dead-code source is deleted.
 
 The UI's "Redo this shot" button still goes through the pre-refactor
@@ -13,7 +13,7 @@ The UI's "Redo this shot" button still goes through the pre-refactor
 ```
 UI button click
   → IPC channel REDO_NODE
-  → kshanaCoreManager.redoNode(sessionId, nodeId, opts)
+  → dheeCoreManager.redoNode(sessionId, nodeId, opts)
   → ConversationManager.redoNode(...)
   → either:
       (a) agent.redoNode() + runTask('')   ← legacy live-ExecutorAgent path
@@ -21,14 +21,14 @@ UI button click
 ```
 
 Both branches predate the BackgroundTaskRunner. (b) literally spawns a
-child Node process that re-imports kshana-core via tsx. (a) is dead
+child Node process that re-imports dhee-core via tsx. (a) is dead
 code in the Pi era — `PiSessionAgent` has no `redoNode` method, so
 the `'redoNode' in session.agent` check always falls through to (b).
 
 ## Why parked, not done
 
 While reading the chain I noticed a likely-existing bug in the IPC
-plumbing — `kshanaCoreManager.redoNode` passes a single options object
+plumbing — `dheeCoreManager.redoNode` passes a single options object
 as the **third positional argument** of `cm.redoNode`, but
 `cm.redoNode`'s declared signature is positional
 (`events?, editedPrompt?, frame?, scope?`). The cast at the call site
@@ -41,7 +41,7 @@ muddled the diff and risked masking either issue. Splitting it out.
 ## What needs to happen
 
 1. **Refactor `cm.redoNode` to a single-options-object signature.** Match
-   the calling convention `kshanaCoreManager.redoNode` already assumes:
+   the calling convention `dheeCoreManager.redoNode` already assumes:
    ```ts
    redoNode(sessionId: string, nodeId: string, opts: {
      events?: ConversationEvents;
@@ -85,8 +85,8 @@ muddled the diff and risked masking either issue. Splitting it out.
    and `pnpm regen` CLI keep `regenNodes`. The `pnpm reset` CLI keeps
    `resetProjectStage`.
 
-5. **Update the desktop wrapper** (`kshanaCoreManager.redoNode` in
-   kshana-desktop) to match the new signature — drops the cast hack.
+5. **Update the desktop wrapper** (`dheeCoreManager.redoNode` in
+   dhee-desktop) to match the new signature — drops the cast hack.
 
 6. **Tests**: pin the redo-from-button path against the new chain.
    - Click Redo → IPC → cm.redoNode → applyInvalidation persists
@@ -101,7 +101,7 @@ muddled the diff and risked masking either issue. Splitting it out.
 ## Out of scope here, in scope for the parent feature
 
 - Type-level redo from the UI ("redo all shot prompts" button). The
-  primitive (`kshana_invalidate type=...`) exists; just no button yet.
+  primitive (`dhee_invalidate type=...`) exists; just no button yet.
 - A "run only invalidated" affordance next to the timeline's Run
   button so the user can choose between "continue from here" and
   "run only what I just redid" — currently only the LLM can

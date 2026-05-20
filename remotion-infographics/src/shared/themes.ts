@@ -62,5 +62,5 @@ export const PALETTES: Record<string, InfographicPalette> = {
 };
 
 export function getPalette(infographicType: string): InfographicPalette {
-  return PALETTES[infographicType] ?? PALETTES['statistic']!;
+  return PALETTES[infographicType] ?? PALETTES['statistic'];
 }

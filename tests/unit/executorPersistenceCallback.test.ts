@@ -189,7 +189,7 @@ describe('ExecutionNode.metadata — round-trip', () => {
     // accessor; metadata is just a property on the ExecutionNode shape.
     // Note: approval / regeneration / feedback fields are intentionally
     // NOT in the ExecutionNodeMetadata shape; pi-agent owns the
-    // approval domain, not kshana-core. Don't reintroduce them here.
+    // approval domain, not dhee-core. Don't reintroduce them here.
     const node = executor.getNode('plot')!;
     node.metadata = {
       name: 'My Plot',

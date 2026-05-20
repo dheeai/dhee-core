@@ -40,11 +40,11 @@ if (!API_KEY) {
 
 const TEST_IMAGE = process.argv[2] ?? resolve(
   REPO_ROOT,
-  'noir_detective_story_setup-3.kshana/assets/images/3EM5uGKF_4a8e0293e3a8d48aab3b3ff7da43b6792fd9c5b05f45aa595e116657ad4e8068.png',
+  'noir_detective_story_setup-3.dhee/assets/images/3EM5uGKF_4a8e0293e3a8d48aab3b3ff7da43b6792fd9c5b05f45aa595e116657ad4e8068.png',
 );
 const TEST_REF = resolve(
   REPO_ROOT,
-  'noir_detective_story_setup-3.kshana/assets/images/UTQTQQa-_0f8d340be31e85cd5953fac6cc48b84fe592a8699e9b519d37dfb1f5518b8226.png',
+  'noir_detective_story_setup-3.dhee/assets/images/UTQTQQa-_0f8d340be31e85cd5953fac6cc48b84fe592a8699e9b519d37dfb1f5518b8226.png',
 );
 
 if (!existsSync(TEST_IMAGE)) {

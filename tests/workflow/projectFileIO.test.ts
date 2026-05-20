@@ -134,7 +134,7 @@ function createTimeline(): Timeline {
 
 describe('projectFileIO remote persistence', () => {
   it('writes project text through remote mkdir/write commands and cache', () => {
-    const projectRoot = '/Users/indhicdev/Documents/test-kshana-dev/test-kshana-dev.kshana';
+    const projectRoot = '/Users/indhicdev/Documents/test-dhee-dev/test-dhee-dev.dhee';
 
     withRemoteProjectSession(projectRoot, (remoteFs) => {
       writeProjectText('plans/plot.md', '# Plot\n\nSaved remotely');
@@ -154,7 +154,7 @@ describe('projectFileIO remote persistence', () => {
   });
 
   it('persists project.json through remote file commands and reloads from cache', () => {
-    const projectRoot = '/Users/indhicdev/Documents/test-kshana-dev/test-kshana-dev.kshana';
+    const projectRoot = '/Users/indhicdev/Documents/test-dhee-dev/test-dhee-dev.dhee';
 
     withRemoteProjectSession(projectRoot, (remoteFs) => {
       saveProject({
@@ -191,7 +191,7 @@ describe('projectFileIO remote persistence', () => {
   });
 
   it('writes binary project assets through remote buffer commands', () => {
-    const projectRoot = '/Users/indhicdev/Documents/test-kshana-dev/test-kshana-dev.kshana';
+    const projectRoot = '/Users/indhicdev/Documents/test-dhee-dev/test-dhee-dev.dhee';
 
     withRemoteProjectSession(projectRoot, (remoteFs) => {
       writeProjectBuffer('assets/images/frame.png', Buffer.from('binary-data'));
@@ -212,7 +212,7 @@ describe('projectFileIO remote persistence', () => {
   });
 
   it('persists timeline.json through remote project file commands and reloads from cache', () => {
-    const projectRoot = '/Users/indhicdev/Documents/test-kshana-dev/test-kshana-dev.kshana';
+    const projectRoot = '/Users/indhicdev/Documents/test-dhee-dev/test-dhee-dev.dhee';
 
     withRemoteProjectSession(projectRoot, (remoteFs) => {
       const timeline = createTimeline();

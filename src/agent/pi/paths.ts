@@ -5,17 +5,17 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Walk up from `metaUrl` (typically `import.meta.url`) until we find
- * the kshana-core package's own `package.json`. Robust against being
+ * the dhee-core package's own `package.json`. Robust against being
  * called from either `src/...` (vitest, tsx) or `dist/server/manager.js`
  * (bundled CJS/ESM output) — the depth differs but the package
- * boundary is unambiguous via `name === "kshana-core"`.
+ * boundary is unambiguous via `name === "dhee-core"`.
  *
  * Used to resolve repo-relative resources (orchestrator prompt,
  * subagent prompts, prompt-skill markdown). The previous hardcoded
  * `../../..` worked from source but pointed one level too high
  * when bundled, ENOENT'ing on the orchestrator prompt.
  */
-export function findKshanaCoreRoot(metaUrl: string): string {
+export function finddheeCoreRoot(metaUrl: string): string {
   let dir = dirname(fileURLToPath(metaUrl));
   // Cap the walk at filesystem root — defensive guard, not a real loop bound.
   for (let i = 0; i < 64; i += 1) {
@@ -23,7 +23,7 @@ export function findKshanaCoreRoot(metaUrl: string): string {
     if (existsSync(pkgPath)) {
       try {
         const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: unknown };
-        if (pkg.name === "kshana-core") {
+        if (pkg.name === "dhee-core") {
           return resolve(dir);
         }
       } catch {
@@ -35,14 +35,14 @@ export function findKshanaCoreRoot(metaUrl: string): string {
     dir = parent;
   }
   throw new Error(
-    `findKshanaCoreRoot: could not locate kshana-core package.json walking up from ${metaUrl}`,
+    `finddheeCoreRoot: could not locate dhee-core package.json walking up from ${metaUrl}`,
   );
 }
 
-const REPO_ROOT = findKshanaCoreRoot(import.meta.url);
+const REPO_ROOT = finddheeCoreRoot(import.meta.url);
 
 function isPackaged(): boolean {
-  return process.env["KSHANA_PACKAGED"] === "1" || process.env["KSHANA_PACKAGED"] === "true";
+  return process.env["dhee_PACKAGED"] === "1" || process.env["dhee_PACKAGED"] === "true";
 }
 
 function expandTilde(p: string): string {
@@ -52,34 +52,34 @@ function expandTilde(p: string): string {
 }
 
 export function getProjectsDir(): string {
-  const override = process.env["KSHANA_PROJECTS_DIR"];
+  const override = process.env["dhee_PROJECTS_DIR"];
   if (override) return resolve(expandTilde(override));
   if (isPackaged()) {
-    return resolve(homedir(), "Kshana");
+    return resolve(homedir(), "dhee");
   }
   return REPO_ROOT;
 }
 
-export function getKshanaConfigDir(): string {
-  const override = process.env["KSHANA_CONFIG_DIR"];
+export function getdheeConfigDir(): string {
+  const override = process.env["dhee_CONFIG_DIR"];
   if (override) return resolve(expandTilde(override));
-  return resolve(homedir(), ".kshana");
+  return resolve(homedir(), ".dhee");
 }
 
 /**
  * Root directory for persisted pi-coding-agent chat sessions.
- * Sessions are scoped by project slug so each kshana project has its
+ * Sessions are scoped by project slug so each dhee project has its
  * own append-only JSONL transcript per chat session.
  *
  * Layout: <root>/<projectSlug>/<sessionId>.jsonl
  *
- * Override via KSHANA_PI_SESSIONS_DIR (mostly for tests).
+ * Override via DHEE_PI_SESSIONS_DIR (mostly for tests).
  */
 export function getPiSessionsDir(projectSlug?: string): string {
-  const override = process.env["KSHANA_PI_SESSIONS_DIR"];
+  const override = process.env["DHEE_PI_SESSIONS_DIR"];
   const root = override
     ? resolve(expandTilde(override))
-    : resolve(getKshanaConfigDir(), "pi-sessions");
+    : resolve(getdheeConfigDir(), "pi-sessions");
   return projectSlug ? resolve(root, projectSlug) : root;
 }
 

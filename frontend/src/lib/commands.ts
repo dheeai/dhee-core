@@ -116,7 +116,7 @@ const COMMANDS: Record<string, CommandDef> = {
       // If only one arg and it looks like a stage, use the selected project
       let projectName: string
       let stage: string
-      if (parts.length === 1 && stages.includes(parts[0]!)) {
+      if (parts.length === 1 && stages.includes(parts[0])) {
         if (!ctx.selectedProject) {
           ctx.dispatch({
             type: 'ADD_CHAT_MESSAGE',
@@ -181,7 +181,7 @@ const COMMANDS: Record<string, CommandDef> = {
         return
       }
 
-      const stage = parts[0]!
+      const stage = parts[0]
       if (!STAGES.includes(stage)) {
         ctx.dispatch({
           type: 'ADD_CHAT_MESSAGE',
@@ -238,7 +238,7 @@ const COMMANDS: Record<string, CommandDef> = {
           id: `cmd_${Date.now()}`,
           type: 'system',
           content: r.ok
-            ? `Project **${name.replace(/\.kshana$/, '')}** loaded.`
+            ? `Project **${name.replace(/\.dhee$/, '')}** loaded.`
             : (r.reason || 'Failed to select project'),
           timestamp: Date.now(),
         },
@@ -250,7 +250,7 @@ const COMMANDS: Record<string, CommandDef> = {
     description: 'Alias for /project',
     usage: '/select [project-name]',
     handler: async (args, ctx) => {
-      await COMMANDS.project!.handler(args, ctx)
+      await COMMANDS.project.handler(args, ctx)
     },
   },
 
@@ -321,7 +321,7 @@ export function tryExecuteCommand(input: string, ctx: CommandContext): boolean {
   if (!match) return false
 
   const [, name, args] = match
-  const cmd = COMMANDS[name!]
+  const cmd = COMMANDS[name]
 
   if (!cmd) {
     ctx.dispatch({

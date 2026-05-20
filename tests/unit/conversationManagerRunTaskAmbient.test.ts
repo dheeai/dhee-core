@@ -16,7 +16,7 @@
  * exists, and the second check at the "Failed to initialize" line
  * already covers the failure case).
  *
- * Bug surfaced 2026-05-01 in the kshana-desktop embedded path:
+ * Bug surfaced 2026-05-01 in the dhee-desktop embedded path:
  * "Session agent not configured. Select a project first." appeared
  * after the user opened a project, even though the desktop's
  * ChatPanelEmbedded calls focusProject on project select.
@@ -61,7 +61,7 @@ describe("ConversationManager.runTask ambient session bootstrap", () => {
           s.sessionContext = {
             sessionId,
             mode: "local",
-            projectDir: "ambient.kshana",
+            projectDir: "ambient.dhee",
           } as never;
           s.initialized = true;
         }

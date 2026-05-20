@@ -46,7 +46,7 @@ interface PlotData {
 
 const plots: PlotData[] = [];
 for (const tc of TEST_CASES) {
-  const plotPath = join(`${tc.project}.kshana`, 'chapters', 'chapter_1', 'plans', 'plot.md');
+  const plotPath = join(`${tc.project}.dhee`, 'chapters', 'chapter_1', 'plans', 'plot.md');
   if (existsSync(plotPath)) {
     plots.push({
       projectName: tc.project,

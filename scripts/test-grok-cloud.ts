@@ -21,7 +21,7 @@ if (!API_KEY) {
 }
 
 const TEST_IMAGE = process.argv[2]
-  || 'air_already_thick_promise.kshana/assets/images/iGnmUX9h_Scene3_00026_.png';
+  || 'air_already_thick_promise.dhee/assets/images/iGnmUX9h_Scene3_00026_.png';
 const WORKFLOW_PATH = 'workflows/user/grok_image_edit.json';
 const CLIENT_ID = crypto.randomUUID();
 

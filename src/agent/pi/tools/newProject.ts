@@ -8,7 +8,7 @@ import {
 import { getProjectsDir } from "../paths.js";
 
 const Params = Type.Object({
-  name: Type.String({ description: "Project name (folder will be <name>.kshana)" }),
+  name: Type.String({ description: "Project name (folder will be <name>.dhee)" }),
   style: Type.Optional(
     Type.String({ description: "Visual style, e.g. cinematic_realism, anime, noir" }),
   ),
@@ -24,7 +24,7 @@ const Params = Type.Object({
   existingDir: Type.Optional(
     Type.String({
       description:
-        "Absolute path to a pre-created project folder. Use this when the host (e.g. kshana-desktop) has already created the workspace folder and you want to initialize it in place instead of creating a new <name>.kshana sibling. The folder must exist; original_input.md and project.json are written into it.",
+        "Absolute path to a pre-created project folder. Use this when the host (e.g. dhee-desktop) has already created the workspace folder and you want to initialize it in place instead of creating a new <name>.dhee sibling. The folder must exist; original_input.md and project.json are written into it.",
     }),
   ),
 });
@@ -45,11 +45,11 @@ function failure(message: string): AgentToolResult<NewProjectDetails> {
   };
 }
 
-export const kshanaNew = defineTool({
-  name: "kshana_new",
-  label: "kshana new",
+export const dheeNew = defineTool({
+  name: "dhee_new",
+  label: "dhee new",
   description:
-    "Create a new kshana project from a story or idea. Sets up the project folder and seeds the dependency graph; does not run the pipeline.",
+    "Create a new dhee project from a story or idea. Sets up the project folder and seeds the dependency graph; does not run the pipeline.",
   parameters: Params,
   async execute(_id, params: Static<typeof Params>): Promise<AgentToolResult<NewProjectDetails>> {
     // CLI script accepted style/duration/input as optional flags but
@@ -83,7 +83,7 @@ export const kshanaNew = defineTool({
       });
 
       const lines = [
-        `Created project: ${params.name}.kshana`,
+        `Created project: ${params.name}.dhee`,
         `  Style:        ${result.resolvedStyle} (from ${params.style})`,
         `  Duration:     ${params.duration}s`,
         `  Template:     ${params.template ?? "narrative"}`,
