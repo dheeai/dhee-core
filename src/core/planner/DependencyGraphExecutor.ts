@@ -437,7 +437,7 @@ export class DependencyGraphExecutor {
    */
   expandCollection(
     nodeId: string,
-    items: Array<{ itemId: string; name: string }>,
+    items: Array<{ itemId: string; name: string; metadata?: import('./types.js').ExecutionNodeMetadata }>,
   ): ExecutionNode[] {
     const existingNode = this.nodes.get(nodeId);
     if (!existingNode) return [];
@@ -472,6 +472,7 @@ export class DependencyGraphExecutor {
         isCollection: false,
         dependencies: rewiredDeps,
         dependents: [],
+        ...(item.metadata ? { metadata: item.metadata } : {}),
       };
       newNodes.push(itemNode);
       this.nodes.set(itemNodeId, itemNode);

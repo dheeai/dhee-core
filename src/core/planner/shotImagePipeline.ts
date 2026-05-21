@@ -53,6 +53,15 @@ export interface Reference {
    * of day, key elements for settings).
    */
   newRefDescription?: string;
+  /**
+   * Phase D — when status === 'new' AND this ref is a reframe or
+   * alternate angle of an existing ref, the existing ref's canonical
+   * refId. Triggers chained-edit generation: the parent's outputPath
+   * becomes the base canvas, the new ref's description becomes the
+   * reframe prompt. Most common case: Side B (over-the-shoulder
+   * reverse) of a setting that already exists for Side A.
+   */
+  derivedFrom?: string;
 }
 
 export interface AvailableRef extends Reference {
@@ -123,7 +132,40 @@ export function buildTurn2UserMessage(
 ): string {
   const menuJson = JSON.stringify(menu, null, 2);
   const otsNote = options?.otsHint
-    ? `\n\nThis shot's brief suggests over-the-shoulder / dialogue framing — mark the in-frame subject as side='A' and the OTS silhouette as side='B' in your output.`
+    ? [
+        ``,
+        `**OTS / dialogue framing detected.** Side A and Side B are the TWO`,
+        `CAMERA ANGLES of one OTS exchange. They are NOT character properties —`,
+        `they're a property of THIS SHOT. Decide which side this shot is by`,
+        `reading your own prose: who is the camera looking AT (face visible),`,
+        `and who is the camera looking PAST (silhouette in foreground)?`,
+        ``,
+        `Once you decide the side, the setting variant and the character role`,
+        `assignment MUST agree — they are two consequences of the same camera`,
+        `position. Here is the interlock:`,
+        ``,
+        `  Side A (camera at one end of the room):`,
+        `    - Setting: the BASE setting (the existing menu entry, no _reverse suffix)`,
+        `    - Character side='A' = the face we see (in-frame subject)`,
+        `    - Character side='B' = the back of the head we see in foreground (OTS silhouette)`,
+        ``,
+        `  Side B (camera at the OPPOSITE end, looking back):`,
+        `    - Setting: the REVERSE setting (existing \`_reverse\` entry, OR propose a new one)`,
+        `    - Character side='A' = the face we see (was side='B' in the paired Side-A shot)`,
+        `    - Character side='B' = the OTS silhouette (was side='A' in the paired Side-A shot)`,
+        ``,
+        `In other words: the two characters swap foreground/silhouette roles`,
+        `between paired shots, AND the setting flips to the reverse canvas.`,
+        `Picking the base setting with a side='B' character framing — or the`,
+        `reverse setting with side='A' framing — produces eyelines and`,
+        `backgrounds that don't line up.`,
+        ``,
+        `**If you choose Side B and no \`_reverse\` setting is in the menu, propose one:**`,
+        `  - \`refId\`: \`setting_image:<base_setting_id>_reverse\` (deterministic — paired shots in the same scene MUST land on this same refId)`,
+        `  - \`status\`: 'new'`,
+        `  - \`derivedFrom\`: \`<base_setting_id>\` (the canonical refId of the Side A setting from the menu — the executor uses its rendered canvas as the Klein base)`,
+        `  - \`newRefDescription\`: write a 1-2 sentence reframe brief grounded in the BASE setting's description above. State explicitly what's now in frame (what was previously behind the camera). Same lighting, same time of day, same color palette — just the opposite camera angle.`,
+      ].join('\n')
     : '';
   return [
     `Now extract the reference image list this shot needs to render.`,
@@ -133,11 +175,27 @@ export function buildTurn2UserMessage(
     `references[] entry. Prefer existing refs from the menu below;`,
     `propose a new one only if no menu entry matches.`,
     ``,
-    `**Existing reference menu:**`,
+    `**Use the menu \`description\` field to ground your decisions.** Each`,
+    `entry below carries the actual visual description of that character /`,
+    `setting / object. For OTS framing especially, the setting's description`,
+    `tells you what's physically in the location — what's at the entrance vs.`,
+    `the back wall, where the windows are, which direction faces the street —`,
+    `so you can reason about what the camera sees when it pivots to the`,
+    `reverse angle. Don't guess; read the description and base your shotSide`,
+    `+ setting-variant choice on it.`,
+    ``,
+    `**Naming convention for new refs — STABLE so cross-shot dedup works:**`,
+    `  - Character: \`character_image:<snake_case_name>\` (e.g. \`character_image:pawn_broker\`)`,
+    `  - Setting: \`setting_image:<snake_case_name>\` (e.g. \`setting_image:bus_station_morning\`)`,
+    `  - Reverse angle of an existing setting: \`setting_image:<base>_reverse\``,
+    `  - Object: \`object_image:<snake_case_name>\``,
+    `If another shot proposes the same conceptual ref later, it must land on the SAME refId — name things by what they ARE, not by which shot introduced them.`,
+    ``,
+    `**Existing reference menu (refId + label + description):**`,
     `\`\`\`json`,
     menuJson,
     `\`\`\``,
-    `${otsNote}`,
+    otsNote,
     ``,
     `Output JSON only, wrapped in \`{ "references": [...] }\`. Each entry:`,
     `  - \`refId\`: snake-case canonical key (e.g. \`character_image:ruby\`)`,
@@ -146,50 +204,229 @@ export function buildTurn2UserMessage(
     `  - \`status\`: 'existing' (refId from menu) or 'new' (propose to create)`,
     `  - \`side\`: 'A' or 'B' for OTS framing (omit otherwise)`,
     `  - \`newRefDescription\`: required when status='new', 1-2 sentence visual description`,
+    `  - \`derivedFrom\`: optional. When status='new', the canonical refId of a parent ref this is a reframe / variant of. Triggers image-edit generation against the parent canvas.`,
     ``,
     `Hard rules: ≤ 4 total refs; exactly one setting at imageNumber 1; no duplicate refIds; no duplicate imageNumbers.`,
   ].join('\n');
 }
 
 /**
- * Parse turn 2's LLM output into a Reference[]. Forgiving: accepts
- * either `{ "references": [...] }` or a bare array. Falls back to []
- * on parse failure (caller treats this as "no refs — keep whatever
- * turn 1 emitted").
+ * Map a `type` value to its canonical image-typeId prefix. Used for
+ * auto-prefixing bare refIds the LLM emits without a typeId.
+ */
+function imageTypeIdForRefType(type: 'character' | 'setting' | 'object'): string {
+  return type === 'character' ? 'character_image' :
+    type === 'setting' ? 'setting_image' :
+    'object_image';
+}
+
+/**
+ * Coerce a refId into its canonical `<imageTypeId>:<itemId>` form. Used
+ * by turn-2 normalization to absorb common LLM mistakes (bare itemId,
+ * upstream-typed prefix) so downstream code never has to defend against
+ * them.
+ */
+function canonicalizeRefId(raw: string, type: 'character' | 'setting' | 'object'): string {
+  const imageTypeId = imageTypeIdForRefType(type);
+  if (raw.startsWith(`${imageTypeId}:`)) return raw;
+  if (raw.includes(':')) {
+    const after = raw.split(':')[1]!;
+    return `${imageTypeId}:${after}`;
+  }
+  return `${imageTypeId}:${raw}`;
+}
+
+/**
+ * Parse + normalize + validate turn 2's LLM output.
+ *
+ * **Reference resolution is load-bearing.** A missing or misbound ref
+ * silently drops a character or setting from Klein's conditioning — the
+ * rendered image is wrong but no error fires. So this function is
+ * deliberately strict:
+ *
+ *   1. **Auto-fix unambiguous mistakes** so the LLM's first slip
+ *      doesn't cost a regen:
+ *        - bare refId (`ruby`) or upstream-typed (`character:ruby`)
+ *          → canonical `character_image:ruby`
+ *        - imageNumber out of 1..4 → drop the entry
+ *        - status='new' missing newRefDescription → drop the entry
+ *        - >4 refs → keep first 4 by declared order (after slot 1 = setting)
+ *
+ *   2. **Reject ambiguous outputs** by returning `[]`. The caller
+ *      MUST treat `[]` as "keep turn-1 refs" — better to ship turn-1's
+ *      best guess than a half-built refs array:
+ *        - two settings in the same array
+ *        - setting at a slot other than 1 AND slot 1 is occupied by
+ *          something else (no clean swap available)
+ *        - no setting at all when at least one ref is character/object
+ *          (Klein needs slot 1 = base canvas)
+ *
+ * Forgiving: accepts either `{ "references": [...] }` or a bare array.
+ * Returns `[]` on parse failure or validation failure.
  */
 export function parseTurn2RefsJson(rawText: string): Reference[] {
+  let arr: unknown[];
   try {
-    // Strip markdown fences in case the LLM wrapped despite instructions.
     const cleaned = rawText.trim().replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
     const parsed = JSON.parse(cleaned) as unknown;
-    const arr = Array.isArray(parsed)
+    const candidate = Array.isArray(parsed)
       ? parsed
       : (parsed as { references?: unknown[] })?.references;
-    if (!Array.isArray(arr)) return [];
-    const out: Reference[] = [];
-    const seenSlot = new Set<number>();
-    const seenRef = new Set<string>();
-    for (const item of arr) {
-      if (!item || typeof item !== 'object') continue;
-      const r = item as Record<string, unknown>;
-      const refId = typeof r['refId'] === 'string' ? r['refId'] : null;
-      const type = r['type'];
-      const imageNumber = typeof r['imageNumber'] === 'number' ? r['imageNumber'] : null;
-      if (!refId || !imageNumber) continue;
-      if (type !== 'character' && type !== 'setting' && type !== 'object') continue;
-      if (seenSlot.has(imageNumber) || seenRef.has(refId)) continue;
-      seenSlot.add(imageNumber);
-      seenRef.add(refId);
-      const ref: Reference = { refId, type, imageNumber };
-      if (r['side'] === 'A' || r['side'] === 'B') ref.side = r['side'];
-      if (r['status'] === 'existing' || r['status'] === 'new') ref.status = r['status'];
-      if (typeof r['newRefDescription'] === 'string') ref.newRefDescription = r['newRefDescription'];
-      out.push(ref);
-    }
-    return out;
+    if (!Array.isArray(candidate)) return [];
+    arr = candidate;
   } catch {
     return [];
   }
+
+  // ── Stage 1: per-entry normalization. Drop malformed entries; keep
+  // structurally-valid ones with canonical refIds.
+  const normalized: Reference[] = [];
+  for (const item of arr) {
+    if (!item || typeof item !== 'object') continue;
+    const r = item as Record<string, unknown>;
+    const rawRefId = typeof r['refId'] === 'string' ? r['refId'].trim() : '';
+    const type = r['type'];
+    const imageNumber = typeof r['imageNumber'] === 'number' ? r['imageNumber'] : null;
+    if (!rawRefId) continue;
+    if (type !== 'character' && type !== 'setting' && type !== 'object') continue;
+    if (imageNumber === null || !Number.isInteger(imageNumber)) continue;
+    if (imageNumber < 1 || imageNumber > 4) continue; // 2.7 — out of slot range
+    const status = r['status'] === 'existing' || r['status'] === 'new' ? r['status'] : undefined;
+    const newRefDescription = typeof r['newRefDescription'] === 'string' ? r['newRefDescription'].trim() : '';
+    // 2.8 — status='new' MUST carry a description so downstream gen has
+    // something to render from. Without it, drop the entry.
+    if (status === 'new' && newRefDescription.length === 0) continue;
+    const ref: Reference = {
+      refId: canonicalizeRefId(rawRefId, type),
+      type,
+      imageNumber,
+    };
+    if (r['side'] === 'A' || r['side'] === 'B') ref.side = r['side'];
+    if (status) ref.status = status;
+    if (newRefDescription) ref.newRefDescription = newRefDescription;
+    if (typeof r['derivedFrom'] === 'string' && r['derivedFrom'].trim().length > 0) {
+      ref.derivedFrom = r['derivedFrom'].trim();
+    }
+    normalized.push(ref);
+  }
+
+  // ── Stage 2: dedup by refId AND by imageNumber, keeping the FIRST
+  // occurrence. Settings get priority to claim slot 1 even if a non-
+  // setting tried to grab it first.
+  // We dedup refIds first so two refs with the same refId can't both
+  // race for a slot; then we resolve slot collisions.
+  const byRefId = new Map<string, Reference>();
+  for (const ref of normalized) {
+    if (!byRefId.has(ref.refId)) byRefId.set(ref.refId, ref);
+  }
+  let candidates = Array.from(byRefId.values());
+
+  // ── Stage 3: 2.3 — at most ONE setting. If two settings exist, the
+  // refs array is ambiguous; we can't pick which one to drop without
+  // narrative knowledge. Reject and fall back to turn-1.
+  const settings = candidates.filter(r => r.type === 'setting');
+  if (settings.length > 1) return [];
+
+  // ── Stage 4: 2.2 — setting must occupy slot 1. If it isn't and slot
+  // 1 is free, coerce. If it isn't and slot 1 is occupied, swap.
+  if (settings.length === 1) {
+    const setting = settings[0]!;
+    if (setting.imageNumber !== 1) {
+      const occupant = candidates.find(r => r.imageNumber === 1 && r !== setting);
+      if (occupant) {
+        const oldSettingSlot = setting.imageNumber;
+        setting.imageNumber = 1;
+        occupant.imageNumber = oldSettingSlot;
+      } else {
+        setting.imageNumber = 1;
+      }
+    }
+  }
+
+  // ── Stage 5: 2.4 — if the array names any character or object refs
+  // but has NO setting, Klein has no base canvas. Reject.
+  const hasNonSetting = candidates.some(r => r.type !== 'setting');
+  if (hasNonSetting && settings.length === 0) return [];
+
+  // ── Stage 6: resolve slot collisions. After the setting swap above,
+  // multiple refs may still share an imageNumber (e.g. LLM put two
+  // characters both at slot 2). Keep the first claimant per slot; drop
+  // the rest. Settings always win their slot (handled above).
+  const seenSlot = new Set<number>();
+  const slotResolved: Reference[] = [];
+  // Iterate settings first to ensure they keep their slot.
+  for (const r of candidates.filter(r => r.type === 'setting')) {
+    if (seenSlot.has(r.imageNumber)) continue;
+    seenSlot.add(r.imageNumber);
+    slotResolved.push(r);
+  }
+  for (const r of candidates.filter(r => r.type !== 'setting')) {
+    if (seenSlot.has(r.imageNumber)) continue;
+    seenSlot.add(r.imageNumber);
+    slotResolved.push(r);
+  }
+  candidates = slotResolved;
+
+  // ── Stage 7: 2.1 — cap at 4. Sort by imageNumber so the lowest
+  // slots survive (slot 1 setting is always preserved).
+  candidates.sort((a, b) => a.imageNumber - b.imageNumber);
+  if (candidates.length > 4) candidates = candidates.slice(0, 4);
+
+  // ── Stage 8: 6.x — side A/B pairing invariants.
+  //
+  // Side A/B labels are camera-angle markers for an OTS exchange. They
+  // are only meaningful when a true PAIR exists — exactly two characters
+  // in the same shot, one foreground (A) and one silhouette (B).
+  // Anything else is either nonsense or an LLM slip:
+  //
+  //   - 6.2: side on a setting/object → strip (only characters get sides;
+  //          settings carry the angle via derivedFrom)
+  //   - 6.1: two characters both side='A' (or both 'B') → keep the first,
+  //          strip the duplicate (no double-foreground / double-silhouette)
+  //   - 6.3: only one character ref → strip its side label (an OTS pair
+  //          needs two characters; lone framing is solo, not OTS)
+  //   - combined: half-specified pair (only one of two chars labelled) →
+  //          strip the lone label rather than ship asymmetric framing
+  //
+  // Extras beyond the pair (three+ chars) are fine — the A/B labels mark
+  // the two who define the angle; the rest stay unlabelled.
+
+  // 6.2 — strip side from non-characters.
+  for (const ref of candidates) {
+    if (ref.type !== 'character' && ref.side !== undefined) {
+      delete ref.side;
+    }
+  }
+
+  // 6.1 — at most one side='A' and at most one side='B' (keep first).
+  let seenA = false;
+  let seenB = false;
+  for (const ref of candidates) {
+    if (ref.type !== 'character' || ref.side === undefined) continue;
+    if (ref.side === 'A') {
+      if (seenA) delete ref.side;
+      else seenA = true;
+    } else if (ref.side === 'B') {
+      if (seenB) delete ref.side;
+      else seenB = true;
+    }
+  }
+
+  // 6.3 + combined — OTS pairing requires BOTH a foreground (A) AND a
+  // silhouette (B). If either is missing, the labels are half-specified;
+  // strip them so prose framing speaks for itself.
+  const characters = candidates.filter(r => r.type === 'character');
+  if (characters.length < 2) {
+    for (const ref of characters) delete ref.side;
+  } else {
+    const hasA = characters.some(r => r.side === 'A');
+    const hasB = characters.some(r => r.side === 'B');
+    if (!(hasA && hasB)) {
+      for (const ref of characters) delete ref.side;
+    }
+  }
+
+  return candidates;
 }
 
 export interface ModeDecision {
@@ -269,6 +506,232 @@ export function buildSlotManifestLine(references: Reference[]): string {
  */
 export function stripInlineFromImageTokens(prose: string): string {
   return prose.replace(/\s+from image \d+/gi, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+/**
+ * Pin the slot manifest at the top of every frame's `imagePrompt` and
+ * strip stale inline `from image N` tokens — driven off each frame's
+ * current `references[]`. Mutates the passed JSON in-place; returns the
+ * same object for convenience.
+ *
+ * Run this AFTER any step that changes a frame's references (e.g. the
+ * shot_image_prompt turn-2 refinement that swaps the array). Without
+ * this re-run, the manifest line baked in by turn-1 — built from
+ * turn-1's possibly incomplete refs — survives and the setting (slot 1)
+ * can be silently dropped from Klein's conditioning even though
+ * references[] lists it.
+ *
+ * Pure: no I/O, no LLM. Safe to call repeatedly (idempotent because the
+ * strip pass removes the previous manifest's tokens before the new
+ * manifest is prepended).
+ */
+/**
+ * Strip the leading manifest paragraph if present — a contiguous run
+ * of "Name [(setting)] from image N." sentences separated by spaces,
+ * followed by a blank line (or end of string). Conservative: only
+ * strips when the leading block looks ENTIRELY like a manifest. Leaves
+ * narrative prose that happens to contain "from image N" untouched.
+ *
+ * Without this, re-running the post-pass corrupts the previously-
+ * prepended manifest (the inline-token strip kicks "from image N" out
+ * of the manifest's own sentences, leaving residue like "Ruby. Bus
+ * (setting)." stranded at the top of the prose).
+ */
+function stripLeadingManifestParagraph(prose: string): string {
+  const m = prose.match(
+    /^(?:[A-Z][\w ]*?(?:\s*\(setting\))?\s+from image \d+\.\s*)+(?:\n+|$)/,
+  );
+  if (!m) return prose;
+  return prose.slice(m[0].length).trimStart();
+}
+
+// ── Phase D — derivedFrom helpers ────────────────────────────────────────────
+
+/**
+ * Coerce a `derivedFrom` value (as emitted by the turn-2 ref-extraction
+ * LLM) into a canonical image-node refId. The LLM may emit:
+ *   - the bare itemId (`bus_station_morning`)
+ *   - the image-typed refId (`setting_image:bus_station_morning`) — pass-through
+ *   - the upstream-typed refId (`setting:bus_station_morning`) — re-prefix
+ *
+ * Output is always `<imageTypeId>:<itemId>` so the executor's `getNode`
+ * lookup hits the right cascaded image node.
+ */
+export function normalizeDerivedFromRefId(
+  raw: string,
+  refType: 'character' | 'setting' | 'object',
+): string {
+  const imageTypeId =
+    refType === 'character' ? 'character_image' :
+    refType === 'setting' ? 'setting_image' :
+    'object_image';
+  if (raw.startsWith(`${imageTypeId}:`)) return raw;
+  if (raw.includes(':')) {
+    const after = raw.split(':')[1]!;
+    return `${imageTypeId}:${after}`;
+  }
+  return `${imageTypeId}:${raw}`;
+}
+
+/**
+ * What the renderer needs to switch a `setting_image` / `character_image`
+ * from text-to-image to Klein image-edit using a parent ref as the base.
+ */
+export interface ChainedEditRef {
+  artifactId: string;
+  type: 'character' | 'setting';
+  name: string;
+  parentOutputPath: string;
+}
+
+export interface DerivedFromResolution {
+  ref: ChainedEditRef | null;
+  /** When `ref` is null, why we couldn't resolve — caller logs and falls back. */
+  reason?: 'no-derived-from' | 'missing-parent' | 'no-output' | 'no-artifact' | 'cycle' | 'depth-exceeded';
+}
+
+interface DerivedFromNodeShape {
+  typeId: string;
+  itemId?: string;
+  outputPath?: string;
+  artifactId?: string;
+  metadata?: { derivedFrom?: string };
+}
+
+/**
+ * Resolve a chained-edit base from a node's `metadata.derivedFrom` value.
+ *
+ * Walks the derivedFrom chain to detect cycles (A→B→A would otherwise
+ * deadlock the planner if both shots resolved each other) but only
+ * returns the IMMEDIATE parent as the Klein base — Klein composes the
+ * full ancestry naturally via successive edits.
+ *
+ * Falls back to `{ ref: null, reason: ... }` whenever the parent isn't
+ * ready or the chain is malformed. Callers MUST treat null as "render
+ * via plain text_to_image" — never block on a half-built parent.
+ *
+ * Pure: takes a `getNode` accessor so it's trivially testable without
+ * spinning up a DependencyGraphExecutor.
+ */
+export function resolveDerivedFromBase(
+  derivedFromRefId: string | undefined,
+  getNode: (id: string) => DerivedFromNodeShape | undefined,
+  options?: { maxDepth?: number },
+): DerivedFromResolution {
+  if (!derivedFromRefId) return { ref: null, reason: 'no-derived-from' };
+  const maxDepth = options?.maxDepth ?? 8;
+  const visited = new Set<string>();
+  let cur: string | undefined = derivedFromRefId;
+  let depth = 0;
+  let immediateParent: DerivedFromNodeShape | undefined;
+  let immediateParentId: string | undefined;
+  while (cur) {
+    if (visited.has(cur)) return { ref: null, reason: 'cycle' };
+    visited.add(cur);
+    depth++;
+    if (depth > maxDepth) return { ref: null, reason: 'depth-exceeded' };
+    const parent = getNode(cur);
+    if (!parent) return { ref: null, reason: 'missing-parent' };
+    if (depth === 1) {
+      immediateParent = parent;
+      immediateParentId = cur;
+    }
+    // Walk further to detect transitive cycles.
+    cur = parent.metadata?.derivedFrom;
+  }
+  if (!immediateParent || !immediateParentId) {
+    return { ref: null, reason: 'missing-parent' };
+  }
+  if (!immediateParent.outputPath) return { ref: null, reason: 'no-output' };
+  if (!immediateParent.artifactId) return { ref: null, reason: 'no-artifact' };
+  const parentType: 'character' | 'setting' =
+    immediateParent.typeId === 'setting_image' ? 'setting' : 'character';
+  return {
+    ref: {
+      artifactId: immediateParent.artifactId,
+      type: parentType,
+      name: immediateParent.itemId ?? immediateParentId,
+      parentOutputPath: immediateParent.outputPath,
+    },
+  };
+}
+
+/**
+ * Invariant I3 — edit_first_frame frames carry no setting ref.
+ *
+ * When a frame's `generationMode === 'edit_first_frame'`, Klein uses
+ * the PRIOR frame's rendered image (first_frame.png) as slot 1 — the
+ * base canvas. The setting was already baked into that image during
+ * first_frame's render. Carrying a separate `setting_image:X` ref on
+ * an edit_first_frame frame is at best redundant and at worst
+ * confusing: Klein sees two slot-1 candidates and the binding becomes
+ * undefined.
+ *
+ * Deterministic rule: walk every frame in the parsed JSON, and for
+ * any frame with `generationMode === 'edit_first_frame'`, remove all
+ * refs of `type === 'setting'` from its `references[]`. Character
+ * and object refs are untouched — Klein still needs those bound to
+ * slots 2..N so the characters stay identity-locked through the edit.
+ *
+ * Pure: mutates the passed object in place, returns it for chaining.
+ *
+ * This replaces the prose-tag-based drop heuristic in
+ * `alignFramesToFirstFrame` for the setting-on-last-frame case. That
+ * heuristic was non-deterministic — whether the setting survived
+ * depended on whether the LLM's turn-1 prose happened to mention the
+ * slot. Under the Phase-A regime where the guide tells the LLM NOT
+ * to write slot tokens, the prose-tag check became a coin flip.
+ */
+export function stripSettingFromEditFirstFrameFrames<
+  T extends {
+    frames?: Record<
+      string,
+      { generationMode?: string; references?: Reference[] } | undefined
+    >;
+  },
+>(parsed: T): T {
+  const frames = parsed.frames;
+  if (!frames) return parsed;
+  for (const key of Object.keys(frames)) {
+    const f = frames[key];
+    if (!f || typeof f !== 'object') continue;
+    if (f.generationMode !== 'edit_first_frame') continue;
+    if (!Array.isArray(f.references)) continue;
+    f.references = f.references.filter(r => r.type !== 'setting');
+  }
+  return parsed;
+}
+
+export function applyShotImageManifestPostPass<
+  T extends {
+    frames?: Record<
+      string,
+      { imagePrompt?: string; references?: Reference[] } | undefined
+    >;
+  },
+>(parsed: T): T {
+  const frames = parsed.frames;
+  if (!frames) return parsed;
+  for (const key of Object.keys(frames)) {
+    const f = frames[key];
+    if (!f || typeof f !== 'object') continue;
+    if (typeof f.imagePrompt !== 'string' || !Array.isArray(f.references)) continue;
+    const manifestLine = buildSlotManifestLine(f.references);
+    // Single structural replace: drop the leading manifest paragraph
+    // (a contiguous run of "Name from image N." sentences terminated by
+    // a blank line) and prepend a fresh one built from `references[]`.
+    //
+    // We deliberately DO NOT grep the body for inline "from image N"
+    // tokens. The guide no longer instructs the LLM to write them, and
+    // if the LLM emits some anyway, Klein still binds via the manifest
+    // at the top — the body's "from image N" becomes harmless prose,
+    // not a competing slot directive. Trying to launder it after the
+    // fact is busywork that risks damaging legitimate narrative
+    // ("she stares at the image of her mother").
+    const withoutLeadingManifest = stripLeadingManifestParagraph(f.imagePrompt);
+    f.imagePrompt = manifestLine ? `${manifestLine}\n\n${withoutLeadingManifest}` : withoutLeadingManifest;
+  }
+  return parsed;
 }
 
 /**

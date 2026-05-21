@@ -61,6 +61,10 @@ import { buildEmptyContentFailureReason, checkEmptyContent } from './checkEmptyC
 import {
   buildSlotManifestLine,
   stripInlineFromImageTokens,
+  applyShotImageManifestPostPass,
+  stripSettingFromEditFirstFrameFrames,
+  normalizeDerivedFromRefId,
+  resolveDerivedFromBase,
   buildReferenceMenu,
   buildTurn2UserMessage,
   parseTurn2RefsJson,
@@ -3348,7 +3352,24 @@ export class ExecutorAgent extends TypedEventEmitter {
                   const refined = await this.refineShotImageRefs(
                     node, system, user, content, toolCallId, toolName,
                   );
-                  if (refined) content = refined;
+                  if (refined) {
+                    content = refined;
+                    // Re-run the deterministic post-pass on the refined
+                    // content. validateJsonOutput's manifest-rebuild step
+                    // (lines ~5852-5858) reads each frame's `references`
+                    // and prepends a fresh `<Label> from image N.` line,
+                    // stripping any stale inline tokens. Without this,
+                    // the manifest baked in by turn-1 — built from turn-1's
+                    // possibly incomplete refs — survives and the setting
+                    // (slot 1) gets silently dropped from Klein's
+                    // conditioning even though `references[]` lists it.
+                    // See 2026-05-20 Ruby V3 s1s1 ("Ruby from image 1."
+                    // with no setting line) for the symptom.
+                    const postValidation = this.validateJsonOutput(content, node);
+                    if (postValidation.valid && postValidation.normalizedContent) {
+                      content = postValidation.normalizedContent;
+                    }
+                  }
                 } catch (err) {
                   this.log(
                     `  [shot_image_prompt turn-2] refinement skipped: ${(err as Error).message}`,
@@ -5841,21 +5862,28 @@ Examples of common failure modes to avoid:
           return { valid: false, error: refCheck.error ?? 'ref-mention check failed' };
         }
 
+        // (5.5) Invariant I3 — strip setting refs from any frame whose
+        // generationMode is `edit_first_frame`. Klein uses the prior
+        // frame's rendered image as slot 1 in that mode; the setting
+        // is already baked into the canvas. Carrying a separate
+        // `setting_image:X` ref produces two slot-1 candidates and
+        // undefined binding. Deterministic by mode — NOT via prose
+        // tag scanning (that was the inconsistent old heuristic).
+        // Must run BEFORE the manifest post-pass so the manifest line
+        // reflects the stripped ref set, not the pre-strip ref set.
+        stripSettingFromEditFirstFrameFrames(parsed as { frames: Record<string, { generationMode?: string; references?: Reference[] } | undefined> });
+
         // (6) Pin the slot manifest at the TOP of every frame's
-        // imagePrompt, and strip inline `from image N` tokens from the
-        // prose body. Slot binding is authoritative via the manifest;
-        // inline markers from the LLM are noise that can mis-number a
-        // ref or refer to a slot that doesn't exist. Without this, the
-        // 2026-05-20 Ruby V3 s1s1 frame had "Ruby from image 1" buried
-        // mid-paragraph and no manifest at the top — Flux Klein had no
-        // deterministic top-of-prompt anchor to bind the character slot.
-        for (const frameKey of Object.keys(parsed.frames)) {
-          const f = parsed.frames[frameKey];
-          if (!f || typeof f !== 'object' || typeof f.imagePrompt !== 'string' || !Array.isArray(f.references)) continue;
-          const manifestLine = buildSlotManifestLine(f.references);
-          const strippedProse = stripInlineFromImageTokens(f.imagePrompt);
-          f.imagePrompt = manifestLine ? `${manifestLine}\n\n${strippedProse}` : strippedProse;
-        }
+        // imagePrompt. Slot binding is authoritative via the manifest;
+        // without this the 2026-05-20 Ruby V3 s1s1 frame had "Ruby
+        // from image 1" buried mid-paragraph and no manifest at the
+        // top — Flux Klein had no deterministic top-of-prompt anchor
+        // to bind the character slot.
+        //
+        // This same helper is re-invoked after the turn-2 ref-refinement
+        // LLM pass — the manifest must always reflect the CURRENT
+        // references array, not whatever turn-1 wrote.
+        applyShotImageManifestPostPass(parsed as { frames: Record<string, { imagePrompt?: string; references?: Reference[] } | undefined> });
 
         mutated = true;
       }
@@ -6228,8 +6256,8 @@ Examples of common failure modes to avoid:
     // turn-1 content stays as-is.
     let turn1Parsed: {
       frames?: {
-        first_frame?: { references?: unknown };
-        last_frame?: { references?: unknown };
+        first_frame?: { references?: unknown; imagePrompt?: string };
+        last_frame?: { references?: unknown; imagePrompt?: string };
       };
     };
     try {
@@ -6258,18 +6286,48 @@ Examples of common failure modes to avoid:
         itemId: n.itemId,
         status: n.status,
       }));
+    // Read the actual content file for each upstream collection item so
+    // the turn-2 LLM has real visual context — not just a humanized
+    // refId. This is what lets the LLM reason about Side A vs Side B
+    // framing ("what's behind the camera in this bus station?"),
+    // propose appropriate reverse-angle settings (Phase D), and assign
+    // character roles (foreground vs OTS silhouette) consistently with
+    // the prose it just wrote in turn 1.
+    //
+    // Path conventions come from narrative.ts:
+    //   character → characters/{{name}}.md
+    //   setting   → settings/{{name}}.md
+    //   object    → objects/{{name}}.md
+    //
+    // Content is trimmed to a per-item budget so the menu stays small —
+    // a 1000-word setting doc would blow up the turn-2 prompt.
+    const PER_ITEM_DESC_CHARS = 600;
     const descFor = (
-      _type: 'character' | 'setting' | 'object',
+      type: 'character' | 'setting' | 'object',
       itemId: string,
     ): { label: string; description: string } => {
-      // Label = humanized itemId. Description left empty in Phase A;
-      // future work resolves from the corresponding `character` /
-      // `setting` collection item's content file.
       const label = itemId
         .split('_')
         .map(p => p.charAt(0).toUpperCase() + p.slice(1))
         .join(' ');
-      return { label, description: '' };
+      const folder = type === 'character' ? 'characters' :
+        type === 'setting' ? 'settings' : 'objects';
+      const contentPath = join(this.config.projectDir, folder, `${itemId}.md`);
+      let description = '';
+      try {
+        if (existsSync(contentPath)) {
+          const raw = readFileSync(contentPath, 'utf-8');
+          // Strip the leading "# Title" heading and collapse whitespace
+          // so the LLM sees prose rather than markdown chrome.
+          const stripped = raw.replace(/^#[^\n]*\n+/, '').replace(/\s+/g, ' ').trim();
+          description = stripped.length > PER_ITEM_DESC_CHARS
+            ? `${stripped.slice(0, PER_ITEM_DESC_CHARS)}…`
+            : stripped;
+        }
+      } catch {
+        // File unreadable — leave description empty rather than crash.
+      }
+      return { label, description };
     };
     const menu: ReferenceMenuItem[] = buildReferenceMenu(imageNodes, descFor);
     if (menu.length === 0) {
@@ -6321,36 +6379,73 @@ Examples of common failure modes to avoid:
       return null;
     }
 
-    // Phase B: walk new refs and request collection expansion so the
+    // Phase B+D: walk new refs and request collection expansion so the
     // executor creates corresponding character_image / setting_image
     // nodes before this shot's downstream shot_image runs.
+    //
+    // Dedup contract (Phase C-lite): expandCollection on an already-
+    // expanded type-level node is a no-op and existing per-item nodes
+    // are NOT overwritten. Two shots proposing the same canonical refId
+    // (e.g. both ask for `setting_image:bus_station_morning_reverse`)
+    // resolve to the SAME per-item node — same render, no duplicate
+    // Klein call. The naming convention in turn-2's user message
+    // ("name things by what they ARE, not which shot introduced them")
+    // is what makes this work at the LLM layer; the no-op at the
+    // executor layer is the safety net.
+    const imageTypeIdFor = (refType: 'character' | 'setting' | 'object'): string =>
+      refType === 'character' ? 'character_image' :
+      refType === 'setting' ? 'setting_image' :
+      'object_image';
     for (const ref of refinedRefs) {
       if (ref.status !== 'new') continue;
-      const collectionTypeId =
+      const upstreamTypeId =
         ref.type === 'character' ? 'character' :
         ref.type === 'setting' ? 'setting' :
         'object';
+      const imageTypeId = imageTypeIdFor(ref.type);
       const itemId = ref.refId.includes(':') ? ref.refId.split(':')[1]! : ref.refId;
       const label = itemId
         .split('_')
         .map(p => p.charAt(0).toUpperCase() + p.slice(1))
         .join(' ');
+      const itemMetadata: import('./types.js').ExecutionNodeMetadata = {
+        name: label,
+        ...(ref.newRefDescription ? { description: ref.newRefDescription, summary: ref.newRefDescription } : {}),
+      };
       try {
-        this.executor.expandCollection(collectionTypeId, [
-          {
-            itemId,
-            name: label,
-            ...(ref.newRefDescription ? { description: ref.newRefDescription } : {}),
-          },
+        this.executor.expandCollection(upstreamTypeId, [
+          { itemId, name: label, metadata: itemMetadata },
         ]);
         this.log(
-          `  [shot_image_prompt turn-2] expanded ${collectionTypeId} with new item '${itemId}'`,
+          `  [shot_image_prompt turn-2] expanded ${upstreamTypeId} with new item '${itemId}'`,
         );
       } catch (err) {
         // Already exists or expansion not applicable — non-fatal.
         this.log(
-          `  [shot_image_prompt turn-2] expandCollection for ${collectionTypeId}:${itemId} skipped: ${(err as Error).message}`,
+          `  [shot_image_prompt turn-2] expandCollection for ${upstreamTypeId}:${itemId} skipped: ${(err as Error).message}`,
         );
+      }
+      // Phase D: write derivedFrom + description directly onto the
+      // cascaded image-level node so the renderer can switch to
+      // chained-edit generation. The cascade from upstream collection
+      // expansion creates `<imageTypeId>:<itemId>` via expandMatchingDependent,
+      // which doesn't propagate metadata — set it here.
+      const imageNodeId = `${imageTypeId}:${itemId}`;
+      const imageNode = this.executor.getNode(imageNodeId);
+      if (imageNode) {
+        const merged: import('./types.js').ExecutionNodeMetadata = {
+          ...(imageNode.metadata ?? {}),
+          ...(ref.newRefDescription ? { description: ref.newRefDescription } : {}),
+          ...(ref.derivedFrom ? { derivedFrom: this.normalizeDerivedFromRefId(ref.derivedFrom, ref.type) } : {}),
+        };
+        if (Object.keys(merged).length > 0) {
+          imageNode.metadata = merged;
+          if (ref.derivedFrom) {
+            this.log(
+              `  [shot_image_prompt turn-2] ${imageNodeId} marked derivedFrom=${merged.derivedFrom}`,
+            );
+          }
+        }
       }
     }
 
@@ -6361,6 +6456,13 @@ Examples of common failure modes to avoid:
     // overwrite first_frame.references and let last_frame.references
     // mirror it (the deterministic slot manifest uses first_frame's
     // refs for both frames).
+    //
+    // The caller re-runs `validateJsonOutput` after this — its
+    // post-pass at line ~5852 rebuilds the manifest prefix in each
+    // frame's imagePrompt from the references array. That's what
+    // keeps the manifest in sync with turn-2's authoritative refs.
+    // We must NOT prepend the manifest here ourselves — that would
+    // double up when the post-pass runs.
     if (turn1Parsed.frames) {
       if (turn1Parsed.frames.first_frame) {
         (turn1Parsed.frames.first_frame as { references: Reference[] }).references = refinedRefs;
@@ -6370,6 +6472,30 @@ Examples of common failure modes to avoid:
       }
     }
     return JSON.stringify(turn1Parsed, null, 2);
+  }
+
+  /**
+   * Coerce the LLM's `derivedFrom` value into a canonical image-node
+   * refId. The LLM may emit the bare itemId (`bus_station_morning`),
+   * the image-typed refId (`setting_image:bus_station_morning`), or
+   * the upstream-typed refId (`setting:bus_station_morning`). Normalize
+   * to the image typeId — that's what the renderer looks up.
+   */
+  private normalizeDerivedFromRefId(
+    raw: string,
+    refType: 'character' | 'setting' | 'object',
+  ): string {
+    const imageTypeId =
+      refType === 'character' ? 'character_image' :
+      refType === 'setting' ? 'setting_image' :
+      'object_image';
+    if (raw.startsWith(`${imageTypeId}:`)) return raw;
+    if (raw.includes(':')) {
+      // Other type prefix (e.g. `setting:`) — strip and re-prefix.
+      const after = raw.split(':')[1]!;
+      return `${imageTypeId}:${after}`;
+    }
+    return `${imageTypeId}:${raw}`;
   }
 
   /**
@@ -7700,6 +7826,33 @@ Examples of common failure modes to avoid:
         imageType = 'object_ref';
         objectName = node.itemId;
       }
+
+      // Phase D — chained-edit (derivedFrom). If this ref node was
+      // spawned by the shot_image_prompt turn-2 LLM as a reframe /
+      // variant of an existing ref, render it as a Klein image-edit
+      // using the parent's outputPath as the base canvas instead of
+      // a plain text-to-image call.
+      const derivedFromRefId = node.metadata?.derivedFrom;
+      let chainedEditRef: { artifactId: string; type: 'character' | 'setting'; name: string } | null = null;
+      if (derivedFromRefId) {
+        const parentNode = this.executor.getNode(derivedFromRefId);
+        if (parentNode?.outputPath && parentNode.artifactId) {
+          const parentType: 'character' | 'setting' =
+            parentNode.typeId === 'setting_image' ? 'setting' : 'character';
+          chainedEditRef = {
+            artifactId: parentNode.artifactId,
+            type: parentType,
+            name: parentNode.itemId ?? parentNode.id,
+          };
+          this.log(
+            `  [${node.id}] derivedFrom=${derivedFromRefId} → chained edit using parent canvas ${parentNode.outputPath}`,
+          );
+        } else {
+          this.log(
+            `  [${node.id}] derivedFrom=${derivedFromRefId} but parent has no outputPath/artifactId yet — falling back to text-to-image`,
+          );
+        }
+      }
       progressHandler = (event) => {
         // Use reset: true so each progress update REPLACES the previous one
         // Format matches webui.ts progress bar detector: "Step N/M (X%)"
@@ -7725,8 +7878,12 @@ Examples of common failure modes to avoid:
         toolName,
       });
 
-      // Call the actual image generation (blocks until done)
-      // Character/setting images are always text_to_image (no references)
+      // Call the actual image generation (blocks until done).
+      // Default: character/setting images are text_to_image with no refs.
+      // Phase D: when this node was spawned with `derivedFrom`, switch
+      // to image_text_to_image and pass the parent's artifact as the
+      // single reference — Klein renders the new ref as a reframe of
+      // the parent canvas.
       const result = await submitImageGeneration({
         scene_number: sceneNumber,
         prompt,
@@ -7736,7 +7893,18 @@ Examples of common failure modes to avoid:
         character_name: characterName,
         setting_name: settingName,
         object_name: objectName,
-        generation_mode: 'text_to_image',
+        generation_mode: chainedEditRef ? 'image_text_to_image' : 'text_to_image',
+        ...(chainedEditRef
+          ? {
+              reference_images: [
+                {
+                  image_id: chainedEditRef.artifactId,
+                  type: chainedEditRef.type,
+                  name: chainedEditRef.name,
+                },
+              ],
+            }
+          : {}),
       });
 
       // Unsubscribe from progress
