@@ -58,6 +58,7 @@ import {
 } from './shotImagePromptNormalizer.js';
 import { enforceShotCanonicalRefs } from './enforceShotCanonicalRefs.js';
 import { buildEmptyContentFailureReason, checkEmptyContent } from './checkEmptyContent.js';
+import { retryOnEmptyLLMResponse } from './retryOnEmptyLLMResponse.js';
 import {
   buildSlotManifestLine,
   stripInlineFromImageTokens,
@@ -316,6 +317,8 @@ export class ExecutorAgent extends TypedEventEmitter {
    * so the UI can show the right banner.
    */
   private stopReason: 'complete' | 'paused_at_stage' | 'cancelled' | 'failed' | null = null;
+  /** Where the last stop() call came from — used to tag abort errors. */
+  private lastStopOrigin: 'user' | 'shutdown' | null = null;
   /**
    * Loaded from prompts/story_essence.json after the story_essence node
    * completes (or at startup if the file already exists). Threaded into
@@ -968,9 +971,10 @@ export class ExecutorAgent extends TypedEventEmitter {
    *    upstream, and the BackgroundTaskRunner stayed in 'running'
    *    state for a long time after the user clicked Stop.
    */
-  stop(): void {
+  stop(reason: 'user' | 'shutdown' = 'user'): void {
     this.stopped = true;
     this.stopReason = 'cancelled';
+    this.lastStopOrigin = reason;
     // Abort in-flight LLM streams immediately. Without this, a
     // reasoning-model call (1-7 min wall-clock for DeepSeek-R /
     // o-series / Gemini-thinking) keeps running until natural
@@ -1002,9 +1006,12 @@ export class ExecutorAgent extends TypedEventEmitter {
         // Channel 2 — close any in-flight WS so awaiters bail
         // immediately. Synchronous; doesn't depend on the server
         // responding to the interrupt.
-        const closed = abortAllInFlightWorkflows('agent.stop()');
+        // Reason marker (`:user` / `:shutdown`) ends up in failed-node
+        // error strings so auto-recovery and UX can distinguish them
+        // from real failures.
+        const closed = abortAllInFlightWorkflows(`agent.stop():${reason}`);
         if (closed > 0) {
-          this.log(`[stop] aborted ${closed} in-flight ComfyUI WebSocket(s)`);
+          this.log(`[stop:${reason}] aborted ${closed} in-flight ComfyUI WebSocket(s)`);
         }
       },
     ).catch(() => {});
@@ -2339,6 +2346,16 @@ export class ExecutorAgent extends TypedEventEmitter {
     // before they start.
     this.runAbortController = new AbortController();
 
+    // Bug 16 / Bug 17: auto-recover from prior abort-induced failures.
+    // A user Stop click or a desktop process restart leaves nodes in
+    // `status='failed'` with abort-flavored errors. On the next run,
+    // those should resume cleanly rather than requiring manual
+    // invalidation. Real (non-abort) failures are left alone.
+    const recovered = this.executor.resetAbortedNodes();
+    if (recovered.length > 0) {
+      this.log(`Auto-recovered ${recovered.length} abort-failed nodes: ${recovered.join(', ')}`);
+    }
+
     // Load existing timeline from disk (survives session resume / server restart)
     if (!this.timeline) {
       this.timeline = loadTimeline(this.config.projectDir);
@@ -3058,9 +3075,28 @@ export class ExecutorAgent extends TypedEventEmitter {
                 }
               }
 
-              // Generate content via LLM (pure completion, no tools)
+              // Generate content via LLM (pure completion, no tools).
+              // Bug 13: one-shot retry for empty LLM responses. Transient
+              // model-API hiccups (rate limit recovery, brief content-policy
+              // false positive, network blip mid-stream) commonly return
+              // 0 chars. Before the empty-content guard hard-fails the
+              // node and forces the user to manually invalidate, give the
+              // LLM exactly one more chance — same prompt, fresh call.
+              // If the retry also returns empty, fail-fast as before.
               this.log(`  Calling LLM...`);
-              let content = await this.generateForNode(node, system, user, toolCallId, toolName);
+              let content = await retryOnEmptyLLMResponse(
+                () => this.generateForNode(node, system, user, toolCallId, toolName),
+                {
+                  log: (m) => this.log(`  ${m}`),
+                  onRetry: () => {
+                    this.emit({
+                      type: 'notification',
+                      level: 'info',
+                      message: `LLM returned empty response for ${node.displayName} — retrying once.`,
+                    });
+                  },
+                },
+              );
               this.log(`  LLM returned ${content.length} chars`);
 
               // Motion-directive soft-warn: scan for ambiguous speaker
@@ -5784,28 +5820,57 @@ Examples of common failure modes to avoid:
           }
         }
 
-        // (1) first_frame normalization.
-        const ff = parsed.frames[ffKey];
-        if (ff && typeof ff === 'object' && typeof ff.imagePrompt === 'string' && Array.isArray(ff.references)) {
-          const result = normalizeShotImagePromptWithRefs(ff, availableRefs);
-          parsed.frames[ffKey] = result.frame;
-          for (const ev of result.injected) {
-            allInjected.push({ frame: ffKey, ...ev });
-          }
-        }
+        // Gate: when turn-2 ref refinement succeeded, every frame already
+        // has the canonical refs (refineShotImageRefs overwrites BOTH
+        // first_frame.references and last_frame.references with the same
+        // parseTurn2RefsJson output — see ExecutorAgent.refineShotImageRefs
+        // line ~6502). The legacy normalizer pipeline (injectMissingShotRefs
+        // + alignFramesToFirstFrame) was built for the pre-turn-2 era where
+        // each frame's refs were independently LLM-emitted and mutually
+        // inconsistent. Running it post-turn-2 has only one observable
+        // effect: it injects `from image N` tags into prose that nothing
+        // downstream needs (applyShotImageManifestPostPass builds the
+        // canonical slot binding from references[] alone). The injected
+        // tags then become noise in the saved JSON, contradicting the
+        // skill guide that tells the LLM not to write them.
+        //
+        // Detection: both frames' references arrays match (canonical-equal).
+        const ffRefs = parsed.frames[ffKey]?.references;
+        const lfRefs = parsed.frames['last_frame']?.references;
+        const canonicalKey = (rs: Reference[]): string =>
+          [...rs]
+            .sort((a, b) => a.imageNumber - b.imageNumber)
+            .map(r => `${r.imageNumber}|${r.type}|${r.refId}`)
+            .join(',');
+        const turn2Succeeded =
+          Array.isArray(ffRefs) && ffRefs.length > 0 &&
+          Array.isArray(lfRefs) && lfRefs.length > 0 &&
+          canonicalKey(ffRefs as Reference[]) === canonicalKey(lfRefs as Reference[]);
 
-        // (2) Align other frames to first_frame's canonical mapping.
-        alignFramesToFirstFrame(parsed, availableRefs);
-
-        // (3) Per-frame normalization for non-first frames.
-        for (const frameKey of Object.keys(parsed.frames)) {
-          if (frameKey === ffKey) continue;
-          const f = parsed.frames[frameKey];
-          if (f && typeof f === 'object' && typeof f.imagePrompt === 'string' && Array.isArray(f.references)) {
-            const result = normalizeShotImagePromptWithRefs(f, availableRefs);
-            parsed.frames[frameKey] = result.frame;
+        if (!turn2Succeeded) {
+          // (1) first_frame normalization.
+          const ff = parsed.frames[ffKey];
+          if (ff && typeof ff === 'object' && typeof ff.imagePrompt === 'string' && Array.isArray(ff.references)) {
+            const result = normalizeShotImagePromptWithRefs(ff, availableRefs);
+            parsed.frames[ffKey] = result.frame;
             for (const ev of result.injected) {
-              allInjected.push({ frame: frameKey, ...ev });
+              allInjected.push({ frame: ffKey, ...ev });
+            }
+          }
+
+          // (2) Align other frames to first_frame's canonical mapping.
+          alignFramesToFirstFrame(parsed, availableRefs);
+
+          // (3) Per-frame normalization for non-first frames.
+          for (const frameKey of Object.keys(parsed.frames)) {
+            if (frameKey === ffKey) continue;
+            const f = parsed.frames[frameKey];
+            if (f && typeof f === 'object' && typeof f.imagePrompt === 'string' && Array.isArray(f.references)) {
+              const result = normalizeShotImagePromptWithRefs(f, availableRefs);
+              parsed.frames[frameKey] = result.frame;
+              for (const ev of result.injected) {
+                allInjected.push({ frame: frameKey, ...ev });
+              }
             }
           }
         }

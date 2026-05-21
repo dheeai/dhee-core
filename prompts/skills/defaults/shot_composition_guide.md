@@ -264,12 +264,13 @@ Examples:
 The `focus` object from the shot JSON tells you EXACTLY what should be in focus and what should be blurred.
 
 - **`focus.primary`**: name this element in the prose as razor-sharp with explicit DOF. Example: "Laila's face razor-sharp in a shallow depth of field."
-- **`focus.background`** elements: name them in the prose as "visible but blurred" or "soft bokeh in the background" or "out-of-focus behind the subject."
-- **`focus.lurking`** element (if set): describe it as "barely registered in the defocused background, partially obscured" — present but not drawing the viewer's eye.
+- **`focus.background`** elements: name them in the prose as "soft" or "soft-focus" with a concrete feature — never "blurred" applied to a slotted character. Example: "Vikram's soaked kurta shoulder soft in the near foreground."
+- **`focus.lurking`** element (if set): describe with concrete posture / wardrobe features in soft focus, NOT as a "silhouette" or "indistinct" or "barely visible" shape. Slotted characters always need at least one identifying feature in prose, even when they're background. Example: "at the rear of the dhaba, the cloaked figure (hood pulled low, hands folded) sits in soft focus."
 
 **Worked example:**
 - `focus.primary = "laila_face"`, `focus.background = ["vikram_shoulder", "torches"]`, `focus.lurking = "cloaked_figure"`
-- Prose: "A medium close-up over Vikram's shoulder, Laila in razor-sharp focus, kohl-rimmed eyes fierce. Vikram's soaked kurta shoulder soft and blurred in the near foreground. Torch flames rendered as warm bokeh behind her. Barely visible at the rear of the dhaba, the cloaked figure sits as a defocused indistinct silhouette — present in the frame but outside the viewer's attention."
+- Prose: "A medium close-up over Vikram's shoulder, Laila (dark braid, kohl-rimmed eyes, saffron dupatta) in razor-sharp focus, eyes fierce. Vikram's soaked kurta shoulder soft in the near foreground. Torch flames rendered as warm bokeh behind her. At the rear of the dhaba, the cloaked figure (hood pulled low, hands folded in his lap) sits in soft focus — present in the frame but outside the viewer's attention."
+- Notice: every slotted character carries a parenthetical visual hook on first mention, and no character is described as "silhouette" / "blurred" / "indistinct" / "barely visible" — those words tell the image model to drop the slot's conditioning.
 
 **Rules:**
 - Every prose paragraph for a shot with `focus` must explicitly name what is sharp AND what is blurred.

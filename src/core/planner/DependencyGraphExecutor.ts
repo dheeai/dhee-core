@@ -269,6 +269,40 @@ export class DependencyGraphExecutor {
   }
 
   /**
+   * Auto-reset any failed nodes whose failure came from an abort (user Stop
+   * click, system shutdown, ComfyUI WebSocket teardown). Bug 16 / Bug 17:
+   * abort-induced failures are recoverable — the user wants to resume from
+   * where they paused, not be forced to manually invalidate every node that
+   * got caught by an abort signal.
+   *
+   * Returns the list of node IDs that were reset.
+   */
+  resetAbortedNodes(): string[] {
+    const reset: string[] = [];
+    for (const node of this.nodes.values()) {
+      if (node.status !== 'failed' || !node.error) continue;
+      const err = node.error;
+      const isAbort =
+        err.includes('agent.stop()') ||
+        err.includes('aborted:') ||
+        err.includes('aborted by user') ||
+        err.includes('AbortError') ||
+        err.includes('shutdown');
+      if (!isAbort) continue;
+      node.status = 'pending';
+      node.error = undefined;
+      node.startedAt = undefined;
+      node.completedAt = undefined;
+      reset.push(node.id);
+    }
+    if (reset.length > 0) {
+      this.updatedAt = Date.now();
+      this.onMutation?.();
+    }
+    return reset;
+  }
+
+  /**
    * Invalidate a node (for redo).
    *
    * Options:
@@ -447,6 +481,18 @@ export class DependencyGraphExecutor {
     const typeDef = this.template.artifactTypes[baseTypeId];
     if (!typeDef) return [];
 
+    // Sibling-pollution filter: when this collection node has already
+    // accumulated per-item refs of matching-scope dep types from a prior
+    // cascade (e.g. shot_video:scene_1.dependencies includes ALL of
+    // shot_motion_directive:scene_1_shot_1..N), each per-item clone must
+    // strip the OTHER items' refs and keep only its own. Without this,
+    // shot_video:scene_1_shot_1 inherits shot_motion_directive:scene_1_shot_2..N
+    // and renders block / wire to the wrong dependencies. (Ruby V3 bug.)
+    const matchingScopeTypes = new Set<string>();
+    for (const dep of typeDef.dependencies) {
+      if (dep.scope === 'matching') matchingScopeTypes.add(dep.artifactTypeId);
+    }
+
     // Create per-item nodes. Rewire each per-item's matching-scope deps to
     // per-item parents that already exist (e.g. `scene` → `scene:scene_1`
     // if scene was previously expanded). This covers the case where a
@@ -456,11 +502,16 @@ export class DependencyGraphExecutor {
     const newNodes: ExecutionNode[] = [];
     for (const item of items) {
       const itemNodeId = `${baseTypeId}:${item.itemId}`;
+      const filteredDeps = filterMismatchedPerItemDeps(
+        existingNode.dependencies,
+        item.itemId,
+        matchingScopeTypes,
+      );
       const rewiredDeps = this.rewireMatchingDepsForItem(
         itemNodeId,
         baseTypeId,
         item.itemId,
-        existingNode.dependencies,
+        filteredDeps,
       );
       const itemNode: ExecutionNode = {
         id: itemNodeId,
