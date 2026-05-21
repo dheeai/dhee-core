@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
-  kshanaTaskStatus,
+  dheeTaskStatus,
   __resetTaskStatusCooldownForTesting,
   type TaskStatusDetails,
 } from '../../src/agent/pi/tools/taskStatus.js';
@@ -21,7 +21,7 @@ async function callStatus(): Promise<TaskStatusDetails> {
   // The defineTool execute signature is (toolCallId, params, signal,
   // onUpdate, ctx). Most of the args don't matter for this tool —
   // it's read-only and doesn't touch context. Pass minimal stubs.
-  const result = await kshanaTaskStatus.execute(
+  const result = await dheeTaskStatus.execute(
     'test-call',
     {},
     undefined as never,

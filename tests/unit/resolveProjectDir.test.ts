@@ -89,6 +89,7 @@ describe('resolveProjectDir', () => {
       // Must include both probe paths so the agent (or human) can see
       // exactly what was checked, instead of guessing.
       expect(e.attempted).toEqual([
+        join(basePath, 'ghost.kshana'),
         join(basePath, 'ghost.dhee'),
         join(basePath, 'ghost'),
       ]);
