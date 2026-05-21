@@ -98,12 +98,12 @@ Describe only what a camera captures: shapes, light, position, gesture. Replace 
 
 ### Rule 3 — No Re-Describing References
 
-Do not repeat appearance details already supplied by a reference image.
+Do not repeat appearance details already supplied by a reference image. Name the character directly by their canonical name.
 
-**Bad:** "the woman with sharp angular features and dark eyes from image 1"
-**Good:** "the woman from image 1"
+**Bad:** "a woman with sharp angular features and dark eyes"
+**Good:** "Maya"
 
-Exception: when the scene requires a visible change from the reference (different clothing, injury, etc.), describe only that change: "the woman from image 1, now wearing a hospital gown, left arm in a sling."
+Exception: when the scene requires a visible change from the reference (different clothing, injury, etc.), describe only that change: "Maya, now wearing a hospital gown, left arm in a sling."
 
 ### Rule 4 — Lighting Is Mandatory
 
@@ -116,7 +116,7 @@ Every prompt must specify light source, direction, and quality. "Good lighting" 
 For each character: state their physical pose, where their gaze is directed, and place them spatially relative to the environment or other characters. This applies to EVERY character including background figures, named individuals within crowds, and ensemble groups.
 
 **BAD:** "Rowan directs fleeing civilians" — civilians have no position, no pose, no gaze, no placement
-**GOOD:** "Rowan from image 1 stands at the top of the subway steps in the foreground, arms spread in a directing gesture, gaze fixed left down the avenue. Thirty meters behind him in the mid-ground, civilians — men and women in office clothes — hunched forward, eyes down, pressing rightward across the frame."
+**GOOD:** "Rowan stands at the top of the subway steps in the foreground, arms spread in a directing gesture, gaze fixed left down the avenue. Thirty meters behind him in the mid-ground, civilians — men and women in office clothes — hunched forward, eyes down, pressing rightward across the frame."
 
 For ensemble groups with named individuals: name them and give each a pose and gaze. "A cluster of villagers in the mid-ground — Elder Mara stands upright at the left, arms crossed, gaze fixed on the girl; three adults crouched low over rows of crops, eyes down; two children seated at the far right edge, legs folded, looking toward each other."
 
@@ -129,13 +129,13 @@ For background figures described in the scene (a child with a toy, someone readi
 ### Good example (Mode A — references exist)
 
 ```
-A medium shot of the woman from image 1 seated at a desk in the office from image 2, leaning forward with her chin resting on clasped hands, gaze directed at the papers before her. Her partner from image 3 stands behind her to the right, arms crossed, gaze fixed on the window. Warm overhead lamp creates a pool of light on the desk surface, her face half-lit from above, deep shadows below the brow. Cool blue ambient light from the window behind. Cinematic, shallow depth of field.
+A medium shot of Maya seated at a desk in the precinct office, leaning forward with her chin resting on clasped hands, gaze directed at the papers before her. Her partner Detective Cole stands behind her to the right, arms crossed, gaze fixed on the window. Warm overhead lamp creates a pool of light on the desk surface, her face half-lit from above, deep shadows below the brow. Cool blue ambient light from the window behind. Cinematic, shallow depth of field.
 ```
 
 ### Good example (Mode A — action scene with ensemble)
 
 ```
-A wide shot of Rowan from image 1 at the top of the subway steps in the foreground, arms spread in a directing gesture, jaw set, gaze fixed left down the avenue. Behind him, thirty meters into the mid-ground, a mass of civilians — suits, bags, hunched shoulders — pressed rightward across the frame, eyes down. Above, the ships from image 2 hang motionless against the orange sky, geometric shadows falling across the street below. Cool blue emergency light from the subway entrance at Rowan's feet, warm orange firelight reflecting off the pavement behind him.
+A wide shot of Rowan at the top of the subway steps in the foreground, arms spread in a directing gesture, jaw set, gaze fixed left down the avenue. Behind him, thirty meters into the mid-ground, a mass of civilians — suits, bags, hunched shoulders — pressed rightward across the frame, eyes down. Above, the alien ships hang motionless against the orange sky, geometric shadows falling across the street below. Cool blue emergency light from the subway entrance at Rowan's feet, warm orange firelight reflecting off the pavement behind him.
 ```
 
 ### Good example (Mode B — no references, full descriptions required)
@@ -153,7 +153,7 @@ A wide establishing shot of a sun-baked village field at midday. The young girl,
 ### Bad example (hallucinated references, motion verbs, narrative commentary, omitted characters)
 
 ```
-❌ The weary detective from image 1 slowly makes her way across the dimly lit office from image 3, her exhaustion evident in every step, the weight of the unsolved case bearing down. Her sharp angular features catch the light as she turns toward the filing cabinets.
+❌ The weary detective slowly makes her way across the dimly lit office, her exhaustion evident in every step, the weight of the unsolved case bearing down. Her sharp angular features catch the light as she turns toward the filing cabinets.
 ```
 
 Why it fails:

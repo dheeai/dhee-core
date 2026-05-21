@@ -1,53 +1,52 @@
 # FLUX 2 Klein: Image Edit Prompting Skill
 
-You craft multi-reference edit prompts for FLUX 2 Klein. The model combines 1-4 reference images (characters, settings) into a single coherent output based on your prompt.
+You craft multi-reference edit prompts for FLUX 2 Klein. The model combines 1-4 reference images (characters, settings, objects) into a single coherent output based on your prompt.
 
 ## How FLUX 2 Klein Works
 
 - **No prompt upsampling.** What you write is what you get — be descriptive.
 - **Write like a novelist, not a search engine.** Flowing prose works best, not comma-separated keywords.
-- **Reference images by number.** You MUST explicitly reference images as `image 1`, `image 2`, etc. If you don't reference an image, the model will likely ignore it.
+- **Reference images bind via a deterministic slot manifest the executor prepends to your prompt at render time.** Your job is the cinematic prose body — name characters and settings directly. Slot numbers are not your concern.
 - **Word order matters.** The model pays more attention to what comes first. Front-load the most important elements.
 - **Lighting is the highest-impact element.** Describe light source, quality, direction, temperature, and how it interacts with surfaces.
 
-## Critical: Image Reference Format
+## How the slot manifest works
 
-Every reference image MUST be referenced in the prompt using `image N`:
+The pipeline does two things AFTER you write the prose:
 
-```
-The woman from image 1 stands in the doorway of the house shown in image 2.
-```
+1. A separate ref-extraction pass reads your prose and emits a `references[]` array — `{refId, type, imageNumber, side?}` per ref — that pins each named character/setting/object to a Klein slot (1 for setting, 2-4 for subjects).
+2. The executor prepends the canonical manifest line built from that array to your prose before sending to Klein.
 
-Examples:
-- "the person from image 1"
-- "the building shown in image 2"
-- "the environment from image 3"
-- "the character from image 4"
-
-**Unreferenced images are ignored by the model.**
+So just name the entities in your prose directly — Ruby, the bus station, the silver revolver. The downstream pipeline handles all slot binding.
 
 ## Prompt Structure
 
 Write flowing prose following this priority order:
 
 ```
-[Subject from image N + action/framing] → [Setting from image N] → [Spatial relationships] → [Lighting] → [Mood/atmosphere]
+[Subject + action/framing] → [Setting] → [Spatial relationships] → [Lighting] → [Mood/atmosphere]
 ```
 
 ### Subject & Framing First
+
 Lead with the main subject, what they're doing, and how they're framed:
-- "A close-up of the young woman from image 1, her expression thoughtful as she gazes out the window"
-- "The man from image 1 and the woman from image 2 sit across from each other at a table in the café from image 3"
-- "A wide shot showing the character from image 1 walking towards the building from image 2"
+
+- "A close-up of Ruby, her expression thoughtful as she gazes out the window"
+- "Angel and Ruby sit across from each other at a table in the bus station café"
+- "A wide shot showing Ruby walking toward the pawn shop"
 
 ### Setting & Spatial Relationships
+
 Describe where characters are positioned relative to the environment:
-- "standing in the doorway of the house from image 2"
-- "seated at the far end of the room shown in image 3, near the window"
-- "the blurred interior of the room from image 2 visible in the background"
+
+- "standing in the doorway of the pawn shop"
+- "seated at the far end of the room, near the window"
+- "the blurred interior of the bus station visible in the background"
 
 ### Lighting (Highest Impact)
+
 Describe lighting like a photographer. Instead of "good lighting," write specific details:
+
 - **Source:** natural, artificial, ambient — "soft natural light from a large window camera-left"
 - **Quality:** soft, harsh, diffused, direct — "diffused, creating gentle shadows that define the subject's features"
 - **Direction:** side, back, overhead, fill — "rim lighting from behind, separating the subject from the dark background"
@@ -55,7 +54,9 @@ Describe lighting like a photographer. Instead of "good lighting," write specifi
 - **Interaction:** catches, filters, reflects — "light catches the texture of her wool sweater"
 
 ### Mood & Style
+
 End with mood and optional style annotations:
+
 - "creating a sense of quiet intimacy and shared history"
 - "Style: intimate documentary portrait. Mood: contemplative, vulnerable."
 - "Shot on 35mm film with shallow depth of field — subject razor-sharp, background softly blurred."
@@ -70,25 +71,27 @@ Every sentence should add visual information. Avoid filler.
 
 ## Multi-Reference Patterns
 
-### Character + Setting (2 images)
+### Character + Setting
+
 ```
-The [character description] from image 1 [action] in the [setting] from image 2. [Lighting]. [Mood].
+[Character description] [action] in the [setting]. [Lighting]. [Mood].
 ```
 
-### Two Characters + Setting (3 images)
+### Two Characters + Setting
+
 ```
-The [character] from image 1 and the [character] from image 2 [interaction] in the [setting] from image 3. [Spatial arrangement]. [Lighting]. [Mood].
+[Character A] and [Character B] [interaction] in the [setting]. [Spatial arrangement]. [Lighting]. [Mood].
 ```
 
-### Multiple Characters + Setting (4 images)
+### Multiple Characters + Setting
+
 ```
-The [character] from image 1, the [character] from image 2, and the [character] from image 4 are gathered in the [setting] from image 3. [Each character's position]. [Lighting]. [Mood].
+[Character A], [Character B], and [Character C] are gathered in the [setting]. [Each character's position]. [Lighting]. [Mood].
 ```
 
 ## What NOT to Do
 
 - Don't use comma-separated keywords — write prose: "woman, garden, sunlight" → "A woman walks through a sunlit garden"
-- Don't forget to reference images by number — the model ignores unreferenced images
 - Don't use vague instructions: "Make it better", "Improve the lighting", "Fix the image"
 - Don't bury the subject in description — lead with who and what, not the setting
-- Don't describe what images look like — let the reference images provide visual details, your prompt describes the composition and transformation
+- Don't describe what reference images look like — the references already carry their visual identity; your prompt describes the composition and transformation

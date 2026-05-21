@@ -15,8 +15,8 @@ shot or frame** — not for project-wide stylistic changes (those need
 1. **Load the right craft skill BEFORE you write.** A bad prompt is
    the leading cause of bad regens. Pull in:
    - **image-prompting** — for any change to `imagePrompt` (rules
-     for composition, "from image N" reference markers, style cues,
-     what the generator needs).
+     for composition, character/setting naming conventions, style
+     cues, what the generator needs).
    - **video-direction** — for any change to `motionDirective`
      (camera vs subject motion, timing, transition vocabulary).
 
@@ -43,9 +43,8 @@ shot or frame** — not for project-wide stylistic changes (those need
    Edit only `frames.<frame>.imagePrompt`. Keep `references`,
    `generationMode`, and other fields exactly as they are — they
    pin the visual identity. Apply the rules from `image-prompting`:
-   if the existing prompt names a character via "from image 1",
-   the edited prompt MUST keep the same reference and the same
-   image number.
+   name characters and settings directly in the prose; the
+   `references` array (refId + imageNumber) does the binding.
 
    For motion prompts, the file is `{ motionDirective: "..." }`.
    Replace the string per `video-direction` guidance.

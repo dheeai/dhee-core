@@ -44,14 +44,18 @@ The image must match the shot's framing. Different shot types require different 
 - Use ONLY the character/setting references relevant to THIS shot
 - For close-ups: only the featured character's reference
 - For establishing/wide shots: all character + setting references
-- Reference images as "from image1", "from image2", "from image3" based on the order listed in Reference Images section
+- Name characters and settings directly in the prose by their canonical
+  names (e.g. "Ruby walks toward Angel", "the bus station platform").
+  Slot binding is handled deterministically by the executor — a
+  manifest line is prepended to your output at render time. You do
+  not need to mention slot numbers.
 
 ## Output Format
 
 When reference images EXIST:
 ```
 **Image Prompt:**
-[Single detailed paragraph matching the shot's framing. Use "from image1/image2/image3" to reference characters and settings.]
+[Single detailed paragraph matching the shot's framing. Name characters and settings directly.]
 
 **Reference Images:**
 - Character: [name] [path/to/character_ref.png]

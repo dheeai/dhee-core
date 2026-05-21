@@ -35,16 +35,14 @@ Before writing a single word of the prompt, extract and write down:
 
 ## Reference Image Rule — Hard Constraint
 
-**You may only reference images explicitly listed as available for THIS specific shot.**
+**Write prose using character / setting / object names directly.** A separate downstream pass reads your prose, picks the matching refs from the project, and assigns image-number slots. Your job is clean cinematic prose using names; slot numbers are not your concern.
 
-- Reference each available image using "from image N" phrasing (e.g., "the character from image 1", "the environment from image 2", "the hover-car from image 3").
-- Reference images can be characters, settings, or **objects/props** (vehicles, weapons, artifacts, distinctive items).
-- Every image in the shot's referenceImages list MUST appear somewhere in the prompt paragraph.
-- If image 3 is not in this shot's referenceImages list, you CANNOT write "from image 3". Not even if you saw that image referenced elsewhere. Not even if the setting seems to match.
-- **If a character is NOT described as visible in the shot description, do NOT reference their image — even if it's in the available list.** Available references are for the whole scene; only use the ones relevant to THIS shot.
-- If no characters or settings from the available list appear in the shot, use `text_to_image` mode with no "from imageN" references and an empty references array.
+- Name the characters, settings, and objects visible in THIS shot directly in the prose ("Ruby leans forward", "the bus station platform", "the silver revolver").
+- Reference images can be characters, settings, or **objects/props** (vehicles, weapons, artifacts, distinctive items) — the downstream pass handles all three.
+- **If a character is NOT described as visible in the shot description, do NOT name them in the prose** — even if they're in the available list. Available references are for the whole scene; only the entities visible in THIS shot's frame belong in this shot's prose.
+- If no characters / settings from the available list appear in the shot (documentary / abstract / atmosphere shot), use `text_to_image` mode and write everything from scratch.
 
-**Fabricating image numbers is a critical error. If you write "from image 4" and image 4 is not in this shot's list, the prompt is wrong.**
+**The `references` array in your output JSON should still list which character / setting / object refs the shot needs** — each entry with `refId`, `type`, and `imageNumber`. The JSON references are what bind to Klein's image slots; the prose just describes what's in the frame using names.
 
 ---
 
@@ -77,7 +75,7 @@ Rules:
 - A wide or establishing shot uses deep focus and is dominated by the ENVIRONMENT. Characters in wide shots are small figures within the landscape, not central subjects. Do not write wide-shot prompts that center a named character's actions.
 - A close-up means the face fills the frame. Do not describe the character standing in a vast environment.
 - State depth of field explicitly in the prose every time.
-- **Never use `over_the_shoulder` framing or the phrase `"over-the-shoulder of X"` when the shot has only ONE character ref.** OTS is inherently a two-character composition: foreground anchor (blurred) and focal subject (sharp). With only one character ref, the image model will either invent a phantom second character or distort the scene. For tight intimate framings of a single character (camera angled over the character's own shoulder, focusing on their hands or an object), use `insert`, `extreme_close_up`, or `close_up` shot types instead — and write the prose with the focal element (hands, object, face detail) as the subject. Example: instead of `"OTS view of Parvati from image 2 reaching for the bucket"`, write `"Insert shot: Parvati from image 2's hand reaching toward the bucket, fingers extended, in shallow focus..."`
+- **Never use `over_the_shoulder` framing or the phrase `"over-the-shoulder of X"` when the shot has only ONE character ref.** OTS is inherently a two-character composition: foreground anchor (blurred) and focal subject (sharp). With only one character ref, the image model will either invent a phantom second character or distort the scene. For tight intimate framings of a single character (camera angled over the character's own shoulder, focusing on their hands or an object), use `insert`, `extreme_close_up`, or `close_up` shot types instead — and write the prose with the focal element (hands, object, face detail) as the subject. Example: instead of `"OTS view of Parvati reaching for the bucket"`, write `"Insert shot: Parvati's hand reaching toward the bucket, fingers extended, in shallow focus..."`
 - If the motion JSON specifies a camera angle (low angle, dutch tilt, high angle), include it in the prose.
 
 ---
@@ -113,7 +111,7 @@ The `focus` object from the shot JSON tells you EXACTLY what should be in focus 
 
 **Worked example:**
 - `focus.primary = "laila_face"`, `focus.background = ["vikram_shoulder", "torches"]`, `focus.lurking = "cloaked_figure"`
-- Prose: "A medium close-up over Vikram's shoulder, Laila from image 2 in razor-sharp focus, kohl-rimmed eyes fierce. Vikram's soaked kurta shoulder soft and blurred in the near foreground. Torch flames rendered as warm bokeh behind her. Barely visible at the rear of the dhaba, the cloaked figure from image 3 sits as a defocused indistinct silhouette — present in the frame but outside the viewer's attention."
+- Prose: "A medium close-up over Vikram's shoulder, Laila in razor-sharp focus, kohl-rimmed eyes fierce. Vikram's soaked kurta shoulder soft and blurred in the near foreground. Torch flames rendered as warm bokeh behind her. Barely visible at the rear of the dhaba, the cloaked figure sits as a defocused indistinct silhouette — present in the frame but outside the viewer's attention."
 
 **Rules:**
 - Every prose paragraph for a shot with `focus` must explicitly name what is sharp AND what is blurred.
@@ -195,22 +193,22 @@ Write a single flowing prose paragraph. Do not use bullet points, numbered steps
 
 The paragraph must contain, in order:
 1. The peak visual event and main subject — the specific action at its most dramatic moment
-2. The setting and spatial relationships
+2. The setting and spatial relationships — named directly ("the bus station platform")
 3. Shot framing, camera angle, and depth of field (explicit words from the shot type table)
-4. "from image N" references for every available image
+4. Every character / setting / object visible in the frame — named directly ("Ruby leans forward")
 5. Lighting with source, direction, quality, and temperature — all four
 6. Mood or atmosphere
 
 Lead with what is most dramatic and specific. Do not open with the environment when the event is the point.
 
-Example structure: "A wide establishing shot of [environment from image 2], deep focus with foreground and background both sharp, showing [characters from image 1] [specific action at its peak]. [Lighting with all four components]. [Mood]."
+Example structure: "A wide establishing shot of [environment named directly], deep focus with foreground and background both sharp, showing [characters named directly] [specific action at its peak]. [Lighting with all four components]. [Mood]."
 
 ---
 
 **Output format:**
 ```
 **Image Prompt:**
-[Single detailed paragraph matching the shot's framing. Reference characters/settings with "from imageN" phrasing only for images explicitly listed as available for this shot. Lead with subject and action, then setting, then lighting, then mood. Write flowing prose — not comma-separated keywords.]
+[Single detailed paragraph matching the shot's framing. Name characters/settings directly (no slot tokens — a downstream pass handles slot binding from the `references` JSON below). Lead with subject and action, then setting, then lighting, then mood. Write flowing prose — not comma-separated keywords.]
 
 **Reference Images:**
 - Character: [name] (only if in this shot and listed as available)
@@ -226,7 +224,7 @@ Example structure: "A wide establishing shot of [environment from image 2], deep
 image_text_to_image
 ```
 
-If NO reference images are available (documentary/non-narrative), use `text_to_image` mode with no "from imageN" references.
+If NO reference images are available (documentary/non-narrative), use `text_to_image` mode and write everything from scratch.
 
 ---
 
@@ -360,7 +358,7 @@ When the shot's `videoGenerationMode` is `flfv` or `fmlfv`, you must generate MU
 3. **last_frame** and **mid_frame** PREFER `edit_first_frame` — it keeps visual consistency within the shot
 4. Only use `image_text_to_image` for continuation shots if the camera angle changed dramatically or it's a new location
 5. The `edit_first_frame` and `edit_previous_shot` prompts should describe the DELTA (what changed), not the full scene
-6. For `edit_first_frame` and `edit_previous_shot`, ALWAYS include character references using "from image N" phrasing and populate the `references` array — this is required for character consistency even when editing a base image. Reference every character visible in the shot
+6. For `edit_first_frame` and `edit_previous_shot`, ALWAYS populate the `references` array with every character / setting / object visible in the shot — required for character consistency even when editing a base image. Names go in the prose; slot binding via the references JSON is handled downstream.
 7. **refId MUST exactly match the available reference IDs** — copy them from the available references list. Do NOT invent or guess refIds. If the character is "mr_patel", write `"character_image:mr_patel"`, NOT `"character_image:mr_pattern"` or any variation
 8. The last_frame should ALWAYS describe the end state. Check `<last_frame_changes>` for what must differ from first_frame
 
