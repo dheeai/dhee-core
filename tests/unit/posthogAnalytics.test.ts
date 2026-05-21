@@ -19,7 +19,9 @@ vi.mock('posthog-node', () => ({
 }));
 
 import {
+  captureAnalyticsEvent,
   captureDesktopAppStarted,
+  captureSessionStarted,
   configurePostHogRuntime,
   configureAnalytics,
   identifyAnalyticsUser,
@@ -122,6 +124,67 @@ describe('posthog analytics', () => {
         properties: expect.objectContaining({
           source: 'runtime-config',
         }),
+      }),
+    );
+  });
+
+  it('does not treat core session_id as PostHog $session_id', () => {
+    process.env.POSTHOG_API_KEY = 'phc_test';
+
+    captureAnalyticsEvent('custom_event', { session_id: 'core-session-1' });
+
+    expect(posthogMocks.capture).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        event: 'custom_event',
+        properties: expect.objectContaining({
+          session_id: 'core-session-1',
+        }),
+      }),
+    );
+    expect(posthogMocks.capture.mock.calls.at(-1)?.[0].properties).not.toEqual(
+      expect.objectContaining({
+        '$session_id': expect.any(String),
+      }),
+    );
+  });
+
+  it('preserves explicit PostHog $session_id for screen/session UI events', () => {
+    process.env.POSTHOG_API_KEY = 'phc_test';
+
+    captureAnalyticsEvent('$screen', {
+      '$session_id': 'desktop-launch-1',
+      '$screen_name': 'desktop_main',
+    });
+
+    expect(posthogMocks.capture).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        event: '$screen',
+        properties: expect.objectContaining({
+          '$session_id': 'desktop-launch-1',
+          '$screen_name': 'desktop_main',
+        }),
+      }),
+    );
+  });
+
+  it('captures core sessions with a canonical core_session_id', () => {
+    process.env.POSTHOG_API_KEY = 'phc_test';
+
+    captureSessionStarted('core-session-1', '2026-05-21T01:02:03.000Z');
+
+    expect(posthogMocks.capture).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        event: 'core_session_started',
+        properties: expect.objectContaining({
+          core_session_id: 'core-session-1',
+          session_id: 'core-session-1',
+          session_started_at: '2026-05-21T01:02:03.000Z',
+        }),
+      }),
+    );
+    expect(posthogMocks.capture.mock.calls.at(-1)?.[0].properties).not.toEqual(
+      expect.objectContaining({
+        '$session_id': expect.any(String),
       }),
     );
   });

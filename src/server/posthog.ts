@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { PostHog } from 'posthog-node';
 
 const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com';
@@ -17,7 +17,6 @@ const SENSITIVE_PROPERTY_PATTERN =
 let posthogClient: PostHog | null | undefined;
 let shutdownHandlersRegistered = false;
 let cachedDeviceId: string | undefined;
-const posthogSessionIds = new Map<string, string>();
 
 // posthog-node's @posthog/core hardcodes `console.error('Error while flushing PostHog', err)`
 // in its background flush path with no opt-out. When us.i.posthog.com is unreachable
@@ -40,11 +39,13 @@ export type AnalyticsEventName =
   | 'desktop_auth_started'
   | 'desktop_token_issued'
   | 'core_session_started'
+  | 'core_session_ended'
   | 'core_tool_call_started'
   | 'core_tool_call_completed'
   | 'core_task_started'
   | 'core_task_completed'
   | 'core_task_failed'
+  | 'error_occurred'
   | 'final_video_created'
   | (string & {});
 
@@ -414,58 +415,6 @@ function toDate(input?: string | Date): Date | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
-function bytesToUuid(bytes: Uint8Array): string {
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
-
-function createUuidV7(nowMs: number): string {
-  const bytes = new Uint8Array(16);
-  const timestamp = BigInt(nowMs);
-  const random = randomBytes(10);
-  const r0 = random[0] ?? 0;
-  const r1 = random[1] ?? 0;
-  const r2 = random[2] ?? 0;
-  const r3 = random[3] ?? 0;
-  const r4 = random[4] ?? 0;
-  const r5 = random[5] ?? 0;
-  const r6 = random[6] ?? 0;
-  const r7 = random[7] ?? 0;
-  const r8 = random[8] ?? 0;
-  const r9 = random[9] ?? 0;
-
-  bytes[0] = Number((timestamp >> 40n) & 0xffn);
-  bytes[1] = Number((timestamp >> 32n) & 0xffn);
-  bytes[2] = Number((timestamp >> 24n) & 0xffn);
-  bytes[3] = Number((timestamp >> 16n) & 0xffn);
-  bytes[4] = Number((timestamp >> 8n) & 0xffn);
-  bytes[5] = Number(timestamp & 0xffn);
-
-  bytes[6] = 0x70 | (r0 & 0x0f);
-  bytes[7] = r1;
-  bytes[8] = 0x80 | (r2 & 0x3f);
-  bytes[9] = r3;
-  bytes[10] = r4;
-  bytes[11] = r5;
-  bytes[12] = r6;
-  bytes[13] = r7;
-  bytes[14] = r8;
-  bytes[15] = r9;
-
-  return bytesToUuid(bytes);
-}
-
-function getOrCreatePostHogSessionId(sessionId: string): string {
-  const existing = posthogSessionIds.get(sessionId);
-  if (existing) {
-    return existing;
-  }
-
-  const created = createUuidV7(Date.now());
-  posthogSessionIds.set(sessionId, created);
-  return created;
-}
-
 export function configureAnalytics(input: {
   platform?: CommonProperties['platform'];
   appVersion?: string;
@@ -543,10 +492,6 @@ export function captureAnalyticsEvent(
   }
 
   const identity = resolveIdentity(options.identity);
-  const rawSessionId = properties['session_id'];
-  const posthogSessionId = typeof rawSessionId === 'string' && rawSessionId.length > 0
-    ? getOrCreatePostHogSessionId(rawSessionId)
-    : undefined;
 
   try {
     client.capture({
@@ -559,7 +504,6 @@ export function captureAnalyticsEvent(
         app_component: options.component ?? 'dhee-core',
         install_id: identity.installId,
         user_id: identity.userId,
-        ...(posthogSessionId ? { '$session_id': posthogSessionId } : {}),
         ...properties,
       }),
     });
@@ -611,6 +555,7 @@ export function captureDesktopAuthStarted(properties: Record<string, unknown> = 
 export function captureSessionStarted(sessionId: string, startedAt?: string): void {
   const startIso = startedAt ?? new Date().toISOString();
   captureAnalyticsEvent('core_session_started', {
+    core_session_id: sessionId,
     session_id: sessionId,
     '$start_timestamp': startIso,
     session_started_at: startIso,
@@ -632,6 +577,7 @@ export function captureSessionEnded(
   const bounce = typeof interactionCount === 'number' ? interactionCount <= 1 : undefined;
 
   captureAnalyticsEvent('core_session_ended', {
+    core_session_id: sessionId,
     session_id: sessionId,
     duration_ms: durationMs,
     '$end_timestamp': endIso,
@@ -647,6 +593,7 @@ export function captureSessionEnded(
 
 export function captureWorkflowStarted(payload: WorkflowEventPayload): void {
   captureAnalyticsEvent('core_task_started', {
+    core_session_id: payload.sessionId,
     session_id: payload.sessionId,
     workflow_name: payload.workflowName,
     template_id: payload.templateId,
@@ -657,6 +604,7 @@ export function captureWorkflowStarted(payload: WorkflowEventPayload): void {
 
 export function captureWorkflowCompleted(payload: WorkflowEventPayload): void {
   captureAnalyticsEvent('core_task_completed', {
+    core_session_id: payload.sessionId,
     session_id: payload.sessionId,
     workflow_name: payload.workflowName,
     template_id: payload.templateId,
@@ -669,6 +617,7 @@ export function captureWorkflowCompleted(payload: WorkflowEventPayload): void {
 
 export function captureWorkflowFailed(payload: WorkflowFailedPayload): void {
   captureAnalyticsEvent('core_task_failed', {
+    core_session_id: payload.sessionId,
     session_id: payload.sessionId,
     workflow_name: payload.workflowName,
     template_id: payload.templateId,
@@ -682,6 +631,7 @@ export function captureWorkflowFailed(payload: WorkflowFailedPayload): void {
 
 export function captureErrorOccurred(payload: ErrorOccurredPayload): void {
   captureAnalyticsEvent('error_occurred', {
+    core_session_id: payload.sessionId,
     session_id: payload.sessionId,
     error_type: payload.errorType,
     tool_name: payload.toolName,
@@ -696,6 +646,7 @@ export function captureToolCallStarted(payload: ToolCallStartedPayload): void {
   captureAnalyticsEvent(
     'core_tool_call_started',
     {
+      core_session_id: payload.sessionId,
       session_id: payload.sessionId,
       tool_call_id: payload.toolCallId,
       tool_name: payload.toolName,
@@ -713,6 +664,7 @@ export function captureToolCallCompleted(payload: ToolCallCompletedPayload): voi
   captureAnalyticsEvent(
     'core_tool_call_completed',
     {
+      core_session_id: payload.sessionId,
       session_id: payload.sessionId,
       tool_call_id: payload.toolCallId,
       tool_name: payload.toolName,
@@ -735,6 +687,7 @@ export function captureToolCallCompleted(payload: ToolCallCompletedPayload): voi
 
 export function captureFinalVideoCreated(payload: FinalVideoCreatedPayload): void {
   captureAnalyticsEvent('final_video_created', {
+    core_session_id: payload.sessionId,
     session_id: payload.sessionId,
     duration_seconds: payload.durationSeconds,
     file_size_bytes: payload.fileSizeBytes,
@@ -782,7 +735,6 @@ export function registerPostHogShutdownHandlers(): void {
 export function resetAnalyticsForTests(): void {
   posthogClient = undefined;
   cachedDeviceId = undefined;
-  posthogSessionIds.clear();
   analyticsIdentity = {};
   extraCommonProperties = {};
   commonProperties = {
