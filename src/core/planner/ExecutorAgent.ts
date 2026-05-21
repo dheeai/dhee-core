@@ -69,6 +69,7 @@ import {
   buildReferenceMenu,
   buildTurn2UserMessage,
   parseTurn2RefsJson,
+  isHoldingBeat,
   type Reference,
   type ReferenceMenuItem,
 } from './shotImagePipeline.js';
@@ -1350,6 +1351,79 @@ export class ExecutorAgent extends TypedEventEmitter {
     return sceneVideoPromptOutputPath
       ?? sceneVideoPromptNode?.outputPath
       ?? this.executor.getNode(`scene_video_prompt:${sceneId}`)?.outputPath;
+  }
+
+  /**
+   * Post-LLM holding-beat skip for shot_image_prompt.
+   *
+   * Loads this shot's purpose + cameraWork from the upstream
+   * scene_video_prompt JSON and runs `isHoldingBeat`. If the heuristic
+   * fires, the LLM-generated `frames.last_frame` is stripped from the
+   * JSON and `generationStrategy` is flipped to `'i2v'`. The downstream
+   * `shot_image_last_frame` bridge no-ops on missing
+   * `frames.last_frame.imagePrompt`; the video provider reads
+   * `generationStrategy === 'i2v'` and routes to `ltx23_i2v_*`.
+   *
+   * Returns the mutated JSON string when the skip fires, or `null` when
+   * the heuristic doesn't fire / the shot brief can't be resolved.
+   * Callers fall back to the original `content` on null.
+   *
+   * Failure modes are non-fatal: any parsing / lookup error returns
+   * null and the original JSON ships unchanged.
+   */
+  private applyHoldingBeatSkip(content: string, node: ExecutionNode): string | null {
+    if (!node.itemId || node.typeId !== 'shot_image_prompt') return null;
+    const m = node.itemId.match(/^(scene_(\d+))_shot_(\d+)$/);
+    if (!m || !m[1] || !m[3]) return null;
+    const sceneId = m[1];
+    const shotNumber = parseInt(m[3], 10);
+
+    const svpOutputPath = this.resolveSceneVideoPromptOutputPath(sceneId);
+    if (!svpOutputPath) return null;
+    const svpAbs = join(this.config.projectDir, svpOutputPath);
+    if (!existsSync(svpAbs)) return null;
+
+    let svpRaw = readFileSync(svpAbs, 'utf-8').trim();
+    if (svpRaw.startsWith('```')) {
+      svpRaw = svpRaw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+    let svp: { shots?: Array<{ shotNumber?: number; purpose?: string; cameraWork?: string }> };
+    try {
+      svp = JSON.parse(svpRaw);
+    } catch {
+      return null;
+    }
+    const shot = svp.shots?.find((s) => s.shotNumber === shotNumber);
+    if (!shot) return null;
+
+    const purpose = shot.purpose ?? '';
+    const cameraWork = shot.cameraWork ?? '';
+    if (!isHoldingBeat(purpose, cameraWork)) return null;
+
+    let parsed: {
+      frames?: { first_frame?: unknown; last_frame?: unknown; mid_frame?: unknown };
+      generationStrategy?: string;
+      [k: string]: unknown;
+    };
+    try {
+      let raw = content.trim();
+      if (raw.startsWith('```')) {
+        raw = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!parsed.frames) return null;
+    if (parsed.frames.last_frame !== undefined) {
+      delete parsed.frames.last_frame;
+    }
+    parsed.generationStrategy = 'i2v';
+
+    this.log(
+      `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v`,
+    );
+    return JSON.stringify(parsed, null, 2);
   }
 
   private parseSceneBreakdown(
@@ -3409,6 +3483,22 @@ export class ExecutorAgent extends TypedEventEmitter {
                 } catch (err) {
                   this.log(
                     `  [shot_image_prompt turn-2] refinement skipped: ${(err as Error).message}`,
+                  );
+                }
+
+                // Skip-LF for holding beats: load this shot's purpose +
+                // cameraWork from scene_video_prompt, run isHoldingBeat,
+                // and if it fires, strip frames.last_frame from the JSON
+                // and flip generationStrategy to 'i2v'. The downstream
+                // executor reads strategy=i2v and routes shot_video to
+                // ltx23_i2v_* workflows; executeShotImageLastFrame
+                // already no-ops on missing frames.last_frame.imagePrompt.
+                try {
+                  const filtered = this.applyHoldingBeatSkip(content, node);
+                  if (filtered) content = filtered;
+                } catch (err) {
+                  this.log(
+                    `  [shot_image_prompt holding-beat] skip check failed: ${(err as Error).message}`,
                   );
                 }
               }
