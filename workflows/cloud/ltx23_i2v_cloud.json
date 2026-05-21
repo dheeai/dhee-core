@@ -335,7 +335,7 @@
       "title": "LTXVImgToVideoInplaceKJ (Stage 2 \u2014 FL2V conditioning, patched per task #6)"
     },
     "inputs": {
-      "num_images": "2",
+      "num_images": "1",
       "num_images.strength_1": 1,
       "num_images.strength_2": 1,
       "num_images.index_1": 0,
@@ -802,7 +802,7 @@
   },
   "210": {
     "inputs": {
-      "num_images": "2",
+      "num_images": "1",
       "num_images.strength_1": 1,
       "num_images.strength_2": 1,
       "num_images.index_1": 0,
