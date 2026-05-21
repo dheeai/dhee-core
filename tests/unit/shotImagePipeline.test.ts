@@ -1539,3 +1539,108 @@ describe('shotImagePipeline: parseTurn2RefsJson — Must 1.1 (null/empty fallbac
     expect(msg).toContain('`derivedFrom`');
   });
 });
+
+describe('shotImagePipeline: isHoldingBeat — holding-beat detection for skip-LF', () => {
+  it('returns true for hold_emotion with static cameraWork', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('hold_emotion', 'medium close-up, eye-level')).toBe(true);
+  });
+
+  it('returns true for show_reaction without motion verbs', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('show_reaction', 'close-up, slight low angle')).toBe(true);
+  });
+
+  it('returns true for set_the_mood, set_the_world, show_dialogue, show_clue, punctuate when static', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('set_the_mood', 'wide')).toBe(true);
+    expect(isHoldingBeat('set_the_world', 'extreme wide establishing')).toBe(true);
+    expect(isHoldingBeat('show_dialogue', 'medium two-shot')).toBe(true);
+    expect(isHoldingBeat('show_clue', 'insert macro')).toBe(true);
+    expect(isHoldingBeat('punctuate', 'cut to black')).toBe(true);
+  });
+
+  it('returns false when cameraWork includes a motion verb', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('hold_emotion', 'slow push in on her face')).toBe(false);
+    expect(isHoldingBeat('show_reaction', 'tracking shot following her')).toBe(false);
+    expect(isHoldingBeat('set_the_mood', 'crane up over the city')).toBe(false);
+    expect(isHoldingBeat('show_dialogue', 'dolly back as they walk')).toBe(false);
+  });
+
+  it('returns false for action-y purposes regardless of cameraWork', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('show_action', 'static medium')).toBe(false);
+    expect(isHoldingBeat('show_change', 'static medium')).toBe(false);
+    expect(isHoldingBeat('meet_character', 'static medium')).toBe(false);
+    expect(isHoldingBeat('show_passage', 'static medium')).toBe(false);
+    expect(isHoldingBeat('show_tension', 'static medium')).toBe(false);
+  });
+
+  it('returns false on unknown / empty purpose', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('', 'medium')).toBe(false);
+    expect(isHoldingBeat('not_a_real_purpose', 'medium')).toBe(false);
+  });
+
+  it('returns true when cameraWork is empty (trusts the purpose alone)', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('hold_emotion', '')).toBe(true);
+  });
+});
+
+describe('shotImagePipeline: assembleShotImagePrompt — skip-LF path', () => {
+  it('omits last_frame and forces generationStrategy=i2v when lastFramePrompt is empty', async () => {
+    const { assembleShotImagePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
+    const result = assembleShotImagePrompt({
+      shotNumber: 2,
+      generationStrategy: 'flfv',
+      firstFrameMode: 'image_text_to_image',
+      firstFramePrompt: 'A close-up of her face from image 1, evening light...',
+      firstFrameRefs: [{ imageNumber: 1, type: 'character' as const, refId: 'character_image:ruby' }],
+      lastFramePrompt: '',
+      negativePrompt: 'blurry, cartoon',
+    });
+
+    expect(result.frames.last_frame).toBeUndefined();
+    expect(result.frames.first_frame).toBeDefined();
+    expect(result.generationStrategy).toBe('i2v');
+
+    // Still passes the schema (last_frame is optional)
+    const validation = validateWithSchema('shot_image_prompt', result);
+    expect(validation.valid).toBe(true);
+  });
+
+  it('omits last_frame when lastFramePrompt is whitespace-only', async () => {
+    const { assembleShotImagePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
+    const result = assembleShotImagePrompt({
+      shotNumber: 3,
+      generationStrategy: 'flfv',
+      firstFrameMode: 'image_text_to_image',
+      firstFramePrompt: 'A wide of the empty street...',
+      firstFrameRefs: [{ imageNumber: 1, type: 'setting' as const, refId: 'setting_image:street' }],
+      lastFramePrompt: '   \n\t  ',
+      negativePrompt: 'blurry',
+    });
+
+    expect(result.frames.last_frame).toBeUndefined();
+    expect(result.generationStrategy).toBe('i2v');
+  });
+
+  it('retains last_frame when prompt is non-empty (no skip)', async () => {
+    const { assembleShotImagePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
+    const result = assembleShotImagePrompt({
+      shotNumber: 4,
+      generationStrategy: 'flfv',
+      firstFrameMode: 'image_text_to_image',
+      firstFramePrompt: 'Ruby running toward the door...',
+      firstFrameRefs: [{ imageNumber: 1, type: 'character' as const, refId: 'character_image:ruby' }],
+      lastFramePrompt: 'Ruby has reached the door, hand on the handle...',
+      negativePrompt: 'blurry',
+    });
+
+    expect(result.frames.last_frame).toBeDefined();
+    expect(result.frames.last_frame!.imagePrompt).toContain('door');
+    expect(result.generationStrategy).toBe('flfv');
+  });
+});

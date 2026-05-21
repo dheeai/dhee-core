@@ -23,6 +23,66 @@ import { join } from 'path';
  */
 const FRESH_PURPOSES = new Set<string>();
 
+/**
+ * Holding-beat purposes — shots where the LF visually matches the FF
+ * (subject still, camera static). LTX i2v handles these with subtle
+ * ambient improvisation; generating a distinct LF prompt + Klein edit
+ * costs ~$0.02-0.03/shot for no perceptual gain. See skip-wasted-LF
+ * todo and skip-lf branch.
+ */
+const HOLDING_BEAT_PURPOSES = new Set<string>([
+  'set_the_world',
+  'set_the_mood',
+  'hold_emotion',
+  'show_reaction',
+  'show_dialogue',
+  'show_clue',
+  'punctuate',
+]);
+
+/**
+ * Motion verbs in `cameraWork` that veto the holding-beat classification.
+ * If the camera is moving, the LF can't be the same frame as the FF —
+ * the camera's position has changed even if the subject hasn't.
+ */
+const CAMERA_MOTION_VERBS = [
+  'push in', 'push-in', 'pushin',
+  'pull back', 'pull-back', 'pullback',
+  'pan',
+  'dolly',
+  'tracking', 'track ',
+  'tilt',
+  'zoom',
+  'follow',
+  'crane',
+  'orbit',
+  'whip',
+  'swirl',
+  'rack focus', 'rack-focus',
+  'arc shot', 'arc ',
+];
+
+/**
+ * Decide whether a shot is a "holding beat" — its LF should be skipped
+ * and the video gen falls back to i2v (FF only).
+ *
+ * Triggers when:
+ *   - purpose ∈ HOLDING_BEAT_PURPOSES, AND
+ *   - cameraWork prose lacks any camera-motion verb.
+ *
+ * Be conservative: if either signal is unclear, return false so the
+ * default FL2V path runs.
+ */
+export function isHoldingBeat(purpose: string, cameraWork: string): boolean {
+  if (!purpose || !HOLDING_BEAT_PURPOSES.has(purpose)) return false;
+  const cw = (cameraWork ?? '').toLowerCase();
+  if (!cw) return true; // no cameraWork prose → trust the purpose
+  for (const verb of CAMERA_MOTION_VERBS) {
+    if (cw.includes(verb)) return false;
+  }
+  return true;
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface Reference {
@@ -829,24 +889,37 @@ export function assembleShotImagePrompt(input: AssembleInput): ShotImagePromptJs
   // The order matters slightly: strip refs first (smaller change), then
   // normalize verbs. Both are idempotent.
   const firstFrameProse = enforceFrozenInstant(stripInlineFromImageTokens(input.firstFramePrompt));
-  const lastFrameProse = enforceFrozenInstant(stripInlineFromImageTokens(input.lastFramePrompt));
   const composed = (line: string, prose: string) => (line ? `${line}\n\n${prose}` : prose);
+
+  // Skip-LF mode: when the pipeline emitted an empty LF prompt (holding
+  // beat detected upstream), omit last_frame from the frames map. The
+  // bridge node + executor + provider all read this absence and route
+  // shot_video to i2v. Effective video strategy becomes 'i2v' instead
+  // of 'flfv'. See skip-lf branch + isHoldingBeat() for the heuristic.
+  const lastFrameSkipped = !input.lastFramePrompt || !input.lastFramePrompt.trim();
+  const frames: ShotImagePromptJson['frames'] = {
+    first_frame: {
+      imagePrompt: composed(manifestLine, firstFrameProse),
+      generationMode: input.firstFrameMode,
+      references: input.firstFrameRefs,
+    },
+  };
+  if (!lastFrameSkipped) {
+    const lastFrameProse = enforceFrozenInstant(stripInlineFromImageTokens(input.lastFramePrompt));
+    frames.last_frame = {
+      imagePrompt: composed(manifestLine, lastFrameProse),
+      generationMode: 'edit_first_frame',
+      references: [],
+    };
+  }
 
   return {
     shotNumber: input.shotNumber,
-    generationStrategy: strategy,
-    frames: {
-      first_frame: {
-        imagePrompt: composed(manifestLine, firstFrameProse),
-        generationMode: input.firstFrameMode,
-        references: input.firstFrameRefs,
-      },
-      last_frame: {
-        imagePrompt: composed(manifestLine, lastFrameProse),
-        generationMode: 'edit_first_frame',
-        references: [],
-      },
-    },
+    // When LF is skipped, downstream video strategy must be i2v (see
+    // executor strategy override and ltx23_i2v_* manifests). Force it
+    // here so persisted JSON matches what the renderer will actually do.
+    generationStrategy: lastFrameSkipped ? 'i2v' : strategy,
+    frames,
     negativePrompt: input.negativePrompt,
     aspectRatio: '16:9',
   };
@@ -1164,18 +1237,30 @@ export async function generateShotImagePromptPipeline(
   emit?.({ type: 'tool_streaming', toolCallId: callId2, chunk: firstFramePrompt.substring(0, 200) + '...', done: true, agentName: agent, toolName: 'shot_first_frame' });
   emit?.({ type: 'tool_result', toolCallId: callId2, toolName: 'shot_first_frame', result: { prompt: firstFramePrompt }, agentName: agent });
 
-  // ── Call 3: Last Frame Prompt ──
-  const lastFrameInput = buildLastFramePrompt({
-    firstFramePrompt,
-    lastFrameChanges: ctx.lastFrameChanges,
-    shotDescription: ctx.shotDescription,
-  });
+  // ── Call 3: Last Frame Prompt (or skip for holding beats) ──
+  // Holding beats (static subject + static camera) get FF=LF treatment:
+  // skip the LLM call and emit an empty LF prompt. The assembler omits
+  // last_frame from the JSON; the executor's bridge node no-ops; the
+  // shot_video resolver flips strategy to i2v. See skip-lf branch.
+  const skipLastFrame = isHoldingBeat(ctx.shotPurpose, ctx.shotCameraWork);
+  let lastFramePrompt = '';
+  if (skipLastFrame) {
+    const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;
+    emit?.({ type: 'tool_call', toolCallId: callId3, toolName: 'shot_last_frame', arguments: { shot: ctx.itemId, skipped: true, reason: 'holding_beat' }, agentName: agent });
+    emit?.({ type: 'tool_result', toolCallId: callId3, toolName: 'shot_last_frame', result: { skipped: true, reason: 'holding_beat', purpose: ctx.shotPurpose }, agentName: agent });
+  } else {
+    const lastFrameInput = buildLastFramePrompt({
+      firstFramePrompt,
+      lastFrameChanges: ctx.lastFrameChanges,
+      shotDescription: ctx.shotDescription,
+    });
 
-  const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;
-  emit?.({ type: 'tool_call', toolCallId: callId3, toolName: 'shot_last_frame', arguments: { shot: ctx.itemId }, agentName: agent });
-  const lastFramePrompt = await callLLM(llm, lastFrameInput.system, lastFrameInput.user, 0.3, false);
-  emit?.({ type: 'tool_streaming', toolCallId: callId3, chunk: lastFramePrompt.substring(0, 200) + '...', done: true, agentName: agent, toolName: 'shot_last_frame' });
-  emit?.({ type: 'tool_result', toolCallId: callId3, toolName: 'shot_last_frame', result: { prompt: lastFramePrompt }, agentName: agent });
+    const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;
+    emit?.({ type: 'tool_call', toolCallId: callId3, toolName: 'shot_last_frame', arguments: { shot: ctx.itemId }, agentName: agent });
+    lastFramePrompt = await callLLM(llm, lastFrameInput.system, lastFrameInput.user, 0.3, false);
+    emit?.({ type: 'tool_streaming', toolCallId: callId3, chunk: lastFramePrompt.substring(0, 200) + '...', done: true, agentName: agent, toolName: 'shot_last_frame' });
+    emit?.({ type: 'tool_result', toolCallId: callId3, toolName: 'shot_last_frame', result: { prompt: lastFramePrompt }, agentName: agent });
+  }
 
   // FML2V disabled: no Call 4 (mid frame). All shots use FL2V (2-frame) video.
 

@@ -1,13 +1,13 @@
 {
-  "id": "ltx23_fl2v_cloud",
-  "displayName": "LTX 2.3 FL2V (Cloud)",
+  "id": "ltx23_i2v_cloud",
+  "displayName": "LTX 2.3 I2V (Cloud)",
   "pipeline": "video_generation",
-  "llmDescription": "Cloud-based first+last frame video generation using LTX 2.3.",
-  "selectionCriteria": "Video generation from first and last frame images on ComfyUI Cloud.",
+  "llmDescription": "Cloud image-to-video generation using LTX 2.3 with only a first-frame anchor. Derived from the FL2V cloud workflow by wiring the second LTX anchor slot back to the first frame. Model improvises subtle ambient motion.",
+  "selectionCriteria": "Use for holding beats (static subject + static camera) on ComfyUI Cloud. Skips last-frame generation entirely.",
   "outputType": "video",
   "priority": 10,
   "strategies": [
-    "flfv"
+    "i2v"
   ],
   "inputRequirements": [
     {
@@ -26,13 +26,8 @@
       "id": "first_frame",
       "type": "image",
       "source": "shot_image",
+      "description": "First frame image (the only anchor for i2v)",
       "required": true
-    },
-    {
-      "id": "last_frame",
-      "type": "image",
-      "source": "shot_image",
-      "required": false
     },
     {
       "id": "seed",
@@ -61,7 +56,7 @@
       "required": false
     }
   ],
-  "workflowFile": "ltx23_fl2v_cloud.json",
+  "workflowFile": "ltx23_i2v_cloud.json",
   "format": "api",
   "parameterMappings": [
     {
@@ -77,11 +72,6 @@
     {
       "input": "first_frame",
       "nodeId": "45",
-      "field": "image"
-    },
-    {
-      "input": "last_frame",
-      "nodeId": "47",
       "field": "image"
     },
     {
