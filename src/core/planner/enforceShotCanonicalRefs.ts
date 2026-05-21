@@ -79,9 +79,45 @@ export function enforceShotCanonicalRefs(
   existingRefs: ShotImagePromptRefMinimal[],
   availableRefs: AvailableRefMinimal[],
 ): EnforcementResult {
-  const out = [...existingRefs];
+  let out = [...existingRefs];
   const addedRefIds: string[] = [];
-  if (!shot) return { references: out, addedRefIds };
+  if (!shot) return { references: capAndDedup(out), addedRefIds };
+
+  // Build lookup: refId-suffix → available-refs entry. The executor
+  // stores refIds as `<type>:<itemId>` (e.g. "character_image:protagonist")
+  // but SVP fields name just the itemId ("protagonist"). Match either
+  // form so callers don't need to normalize first.
+  const byItemId = new Map<string, AvailableRefMinimal>();
+  const byFullRefId = new Map<string, AvailableRefMinimal>();
+  for (const ar of availableRefs) {
+    byFullRefId.set(ar.refId, ar);
+    const itemId = ar.refId.includes(':') ? ar.refId.split(':')[1]! : ar.refId;
+    byItemId.set(itemId, ar);
+  }
+  const resolve = (id: string): AvailableRefMinimal | undefined =>
+    byFullRefId.get(id) ?? byItemId.get(id);
+
+  // Bug 1 (Ruby V3): if the existing references[] has a setting that
+  // ISN'T the SVP-canonical one, replace it. The SVP's
+  // canonicalSceneSetting is the authoritative scene-level continuity
+  // record — a "doorway/threshold" shot whose LLM picked the wrong side
+  // of the doorway gets straightened out here. Without this, the
+  // append-only path leaves Klein with two settings and undefined slot-1
+  // binding.
+  if (shot.canonicalSceneSetting) {
+    const canonical = resolve(shot.canonicalSceneSetting);
+    if (canonical && canonical.type === 'setting') {
+      const settingIdx = out.findIndex(r => r.type === 'setting');
+      if (settingIdx >= 0 && out[settingIdx]!.refId !== canonical.refId) {
+        out[settingIdx] = {
+          ...out[settingIdx]!,
+          type: canonical.type,
+          refId: canonical.refId,
+        };
+        addedRefIds.push(canonical.refId);
+      }
+    }
+  }
 
   // The canonical refIds the SVP named for this shot. Order matters
   // only for "which one gets the lowest imageNumber" — settings first
@@ -96,18 +132,6 @@ export function enforceShotCanonicalRefs(
     if (typeof b === 'string') canonicalIds.push(b);
   }
 
-  // Build lookup: refId-suffix → available-refs entry. The executor
-  // stores refIds as `<type>:<itemId>` (e.g. "character_image:protagonist")
-  // but SVP fields name just the itemId ("protagonist"). Match either
-  // form so callers don't need to normalize first.
-  const byItemId = new Map<string, AvailableRefMinimal>();
-  const byFullRefId = new Map<string, AvailableRefMinimal>();
-  for (const ar of availableRefs) {
-    byFullRefId.set(ar.refId, ar);
-    const itemId = ar.refId.includes(':') ? ar.refId.split(':')[1]! : ar.refId;
-    byItemId.set(itemId, ar);
-  }
-
   const existingByRefId = new Set(out.map(r => r.refId));
   let maxN = 0;
   for (const r of out) {
@@ -119,9 +143,7 @@ export function enforceShotCanonicalRefs(
   const addedThisPass = new Set<string>();
 
   for (const id of canonicalIds) {
-    const ar =
-      byFullRefId.get(id) ??
-      byItemId.get(id);
+    const ar = resolve(id);
     if (!ar) continue; // Not a refId we can resolve — likely free-form prose.
     if (existingByRefId.has(ar.refId)) continue;
     if (addedThisPass.has(ar.refId)) continue;
@@ -135,5 +157,40 @@ export function enforceShotCanonicalRefs(
     addedRefIds.push(ar.refId);
   }
 
+  // Bug 1 (cap): Klein has exactly 4 image input slots. The enforcer can
+  // push references past 4 (s2s7 ended with 5). After all appends, cap
+  // at 4 with setting priority: setting wins slot 1, then characters by
+  // existing order. Also dedup by refId in case any sibling pass left a
+  // duplicate entry behind.
+  out = capAndDedup(out);
+
   return { references: out, addedRefIds };
+}
+
+/**
+ * Dedupe references by refId (preserving first occurrence) and cap at 4
+ * entries. When over the cap, the setting (if present) is kept and the
+ * tail of the array is dropped — Klein binds slot 1 to the base canvas,
+ * so dropping the setting in favor of characters would force a portrait
+ * into the canvas slot. Characters beyond slot 4 simply don't render.
+ */
+function capAndDedup(refs: ShotImagePromptRefMinimal[]): ShotImagePromptRefMinimal[] {
+  const seen = new Set<string>();
+  const deduped: ShotImagePromptRefMinimal[] = [];
+  for (const r of refs) {
+    if (seen.has(r.refId)) continue;
+    seen.add(r.refId);
+    deduped.push(r);
+  }
+  if (deduped.length <= 4) return deduped;
+
+  // Over cap. Find the setting (Klein slot 1) and pin it; keep the first
+  // three non-setting entries in their original order to fill slots 2-4.
+  const settingIdx = deduped.findIndex(r => r.type === 'setting');
+  if (settingIdx < 0) {
+    return deduped.slice(0, 4);
+  }
+  const setting = deduped[settingIdx]!;
+  const nonSetting = deduped.filter((_, i) => i !== settingIdx);
+  return [setting, ...nonSetting.slice(0, 3)];
 }

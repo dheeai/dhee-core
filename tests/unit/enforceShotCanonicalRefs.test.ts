@@ -277,4 +277,89 @@ describe('enforceShotCanonicalRefs', () => {
     expect(references[0]!.refId).toBe('character_image:antagonist');
     expect(references[1]!.refId).toBe('character_image:protagonist');
   });
+
+  // Bug 1 (Ruby V3, 2026-05-20): the LLM picked the INTERIOR setting for a
+  // doorway/threshold shot, but SVP canonical is the EXTERIOR. Old behaviour
+  // appended the canonical → two settings → undefined Klein binding. Right
+  // behaviour: replace the existing setting with the canonical one. The SVP
+  // is the authoritative continuity record.
+  it('Bug 1: existing different setting → REPLACED by canonical (not duplicated)', () => {
+    const SECOND_SETTING: AvailableRefMinimal = {
+      imageNumber: 0,
+      type: 'setting',
+      refId: 'setting_image:pawn_shop_interior',
+      label: 'pawn_shop_interior',
+    };
+    const available = [...AVAILABLE, SECOND_SETTING];
+
+    const existing: ShotImagePromptRefMinimal[] = [
+      { imageNumber: 1, type: 'setting',   refId: 'setting_image:pawn_shop_interior' },
+      { imageNumber: 2, type: 'character', refId: 'character_image:protagonist' },
+      { imageNumber: 3, type: 'character', refId: 'character_image:antagonist' },
+    ];
+    const shot: CanonicalRefsShot = { canonicalSceneSetting: 'broadcast_booth' };
+
+    const { references } = enforceShotCanonicalRefs(shot, existing, available);
+
+    // Exactly one setting in the output
+    const settings = references.filter(r => r.type === 'setting');
+    expect(settings).toHaveLength(1);
+    expect(settings[0]!.refId).toBe('setting_image:broadcast_booth');
+
+    // Characters preserved
+    const chars = references.filter(r => r.type === 'character');
+    expect(chars.map(c => c.refId).sort()).toEqual([
+      'character_image:antagonist',
+      'character_image:protagonist',
+    ]);
+  });
+
+  // Bug 1 (cap): the canonical-refs enforcer can push refs past Klein's
+  // 4-slot capacity (s2s7 ended with 5 refs after enforcement). After ANY
+  // append, the final references[] must be deduplicated by refId and
+  // capped at 4. The setting (slot 1) wins priority; characters fill 2-4.
+  it('Bug 1 cap: enforcement that would exceed 4 refs → capped at 4 with setting kept', () => {
+    const FIVE_CHARS: AvailableRefMinimal[] = [
+      { imageNumber: 0, type: 'character', refId: 'character_image:char_a', label: 'char_a' },
+      { imageNumber: 0, type: 'character', refId: 'character_image:char_b', label: 'char_b' },
+      { imageNumber: 0, type: 'character', refId: 'character_image:char_c', label: 'char_c' },
+      { imageNumber: 0, type: 'character', refId: 'character_image:char_d', label: 'char_d' },
+      { imageNumber: 0, type: 'character', refId: 'character_image:char_e', label: 'char_e' },
+      { imageNumber: 0, type: 'setting',   refId: 'setting_image:room',    label: 'room'   },
+    ];
+
+    const existing: ShotImagePromptRefMinimal[] = [
+      { imageNumber: 1, type: 'character', refId: 'character_image:char_a' },
+      { imageNumber: 2, type: 'character', refId: 'character_image:char_b' },
+      { imageNumber: 3, type: 'character', refId: 'character_image:char_c' },
+      { imageNumber: 4, type: 'character', refId: 'character_image:char_d' },
+    ];
+
+    // SVP names another character AND the setting — both would normally be
+    // appended, taking refs to 6. Must cap at 4 and ensure setting wins.
+    const shot: CanonicalRefsShot = {
+      canonicalSceneSetting: 'room',
+      focus: { primary: 'char_e' },
+    };
+    const { references } = enforceShotCanonicalRefs(shot, existing, FIVE_CHARS);
+
+    expect(references.length).toBeLessThanOrEqual(4);
+    // The canonical setting must be retained — Klein binds slot 1 as the
+    // canvas, so dropping it would force a character into the canvas slot.
+    expect(references.some(r => r.refId === 'setting_image:room')).toBe(true);
+  });
+
+  it('Bug 1 cap: existing references already at 4 + canonical setting needed → setting replaces last char', () => {
+    const existing: ShotImagePromptRefMinimal[] = [
+      { imageNumber: 1, type: 'character', refId: 'character_image:protagonist' },
+      { imageNumber: 2, type: 'character', refId: 'character_image:antagonist'  },
+      { imageNumber: 3, type: 'character', refId: 'character_image:antagonist'  }, // dupe just to fill
+      { imageNumber: 4, type: 'character', refId: 'character_image:protagonist' },
+    ];
+    const shot: CanonicalRefsShot = { canonicalSceneSetting: 'broadcast_booth' };
+    const { references } = enforceShotCanonicalRefs(shot, existing, AVAILABLE);
+
+    expect(references.length).toBeLessThanOrEqual(4);
+    expect(references.some(r => r.refId === 'setting_image:broadcast_booth')).toBe(true);
+  });
 });
