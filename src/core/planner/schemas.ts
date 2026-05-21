@@ -329,11 +329,52 @@ const referenceSchema = z.object({
   refId: z.string(),
 });
 
+// Bug 5: generationMode used to be `z.string()` — anything the LLM wrote
+// got through, including hallucinated modes the renderer didn't handle.
+// Enumerate the modes the executor actually implements:
+//   - image_text_to_image: fresh render from refs (no chain base)
+//   - text_to_image:        fresh render with no refs (rare)
+//   - edit_previous_shot:   first_frame chained on prior shot's last_frame
+//   - edit_first_frame:     last_frame chained on THIS shot's first_frame
+//   - reuse_prior_frame:    first_frame is a verbatim copy of the source
+//                           shot's last_frame (no Klein render). Real mode;
+//                           implemented at ExecutorAgent.ts:7156-area.
+// Unknown values are coerced to `image_text_to_image` (the safest default —
+// fresh render with refs) by the post-validation pass; the schema itself
+// stays narrow so audits can spot drift early.
+const generationModeSchema = z.enum([
+  'image_text_to_image',
+  'text_to_image',
+  'edit_previous_shot',
+  'edit_first_frame',
+  'reuse_prior_frame',
+]);
+export type GenerationMode = z.infer<typeof generationModeSchema>;
+
+const KNOWN_MODES: ReadonlySet<string> = new Set(generationModeSchema.options);
+
+/**
+ * Normalize an LLM-emitted generationMode string. Returns a canonical
+ * mode for the recognized forms (including a few common typos) or
+ * `image_text_to_image` as the safe fallback for anything else —
+ * fresh render with refs, no chain base.
+ */
+export function coerceGenerationMode(raw: unknown): GenerationMode {
+  if (typeof raw !== 'string') return 'image_text_to_image';
+  const s = raw.toLowerCase().trim();
+  if (KNOWN_MODES.has(s)) return s as GenerationMode;
+  // Common LLM slips:
+  if (s === 'reuse_previous_frame' || s === 'copy_prior_frame') return 'reuse_prior_frame';
+  if (s === 'edit_prior_shot' || s === 'edit_prev_shot') return 'edit_previous_shot';
+  if (s === 'fresh' || s === 'text2img' || s === 'txt2img') return 'image_text_to_image';
+  return 'image_text_to_image';
+}
+
 const singleFrameImagePromptSchema = z.object({
   imagePrompt: z.string().min(1),
   negativePrompt: z.string().optional().default(''),
   aspectRatio: z.string().optional().default('16:9'),
-  generationMode: z.string(),
+  generationMode: generationModeSchema,
   references: z.array(referenceSchema).optional().default([]),
 });
 
@@ -341,7 +382,7 @@ const singleFrameImagePromptSchema = z.object({
 
 const framePromptSchema = z.object({
   imagePrompt: z.string().min(1),
-  generationMode: z.string(),
+  generationMode: generationModeSchema,
   references: z.array(referenceSchema).optional().default([]),
 });
 
