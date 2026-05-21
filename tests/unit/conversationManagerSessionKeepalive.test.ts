@@ -19,7 +19,7 @@ import {
 } from '../../src/server/runners/BackgroundTaskRunner.js';
 import { __resetBackgroundTaskRunnerForTesting } from '../../src/server/runners/backgroundTaskRunnerSingleton.js';
 
-const SINGLETON_KEY = '__kshana_background_task_runner__';
+const SINGLETON_KEY = '__dhee_background_task_runner__';
 
 function installRunner(runner: BackgroundTaskRunner): void {
   (globalThis as unknown as Record<string, unknown>)[SINGLETON_KEY] = runner;

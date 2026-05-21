@@ -2233,9 +2233,14 @@ export class ConversationManager {
         session.state.taskHistory.length
       );
 
-      // Cancel any running task
+      // Cancel any running task. Pass 'shutdown' as the abort reason so
+      // ExecutorAgent.stop() (wired up via linkAbortSignalToAgent in
+      // runExecutor) can tag the resulting failed nodes with the
+      // shutdown origin. resetAbortedNodes() then auto-recovers them on
+      // the next run instead of leaving them in failed state requiring
+      // manual invalidation. (Bug 17.)
       if (session.abortController) {
-        session.abortController.abort();
+        session.abortController.abort('shutdown');
       }
       // Clear timer checkpoint interval
       if (session.timerCheckpointInterval) {
