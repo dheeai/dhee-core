@@ -47,7 +47,18 @@ export function filterMismatchedPerItemDeps(
       out.push(dep);
       continue;
     }
-    // Per-item ref of a matching-scope type with mismatched itemId — drop.
+    // Parent-scope keep: the current item is a CHILD of the dep's itemId
+    // (e.g. itemId='scene_1_shot_1' is a child of depItemId='scene_1').
+    // Per-item refs that point to a parent in the item hierarchy are
+    // legitimate cross-scope deps and must not be stripped — otherwise
+    // shot_image_prompt:scene_1_shot_K loses its scene_video_prompt:scene_1
+    // dependency on per-shot expansion.
+    if (itemId.startsWith(depItemId + '_')) {
+      out.push(dep);
+      continue;
+    }
+    // Per-item ref of a matching-scope type with mismatched itemId
+    // (not the current item, not a parent of it) — drop as sibling pollution.
   }
   return out;
 }
