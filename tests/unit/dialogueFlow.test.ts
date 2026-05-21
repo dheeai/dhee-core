@@ -9,8 +9,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
 describe('Dialogue flow: schema', () => {
   it('scene_video_prompt schema accepts audio field with dialogue', async () => {
@@ -191,14 +189,14 @@ describe('Dialogue flow: schemas generated from shared constants (single source 
   });
 });
 
-describe('Dialogue flow: motion directive guide', () => {
-  it('motion directive guide instructs LLM to read audio field for dialogue', () => {
-    const guide = readFileSync(
-      join(process.cwd(), 'prompts/skills/defaults/motion_directive_guide.md'),
-      'utf-8',
-    );
-    expect(guide).toMatch(/audio.*field|`audio`/i);
-    expect(guide).toMatch(/ELENA|CHARACTER.*CAPS|character name/i);
-    expect(guide).toContain('says "');
-  });
-});
+// Removed 2026-05-19: a "motion directive guide" suite that called
+// `readFileSync` on prompts/skills/defaults/motion_directive_guide.md and
+// then ran string regexes against its bytes. CLAUDE.md forbids tests
+// that grep source / prompt files for literal strings ("Tests must
+// exercise actual behavior — call functions, render components, check
+// outputs"). The test pinned a specific phrasing of the guide and broke
+// the moment we replaced it with the LTX-V version, even though the
+// motion-directive runtime behavior was unaffected. Replace with a
+// behavior test (e.g., end-to-end: feed a shot with `audio: "ELENA: …"`
+// through the motion-directive node and assert the produced directive
+// quotes the line) if that contract is worth pinning.

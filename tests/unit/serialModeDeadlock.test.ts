@@ -14,25 +14,27 @@
 import { describe, it, expect } from 'vitest';
 
 describe('Serial mode deadlock: content depending on media', () => {
-  it('scene_video_prompt should NOT depend on character_image or setting_image', async () => {
+  it('scene_shot_plan (LLM stage that consumes scene text) should NOT depend on character_image or setting_image', async () => {
+    // Post-hierarchical-refactor: the LLM call that consumes scene text
+    // is scene_shot_plan (Stage A), not scene_video_prompt (which is now
+    // a deterministic assembler). The serial-mode deadlock guard moves
+    // to whichever node is the actual content-on-media boundary.
     const { narrativeTemplate } = await import('../../src/templates/narrative.js');
     const types = narrativeTemplate.artifactTypes as Record<string, any>;
-    const svp = types['scene_video_prompt'];
-    expect(svp).toBeDefined();
+    const plan = types['scene_shot_plan'];
+    expect(plan).toBeDefined();
 
-    const deps = svp.dependencies.map((d: any) => d.artifactTypeId);
-    // scene_video_prompt should depend on scene + world_style only
-    // NOT on character_image or setting_image (those are media nodes)
+    const deps = plan.dependencies.map((d: any) => d.artifactTypeId);
     expect(deps).not.toContain('character_image');
     expect(deps).not.toContain('setting_image');
   });
 
-  it('scene_video_prompt depends on scene (matching scope)', async () => {
+  it('scene_shot_plan depends on scene (matching scope)', async () => {
     const { narrativeTemplate } = await import('../../src/templates/narrative.js');
     const types = narrativeTemplate.artifactTypes as Record<string, any>;
-    const svp = types['scene_video_prompt'];
+    const plan = types['scene_shot_plan'];
 
-    const sceneDep = svp.dependencies.find((d: any) => d.artifactTypeId === 'scene');
+    const sceneDep = plan.dependencies.find((d: any) => d.artifactTypeId === 'scene');
     expect(sceneDep).toBeDefined();
     expect(sceneDep.scope).toBe('matching');
   });

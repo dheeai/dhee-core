@@ -3,6 +3,7 @@ import * as path from 'path';
 
 import { getCurrentSession, getSessionFs } from '../../../core/fs/index.js';
 import { getActiveProjectDir } from './activeProject.js';
+import { atomicWriteFileSync } from '../../../utils/atomicWrite.js';
 
 /**
  * Default basePath for project filesystem helpers. Reads
@@ -13,7 +14,13 @@ import { getActiveProjectDir } from './activeProject.js';
  * for the standalone CLI (where cwd IS the projects dir).
  */
 export function defaultBasePath(): string {
-  const override = process.env['dhee_PROJECTS_DIR'];
+  // Honor the kshana-branded env var first (the post-rename convention
+  // used by kshana-desktop), then the legacy dhee_PROJECTS_DIR for
+  // backward compatibility with older embedders / scripts. Falls back
+  // to process.cwd() for the standalone CLI.
+  const override =
+    process.env['KSHANA_PROJECTS_DIR'] ??
+    process.env['dhee_PROJECTS_DIR'];
   return override && override.length > 0 ? override : process.cwd();
 }
 
@@ -385,7 +392,7 @@ export function writeProjectText(
 
   const remoteFs = getRemoteProjectFs();
   if (!remoteFs) {
-    fs.writeFileSync(projectPath(normalizedRelative, basePath), content, 'utf-8');
+    atomicWriteFileSync(projectPath(normalizedRelative, basePath), content, 'utf-8');
     return;
   }
 
@@ -431,7 +438,7 @@ export function writeProjectBuffer(
 
   const remoteFs = getRemoteProjectFs();
   if (!remoteFs) {
-    fs.writeFileSync(projectPath(normalizedRelative, basePath), data);
+    atomicWriteFileSync(projectPath(normalizedRelative, basePath), data);
     return;
   }
 

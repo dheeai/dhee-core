@@ -1,3 +1,16 @@
+> **DEPRECATED — NOT LOADED BY THE EXECUTOR.**
+> The hierarchical scene-breakdown refactor split this guide into two:
+>
+>  - `scene_breakdown_plan_guide.md` — Stage A (`scene_shot_plan` node).
+>    Shot count / ordering / purpose / duration / one-line summary.
+>  - `scene_breakdown_shot_guide.md` — Stage B (`shot_breakdown` node).
+>    Per-shot details: cameraWork, perspective, focus, audio, transition.
+>
+> Edits to this file have no runtime effect. Kept on disk for diff
+> reference and to satisfy legacy text-grep tests; will be removed in
+> a follow-up once those tests are migrated to exercise behavior
+> instead of file contents.
+
 **PURPOSE**: Break a scene into individual cinematic shots for video generation. Each shot is a brief structural description — detailed frame prompts and generation strategy are handled downstream by the shot_image_prompt step.
 
 ---

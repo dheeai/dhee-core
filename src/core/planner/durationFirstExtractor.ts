@@ -105,7 +105,7 @@ function warnOnce(key: string, message: string): void {
 
 /**
  * Words-per-second for spoken dialogue. Calibrated empirically and used
- * by the existing scene_breakdown_guide dialogue-fit pass.
+ * by the dialogue-fit pass (referenced in scene_breakdown_plan_guide.md).
  */
 const WORDS_PER_SECOND = 2.5;
 /** Lead-in/tail buffer to avoid cutting off mid-sentence */

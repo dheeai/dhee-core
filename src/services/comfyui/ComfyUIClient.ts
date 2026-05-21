@@ -14,6 +14,7 @@ import { nanoid } from 'nanoid';
 import WebSocket from 'ws';
 import { decideWsAction, type ComfyWsMessage } from './wsAction.js';
 import { getLogsDir } from '../../utils/logsPath.js';
+import { registerActiveJob, unregisterActiveJob, type CancellableComfyJob } from './activeJobs.js';
 
 // Debug logging to file instead of console to avoid polluting Ink UI.
 //
@@ -167,7 +168,7 @@ export interface WSProgressInfo {
 }
 
 export interface CompletionResult {
-  status: 'completed' | 'completed_with_timeout' | 'error';
+  status: 'completed' | 'completed_with_timeout' | 'error' | 'cancelled';
   prompt_id: string;
   /**
    * Cloud's exception_message (or other error detail) when status is
@@ -344,6 +345,51 @@ export class ComfyUIClient {
   }
 
   /**
+   * Drain every PENDING prompt from this Comfy server's queue. `/interrupt`
+   * only stops what's currently executing on the GPU — Comfy can have many
+   * prompts queued (the executor batches Klein image edits and LTX video
+   * renders aggressively). Without clearing the queue, a cancel
+   * "stops" what's running but the next prompt immediately starts
+   * executing, and so on, until the queue drains naturally. That's the
+   * "cancel didn't stop anything; ten more images kept rendering" bug.
+   *
+   * CRITICAL: Cloud-mode no-op. On cloud.comfy.org the queue is SHARED
+   * across users. POST /queue {"clear": true} would wipe other tenants'
+   * pending prompts — catastrophic. We rely on /interrupt alone in
+   * cloud mode (which only kills the prompt currently running on OUR
+   * client's session) and let cloud-side scheduling drain our other
+   * pending jobs naturally. In local mode the queue is single-tenant
+   * (user's own GPU) so clearing it is safe.
+   *
+   * Sends POST /queue with `{"clear": true}` per the ComfyUI server
+   * source: a present-and-truthy "clear" flag drops the pending queue.
+   * Best-effort — errors swallowed.
+   */
+  async clearQueue(): Promise<void> {
+    if (this.isCloud) {
+      // Don't touch the shared queue. /interrupt already fired on this
+      // client's currently-running prompt; pending prompts we submitted
+      // will run, but at least we're not deleting other users' work.
+      return;
+    }
+    try {
+      await fetch(this.buildUrl('/queue'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.buildHeaders() },
+        body: JSON.stringify({ clear: true }),
+      });
+    } catch {
+      // Best effort — ComfyUI may not be reachable
+    }
+  }
+
+  /** Stable key for de-duplicating cancel calls across many jobs that
+   *  share one Comfy server. Used by `cancelAllActiveJobs`. */
+  get serverKey(): string {
+    return this.baseUrl;
+  }
+
+  /**
    * Upload an image to ComfyUI input directory.
    */
   async uploadImage(
@@ -459,6 +505,73 @@ export class ComfyUIClient {
     progressCallback?: ProgressCallback,
     pollInterval: number = 10
   ): Promise<CompletionResult> {
+    // Register the in-flight prompt so the cancel path can call
+    // POST /interrupt on this client and stop the GPU job. Always
+    // unregister in finally so completion / error / interrupt all
+    // clean up.
+    //
+    // The AbortController on the handle is what makes cancel ACTUALLY
+    // fast: `cancelAllActiveJobs` aborts it BEFORE awaiting the
+    // (best-effort, sometimes-slow) `/interrupt` HTTP call, and the
+    // poll loop below treats the abort signal as a first-class loop
+    // exit — bailing out of mid-sleep and returning a `cancelled`
+    // status the caller treats as failure. Without this, the 10-second
+    // poll interval is the floor on "how long does Stopping… stay
+    // stuck"; with it, abort-to-loop-exit is sub-millisecond.
+    const abortController = new AbortController();
+    const cancelHandle: CancellableComfyJob = {
+      promptId,
+      interrupt: () => this.interrupt(),
+      clearQueue: () => this.clearQueue(),
+      serverKey: this.serverKey,
+      abortController,
+    };
+    registerActiveJob(cancelHandle);
+    try {
+      return await this.waitForCompletionInner(
+        promptId,
+        progressCallback,
+        pollInterval,
+        abortController.signal,
+      );
+    } finally {
+      unregisterActiveJob(cancelHandle);
+    }
+  }
+
+  /**
+   * Sleep for `ms` milliseconds OR until `signal` fires `abort`,
+   * whichever comes first. Resolves silently in both cases — callers
+   * inspect `signal.aborted` themselves on the next loop top.
+   *
+   * Without this, the poll loop's plain `setTimeout(... 10_000)`
+   * blocks the cancel path for up to a full poll interval. With it,
+   * abort wakes the sleep within milliseconds.
+   */
+  private sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private async waitForCompletionInner(
+    promptId: string,
+    progressCallback?: ProgressCallback,
+    _pollInterval: number = 10,
+    abortSignal?: AbortSignal,
+  ): Promise<CompletionResult> {
     const startTime = Date.now();
 
     // Emit initial progress
@@ -471,6 +584,15 @@ export class ComfyUIClient {
     }
 
     while (true) {
+      // Cancel-aware loop top. Check BEFORE any HTTP call: if cancel
+      // fired during the previous sleep, we want to exit without
+      // talking to ComfyUI again — the GPU release happens via the
+      // separate `interrupt()` call dispatched from
+      // `cancelAllActiveJobs`. We just have to stop waiting.
+      if (abortSignal?.aborted) {
+        debugLog(`[waitForCompletion] Abort received for ${promptId} — exiting poll loop`);
+        return { status: 'cancelled', prompt_id: promptId };
+      }
       const elapsed = (Date.now() - startTime) / 1000;
 
       // Emit progress update during polling
@@ -560,7 +682,15 @@ export class ComfyUIClient {
         console.warn(`Failed to poll history: ${e}`);
       }
 
-      await this.sleep(pollInterval * 1000);
+      // Abortable sleep: if cancel fires during this 10s window, we
+      // wake immediately instead of waiting out the full interval.
+      // Falls back to a plain sleep when no abort signal is provided
+      // (legacy callers / tests).
+      if (abortSignal) {
+        await this.sleepAbortable(_pollInterval * 1000, abortSignal);
+      } else {
+        await this.sleep(_pollInterval * 1000);
+      }
     }
   }
 
@@ -853,6 +983,37 @@ export class ComfyUIClient {
     clientId: string,
     progressCallback?: (info: WSProgressInfo) => void
   ): Promise<CompletionResult> {
+    // Same active-jobs registration as the HTTP wait path so cancel
+    // reaches WS-tracked prompts too. The AbortController is the
+    // signal `cancelAllActiveJobs` fires to wake the WS inner loop
+    // out of any sleep/wait state immediately.
+    const abortController = new AbortController();
+    const cancelHandle: CancellableComfyJob = {
+      promptId,
+      interrupt: () => this.interrupt(),
+      clearQueue: () => this.clearQueue(),
+      serverKey: this.serverKey,
+      abortController,
+    };
+    registerActiveJob(cancelHandle);
+    try {
+      return await this.waitForCompletionWSInner(
+        promptId,
+        clientId,
+        progressCallback,
+        abortController.signal,
+      );
+    } finally {
+      unregisterActiveJob(cancelHandle);
+    }
+  }
+
+  private async waitForCompletionWSInner(
+    promptId: string,
+    clientId: string,
+    progressCallback?: (info: WSProgressInfo) => void,
+    abortSignal?: AbortSignal,
+  ): Promise<CompletionResult> {
     const wsUrl = this.buildWsUrl(clientId);
     debugLog(`[waitForCompletionWS] Connecting to ${wsUrl} for prompt=${promptId}`);
 
@@ -895,8 +1056,16 @@ export class ComfyUIClient {
         }
       }, 10_000);
 
+      const onAbort = () => {
+        debugLog(`[waitForCompletionWS] Abort received for ${promptId} — bailing out of WS wait`);
+        finish({ status: 'cancelled', prompt_id: promptId });
+      };
+
       const cleanup = () => {
         clearInterval(inactivityCheck);
+        if (abortSignal) {
+          abortSignal.removeEventListener('abort', onAbort);
+        }
         try {
           ws?.close();
         } catch {
@@ -910,6 +1079,21 @@ export class ComfyUIClient {
         cleanup();
         resolve(result);
       };
+
+      // Listen for cancel-from-registry. Wired BEFORE the WS opens so
+      // an abort that fires during the connect handshake still wakes
+      // us. Removed in cleanup so we don't leak a listener on the
+      // signal after the promise resolves normally.
+      if (abortSignal) {
+        if (abortSignal.aborted) {
+          // Already cancelled before we even started — short-circuit.
+          queueMicrotask(() => {
+            if (!resolved) finish({ status: 'cancelled', prompt_id: promptId });
+          });
+        } else {
+          abortSignal.addEventListener('abort', onAbort, { once: true });
+        }
+      }
 
       try {
         ws = new WebSocket(wsUrl, this.buildWsOptions());

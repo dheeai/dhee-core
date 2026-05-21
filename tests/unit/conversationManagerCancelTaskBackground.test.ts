@@ -175,7 +175,21 @@ describe('ConversationManager.cancelTask — cancels dispatched background tasks
     expect(runner.isBusy()).toBe(false);
   });
 
-  it('does NOT abort a background task whose sessionId belongs to a different session', async () => {
+  // 2026-05-19: this test previously pinned multi-session ISOLATION — a
+  // cancel on session B must NOT abort a runner task dispatched by
+  // session A. That contract was based on a hypothetical multi-session
+  // model that never actually shipped. In production today only ONE
+  // session is active at a time; the desktop creates a fresh session
+  // (via clearChatHistory) every time the chat resets, which means the
+  // runner's active.spec.sessionId can legitimately drift away from
+  // the renderer's current sessionId during a single user's run. The
+  // old sessionId-match gate then silently dropped EVERY cancel after
+  // such a drift, producing the stuck-Stopping incident traced on
+  // 2026-05-19. The replacement test below pins the new contract:
+  // cancel from ANY session reaches the runner's active task. If we
+  // ever ship true multi-session concurrency, write a different test
+  // — and DON'T re-introduce the silent gate.
+  it('cancels the active background task regardless of which sessionId triggered the cancel (single-session model)', async () => {
     const cm = new ConversationManager({
       llmConfig: { baseUrl: 'x', apiKey: 'x', model: 'x' } as never,
     });
@@ -192,20 +206,28 @@ describe('ConversationManager.cancelTask — cancels dispatched background tasks
       onToolResult: () => {},
     };
 
-    // Session A's turn dispatches the background task.
+    // Session A's turn dispatches the background task. Then session B
+    // takes over the chat (simulates the renderer renaming its session
+    // via clearChatHistory — the runner task is still under A's id).
     await cm.runTask(sessionA.id, 'A kicks off work', sinkEvents);
     expect(runner.isBusy()).toBe(true);
     const sigBeforeCancel = signalReceived;
     expect(sigBeforeCancel!.aborted).toBe(false);
 
-    // Cancelling session B must NOT touch A's running task.
+    // User clicks Stop while the renderer's session is B. The runner's
+    // active task was started under A — but it's THIS user's work, so
+    // the cancel MUST reach it.
     const cancelledB = cm.cancelTask(sessionB.id);
 
-    expect(cancelledB).toBe(true); // pi-agent for B was stopped
+    expect(cancelledB).toBe(true);
     expect(agentB.stopCalled()).toBe(true);
-    expect(agentA.stopCalled()).toBe(false); // A's pi-agent untouched
-    expect(sigBeforeCancel!.aborted).toBe(false); // A's background task still running
-    expect(runner.isBusy()).toBe(true);
+    // The runner cancel is unconditional now; A's signal aborts.
+    expect(sigBeforeCancel!.aborted).toBe(true);
+    // Microtask flush so the executor's `signal.addEventListener('abort', resolve)`
+    // listener gets to run and clear `runner.active`. Otherwise the
+    // assertion fires before the cancel cascade settles.
+    await new Promise<void>((r) => setImmediate(r));
+    expect(runner.isBusy()).toBe(false);
   });
 
   it('returns false and is a no-op when no session and no background task exist', () => {

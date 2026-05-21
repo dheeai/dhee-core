@@ -7,7 +7,8 @@
  */
 
 import { existsSync, readFileSync, statSync, mkdirSync } from 'fs';
-import { join, extname, basename } from 'path';
+import { join, extname, basename, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { spawn, execFileSync } from 'child_process';
 import type { Timeline } from './types.js';
 import { getFfmpegPath, getFfprobePath } from './ffmpegBinaries.js';
@@ -420,14 +421,49 @@ const WATERMARK_PNG_CANDIDATES = [
 ];
 
 /**
+ * Walk up from this source file's location until we hit a package.json —
+ * that's the kshana-core repo root (or its installed package dir under
+ * a host's node_modules). Returns null if no package.json is found in
+ * 64 levels (defensive cap; real depth is ≤6).
+ */
+function findKshanaCoreRootFromSource(): string | null {
+  try {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 64; i += 1) {
+      if (existsSync(join(dir, 'package.json'))) return dir;
+      const parent = dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+  } catch {
+    /* CJS / no import.meta.url — fall through */
+  }
+  return null;
+}
+
+/**
  * Resolve the watermark PNG path (or `null` if none of the candidates
- * exist). Paths are checked relative to the current working directory
- * first, then the dhee-core package root.
+ * exist). Paths are checked in this order:
+ *   1. relative to the current working directory
+ *   2. relative to the dhee-core package root (walked up from this
+ *      source file's location)
+ *
+ * The second tier matters in the desktop runtime: the host process's
+ * cwd is `dhee-desktop/`, which doesn't ship `assets/watermark_*.png`.
+ * Without this fallback the watermark silently disappears from every
+ * assembled final video.
  */
 export function resolveWatermarkPath(cwd: string = process.cwd()): string | null {
   for (const rel of WATERMARK_PNG_CANDIDATES) {
     const abs = join(cwd, rel);
     if (existsSync(abs)) return abs;
+  }
+  const repoRoot = findKshanaCoreRootFromSource();
+  if (repoRoot) {
+    for (const rel of WATERMARK_PNG_CANDIDATES) {
+      const abs = join(repoRoot, rel);
+      if (existsSync(abs)) return abs;
+    }
   }
   return null;
 }
@@ -435,24 +471,37 @@ export function resolveWatermarkPath(cwd: string = process.cwd()): string | null
 /**
  * Build the `overlay` filter chunk that composites a pre-rendered
  * watermark PNG onto the bottom-right corner of the final output.
- * Pure — extracted for tests.
  *
  * Parameters:
  *  - inputLabel: the filter graph label feeding in (e.g. 'concated')
  *  - watermarkInputIdx: the FFmpeg input index of the PNG (e.g. the
  *    Nth `-i` argument, 0-based)
  *  - outputLabel: where the watermarked stream is published (e.g. 'outv')
+ *  - outputHeight: the final video's height in pixels (e.g. 720). The
+ *    watermark scales to ~6.94% of this — 50px tall at 720p, 75px at
+ *    1080p, 150px at 4K. Width auto-derived from the source PNG's
+ *    aspect ratio (square logo → 50×50 at 720p, matching the design
+ *    spec).
  *
- * The PNG carries its own translucency and font; this filter just
- * positions it bottom-right with a 24-px margin.
+ * The PNG must already carry its own alpha channel (transparent
+ * background). Pre-processing happens once when the asset is
+ * generated/imported — the filter doesn't attempt to chroma-key at
+ * render time.
+ *
+ * Pure — extracted for tests.
  */
 export function buildWatermarkOverlayFilter(
   inputLabel: string,
   watermarkInputIdx: number,
   outputLabel: string,
+  outputHeight: number = 720,
 ): string {
+  // 50px / 720p ≈ 6.944%. Round to nearest pixel so the filter
+  // expression stays integer and predictable across runs.
+  const watermarkHeightPx = Math.max(16, Math.round(outputHeight * 0.0694));
   return (
-    `[${watermarkInputIdx}:v]format=rgba[wm];` +
+    `[${watermarkInputIdx}:v]format=rgba,` +
+      `scale=-1:${watermarkHeightPx}:flags=lanczos[wm];` +
     `[${inputLabel}][wm]overlay=x=W-w-24:y=H-h-24:format=auto[${outputLabel}]`
   );
 }
@@ -718,7 +767,7 @@ export async function assembleVideos(
     // Append PNG as an extra -i input; track its index for the filter.
     const watermarkInputIdx = inputArgs.filter(a => a === '-i').length;
     inputArgs.push('-i', watermarkPath);
-    filterParts.push(buildWatermarkOverlayFilter('concated', watermarkInputIdx, 'outv'));
+    filterParts.push(buildWatermarkOverlayFilter('concated', watermarkInputIdx, 'outv', height));
   } else if (config.watermark !== '' && process.env['dhee_WATERMARK'] !== 'off') {
     // No watermark asset found — log a hint but don't fail the assembly.
     // We still need to alias `concated` to `outv` if no watermark was applied.

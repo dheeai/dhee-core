@@ -5,6 +5,7 @@
  */
 import * as nodeFs from 'node:fs';
 import * as nodePath from 'node:path';
+import { atomicWriteFileSync } from '../utils/atomicWrite.js';
 import { v4 as uuidv4 } from 'uuid';
 import { defaultBasePath } from '../tasks/video/workflow/projectFileIO.js';
 import {
@@ -21,6 +22,7 @@ import {
   setSessionProject,
 } from '../agent/pi/sessionStore.js';
 import { getBackgroundTaskRunner } from './runners/backgroundTaskRunnerSingleton.js';
+import { decideCancelActions } from './cancelDecision.js';
 import type { BackgroundTaskRunnerEvents } from './runners/BackgroundTaskRunner.js';
 import { applyProjectAnnouncement } from './projectAnnouncement.js';
 import {
@@ -38,6 +40,7 @@ import {
   type SupervisorState,
 } from './conversation/supervisor.js';
 import { describeImageWithVLM } from '../core/llm/describeImageWithVLM.js';
+import { backfillSceneTreeIfStale } from '../core/project/backfillSceneTreeIfStale.js';
 import { getProviderRegistry } from '../services/providers/index.js';
 import type { SessionState } from './types.js';
 import type { ExpandableTodoItem } from '../core/todo/index.js';
@@ -235,8 +238,27 @@ export class ConversationManager {
     const sinkFor = (session: ActiveSession | undefined): ConversationEvents | undefined =>
       session?.backgroundEvents ?? session?.activeEvents;
 
+    /**
+     * Session-keepalive: bump `state.lastActivity` whenever a runner
+     * event fires for this session. Without this, `cleanupStaleSessions`
+     * reaps the session after `sessionTimeoutMs` (default 30 min) of
+     * "no manual chat activity" — even when the BackgroundTaskRunner
+     * is steadily streaming progress for an in-flight pipeline. Once
+     * reaped, every subsequent runner event has nowhere to forward
+     * to (the `sessions.get(sessionId)` lookup returns undefined),
+     * the chat panel stops receiving updates, and the user sees the
+     * progress count freeze even though the pipeline is still running
+     * on disk. Touching lastActivity here keeps the session alive
+     * for the duration of the run.
+     */
+    const touchSessionActivity = (sessionId: string): ActiveSession | undefined => {
+      const session = this.sessions.get(sessionId);
+      if (session) session.state.lastActivity = Date.now();
+      return session;
+    };
+
     runner.on('started', ({ task }: BackgroundTaskRunnerEvents['started']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       captureToolCallStarted({
         sessionId: task.spec.sessionId,
         toolCallId: fakeToolCallIdForTask(task.id),
@@ -275,7 +297,7 @@ export class ConversationManager {
       );
     });
     runner.on('tool', ({ task, toolName, nodeId }: BackgroundTaskRunnerEvents['tool']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       if (!session || !events) return;
       const line = nodeId ? `  [${toolName}] ${nodeId}` : `  [${toolName}]`;
@@ -289,7 +311,7 @@ export class ConversationManager {
       );
     });
     runner.on('result', ({ task, toolName, filePath, status, error }: BackgroundTaskRunnerEvents['result']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       if (!session || !events) return;
       // Surface the error reason inline so both the agent (when it
@@ -314,7 +336,7 @@ export class ConversationManager {
       );
     });
     runner.on('notification', ({ task, level, message }: BackgroundTaskRunnerEvents['notification']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       if (!session || !events) return;
       events.onToolStreaming?.(
@@ -327,7 +349,7 @@ export class ConversationManager {
       );
     });
     runner.on('asset', ({ task, kind, filePath }: BackgroundTaskRunnerEvents['asset']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       if (!session || !events) return;
       events.onMediaGenerated?.(task.spec.sessionId, {
@@ -338,7 +360,7 @@ export class ConversationManager {
       });
     });
     runner.on('completed', ({ task }: BackgroundTaskRunnerEvents['completed']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       const completedAt = new Date(task.completedAt ?? Date.now()).toISOString();
       const durationMs = Math.max(0, (task.completedAt ?? Date.now()) - task.startedAt);
@@ -374,7 +396,7 @@ export class ConversationManager {
       if (session) session.backgroundEvents = undefined;
     });
     runner.on('failed', ({ task, error }: BackgroundTaskRunnerEvents['failed']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       const completedAt = new Date(task.completedAt ?? Date.now()).toISOString();
       const durationMs = Math.max(0, (task.completedAt ?? Date.now()) - task.startedAt);
@@ -412,7 +434,7 @@ export class ConversationManager {
       if (session) session.backgroundEvents = undefined;
     });
     runner.on('cancelled', ({ task }: BackgroundTaskRunnerEvents['cancelled']) => {
-      const session = this.sessions.get(task.spec.sessionId);
+      const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       const completedAt = new Date(task.completedAt ?? Date.now()).toISOString();
       const durationMs = Math.max(0, (task.completedAt ?? Date.now()) - task.startedAt);
@@ -481,7 +503,15 @@ export class ConversationManager {
   private scheduleSupervisorInvocation(
     event: SupervisorEvent,
     task: BackgroundTaskRunnerEvents['failed']['task'],
-    extra: { reason?: string; kind?: 'image' | 'video'; filePath?: string },
+    extra: {
+      reason?: string;
+      kind?: 'image' | 'video';
+      filePath?: string;
+      /** Node ids the user invalidated (user_invalidate event). */
+      seeds?: string[];
+      /** Free-form origin tag for user_invalidate events. */
+      source?: string;
+    },
   ): void {
     setImmediate(() => {
       void this.runSupervisorInvocation(event, task, extra);
@@ -491,7 +521,13 @@ export class ConversationManager {
   private async runSupervisorInvocation(
     event: SupervisorEvent,
     task: BackgroundTaskRunnerEvents['failed']['task'],
-    extra: { reason?: string; kind?: 'image' | 'video'; filePath?: string },
+    extra: {
+      reason?: string;
+      kind?: 'image' | 'video';
+      filePath?: string;
+      seeds?: string[];
+      source?: string;
+    },
   ): Promise<void> {
     const sessionId = task.spec.sessionId;
     const session = this.sessions.get(sessionId);
@@ -556,6 +592,16 @@ export class ConversationManager {
           taskId: task.id,
           taskKind: task.spec.kind,
           projectName: task.spec.projectName,
+        };
+      }
+      if (event === 'user_invalidate') {
+        return {
+          event: 'user_invalidate',
+          taskId: task.id,
+          taskKind: task.spec.kind,
+          projectName: task.spec.projectName,
+          seeds: extra.seeds ?? [],
+          ...(extra.source ? { source: extra.source } : {}),
         };
       }
       return {
@@ -625,6 +671,44 @@ export class ConversationManager {
           }
         : {}),
     });
+
+    // Resume restore: when the stored session has a known project,
+    // populate `sessionContext` synchronously so IPC calls that need
+    // a working dir (invalidateNodes, run_to, focusSessionProject's
+    // later content reads, etc.) succeed on the first request after
+    // resume. Without this, every IPC call would fail with "Session
+    // project not configured" until the renderer happened to fire a
+    // focusProject IPC — a race that left buttons broken after a
+    // desktop process restart even though everything else looked
+    // healthy.
+    //
+    // The richer `focusSessionProject` path (which also reads
+    // project.json, fires a broadcast, etc.) still runs when the
+    // renderer eventually calls focusProject; this just makes sure
+    // sessionContext is non-null in the interim.
+    if (stored && stored.projectSlug !== AMBIENT_PROJECT_SLUG) {
+      const resumed = this.sessions.get(sessionId);
+      if (resumed) {
+        try {
+          // The project folder may have been deleted out from under
+          // the persisted session id. Skip restore in that case so
+          // the next legitimate focusProject call surfaces the
+          // missing-project error instead of us silently swallowing it.
+          const projectDirAbs = resolveProjectDir({
+            name: stored.projectSlug,
+            basePath: defaultBasePath(),
+          });
+          const projectDirName = nodePath.basename(projectDirAbs);
+          resumed.sessionContext = mode === 'remote' && remoteFs
+            ? createRemoteSession(sessionId, projectDirName, remoteFs)
+            : createLocalSession(sessionId, projectDirName);
+        } catch {
+          // Don't fail createSession — the renderer can still re-focus
+          // explicitly if the project comes back.
+        }
+      }
+    }
+
     captureSessionStarted(sessionId, new Date(state.createdAt).toISOString());
 
     return state;
@@ -757,6 +841,36 @@ export class ConversationManager {
   getSession(sessionId: string): SessionState | undefined {
     const session = this.sessions.get(sessionId);
     return session?.state;
+  }
+
+  /**
+   * Cross-project concurrency check. Returns the focusedProject slug of
+   * any OTHER session that is currently `running` AND bound to a
+   * different project than `currentFocusedProject`. Returns `null` when
+   * it's safe to start a new run in the caller's session.
+   *
+   * Why this matters: the pipeline's `setActiveProjectDir` is a
+   * process-global. Two sessions on different projects firing tasks at
+   * once would race on that global and silently corrupt each other's
+   * project.json. The JobManager serializes within a project; this
+   * guard adds the cross-project layer.
+   *
+   * Ambient sessions (no focusedProject) don't trigger the guard either
+   * direction — the agent can chat about projects without locking out
+   * generation work.
+   */
+  private findCrossProjectConflict(
+    currentSessionId: string,
+    currentFocusedProject: string | undefined,
+  ): string | null {
+    for (const [otherSessionId, other] of this.sessions.entries()) {
+      if (otherSessionId === currentSessionId) continue;
+      if (other.state.status !== 'running') continue;
+      if (!other.focusedProject) continue;
+      if (other.focusedProject === currentFocusedProject) continue;
+      return other.focusedProject;
+    }
+    return null;
   }
 
   getSessionTimerState(sessionId: string): {
@@ -987,6 +1101,20 @@ export class ConversationManager {
       throw new Error('Session already has a running task');
     }
 
+    // Cross-project concurrency guard. kshana-core's pipeline reads a
+    // process-global `activeProjectDir` (see tasks/video/workflow/
+    // activeProject.ts); JobManager serializes per-project, but two
+    // sessions for DIFFERENT projects would race on the global and
+    // silently corrupt each other's project.json. Reject the second
+    // dispatch until the first finishes. Idle / same-project sessions
+    // pass through unchanged.
+    const conflict = this.findCrossProjectConflict(sessionId, session.focusedProject);
+    if (conflict) {
+      throw new Error(
+        `Another project ('${conflict}') has an active task. Cancel it before starting a new generation in this session.`,
+      );
+    }
+
     // Pi-orchestrator chat works without a project being selected — the user
     // can ask "what projects are available?" before picking one. If no project
     // is configured yet, set up an ambient context + agent on first message.
@@ -1139,6 +1267,38 @@ export class ConversationManager {
       );
     }
     const projectDirName = nodePath.basename(projectDirAbs);
+
+    // Backfill the denormalized `scenes[]` mirror from on-disk state
+    // before reading project.json. Fixes the long-standing gap where
+    // executorState.nodes was populated by the executor but scenes[]
+    // stayed empty, because the older addAsset path silently bailed
+    // on shot frames. The helper is idempotent — it short-circuits
+    // when scenes[] is already populated — so safe to invoke on every
+    // focus. Without this, UI readers (PromptsView's two-column
+    // layout, kshana_show_first_frame, etc.) come up blank on
+    // projects that ran end-to-end before the addAsset fix landed.
+    try {
+      const backfillResult = backfillSceneTreeIfStale(projectDirAbs);
+      if (backfillResult.ran) {
+        // Log only when something actually happened — otherwise the
+        // logs get noisy on every project open.
+        // eslint-disable-next-line no-console
+        console.log(
+          `[focusSessionProject] backfilled scenes[] for ${projectName}: ` +
+          `frames=${backfillResult.framesAdded ?? 0} videos=${backfillResult.videosAdded ?? 0} ` +
+          `finalVideo=${backfillResult.finalVideoSet ?? false}`,
+        );
+      }
+    } catch (err) {
+      // Backfill failure is non-fatal — project might be readable
+      // even if the backfill stumbles. Surface for debugging but
+      // continue with the focus flow.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[focusSessionProject] backfillSceneTreeIfStale failed for ${projectName}: ${(err as Error).message}`,
+      );
+    }
+
     let project: NonNullable<ReturnType<typeof loadProject>>;
     try {
       const projectJsonPath = nodePath.join(projectDirAbs, 'project.json');
@@ -1455,35 +1615,170 @@ export class ConversationManager {
    * the runner task matching THIS session's id is touched — other
    * chat windows' work is independent.
    */
-  cancelTask(sessionId: string): boolean {
+  cancelTask(
+    sessionId: string,
+    onProgress?: (step: { lane: 'agent' | 'abort' | 'comfy' | 'runner' | 'summary'; message: string }) => void,
+  ): boolean {
     const session = this.sessions.get(sessionId);
-    if (!session) {
-      return false;
-    }
 
-    // Call agent.stop() to set the aborted flag — the loop checks this each iteration
-    if (session.agent) {
-      session.agent.stop();
-    }
+    // FM9 + user request 2026-05-19: `onProgress` lets the WebSocket /
+    // IPC layer pipe per-lane progress into the chat panel so the user
+    // sees WHAT is being cancelled instead of a stuck "Stopping…"
+    // spinner. Messages are ephemeral chat bubbles — they MUST NOT
+    // flow into the persisted JSONL chat history (the LLM shouldn't
+    // see internal cancellation chatter as conversation context). The
+    // default route is `session.activeEvents.onNotification`, which is
+    // already wired to the renderer's chat panel via the notification
+    // event channel; notifications are NOT persisted by the agent's
+    // event recorder. Explicit `onProgress` overrides for tests or
+    // server-mode callers that want raw lane info.
+    const emit = (lane: 'agent' | 'abort' | 'comfy' | 'runner' | 'summary', message: string) => {
+      console.log(`[cancelTask] ${lane}: ${message}`);
+      try {
+        if (onProgress) {
+          onProgress({ lane, message });
+        } else {
+          session?.activeEvents?.onNotification?.(sessionId, {
+            level: 'info',
+            message: `🛑 ${message}`,
+          });
+        }
+      } catch (err) {
+        console.log(`[cancelTask] emit threw: ${(err as Error).message}`);
+      }
+    };
 
-    if (session.abortController) {
-      session.abortController.abort();
-    }
-
-    let backgroundCancelled = false;
+    // Inspect runner state ONCE up front so the decision helper sees a
+    // consistent snapshot. Wrapped in try/catch because the runner is
+    // initialized lazily and accessing it during early boot throws.
+    let runnerActiveTaskId: string | null = null;
     try {
       const runner = getBackgroundTaskRunner();
       const active = runner.getActive();
-      if (active && active.spec.sessionId === sessionId) {
-        backgroundCancelled = runner.cancel(active.id);
-      }
+      // FM1 fix (2026-05-19): no sessionId match here. Single-session
+      // model — if the runner is busy, it's THIS user's work, period.
+      // The old gate `active.spec.sessionId === sessionId` silently
+      // dropped cancels after a session-rename (clearChatHistory mints
+      // a fresh id on new-project create), leaving the runner ploughing
+      // through shots while the chat's "Stopping..." spinner ran forever.
+      if (active) runnerActiveTaskId = active.id;
     } catch {
-      // Runner uninitialized in this process — nothing to cancel.
+      // Runner uninitialized — leave as null.
+    }
+
+    const plan = decideCancelActions({
+      sessionExists: !!session,
+      hasAgent: !!session?.agent,
+      hasAbortController: !!session?.abortController,
+      runnerActiveTaskId,
+    });
+
+    console.log(
+      `[cancelTask] sessionId=${sessionId} outcome=${plan.outcome} ` +
+        `plan: agent=${plan.signalAgent} abort=${plan.fireAbortController} ` +
+        `comfy=${plan.interruptComfy} runnerTask=${plan.cancelRunnerTaskId ?? '-'}`,
+    );
+
+    if (!session) {
+      emit('summary', `No active session to cancel (sessionId=${sessionId} not found).`);
+      // FM8: when the sessionId doesn't match anything we know, return
+      // false honestly rather than silently report "false" alongside
+      // potentially-fired side-effects.
+      return false;
+    }
+
+    emit('summary', 'Cancelling — waiting for active operations to wind down…');
+
+    let agentSignaled = false;
+    if (plan.signalAgent && session.agent) {
+      try {
+        session.agent.stop();
+        agentSignaled = true;
+        emit('agent', 'Stopping chat agent loop (will halt after the current step).');
+      } catch (err) {
+        emit('agent', `Chat agent stop failed: ${(err as Error).message}`);
+      }
+    }
+
+    let abortFired = false;
+    if (plan.fireAbortController && session.abortController) {
+      try {
+        session.abortController.abort();
+        abortFired = true;
+        emit('abort', 'Aborting in-flight LLM streams.');
+      } catch (err) {
+        emit('abort', `Abort signal failed: ${(err as Error).message}`);
+      }
+    }
+
+    if (plan.interruptComfy) {
+      // Fire-and-forget by design: interrupt is a best-effort GPU
+      // release. Emit a chat update when the call resolves so the
+      // user sees the count of jobs interrupted.
+      emit('comfy', 'Interrupting ComfyUI prompts (releasing GPU)…');
+      void import('../services/comfyui/activeJobs.js')
+        .catch((err) => {
+          emit('comfy', `ComfyUI interrupt failed to load: ${(err as Error).message}`);
+          return null;
+        })
+        .then((mod) => {
+          if (
+            mod &&
+            typeof (mod as { cancelAllActiveJobs?: unknown }).cancelAllActiveJobs ===
+              'function'
+          ) {
+            (mod as { cancelAllActiveJobs: () => Promise<number> })
+              .cancelAllActiveJobs()
+              .then((n) =>
+                emit(
+                  'comfy',
+                  n > 0
+                    ? `ComfyUI interrupt sent for ${n} active job(s).`
+                    : 'ComfyUI had no active prompts to interrupt.',
+                ),
+              )
+              .catch((err) =>
+                emit('comfy', `ComfyUI interrupt threw: ${(err as Error).message}`),
+              );
+          }
+        });
+    }
+
+    let runnerCancelled = false;
+    if (plan.cancelRunnerTaskId) {
+      try {
+        const runner = getBackgroundTaskRunner();
+        runnerCancelled = runner.cancel(plan.cancelRunnerTaskId);
+        emit(
+          'runner',
+          runnerCancelled
+            ? `Background task ${plan.cancelRunnerTaskId} cancellation requested. In-flight work may take a few seconds to wind down.`
+            : `Background task ${plan.cancelRunnerTaskId} was already idle — nothing to cancel.`,
+        );
+      } catch (err) {
+        emit('runner', `Background task cancel threw: ${(err as Error).message}`);
+      }
     }
 
     session.state.status = 'idle';
     session.state.lastActivity = Date.now();
-    return !!(session.agent || session.abortController || backgroundCancelled);
+
+    const anythingHappenedHere =
+      agentSignaled || abortFired || runnerCancelled || plan.interruptComfy;
+    emit(
+      'summary',
+      anythingHappenedHere
+        ? 'Cancel signals dispatched. The runner will mark the task cancelled once in-flight ops settle.'
+        : 'Nothing was running to cancel.',
+    );
+
+    // FM8: the legacy `return !!(agent || abortController || backgroundCancelled)`
+    // counted the OLD pre-cancel state, not what actually fired. Now we
+    // return true only when at least one downstream signal actually
+    // dispatched (or got skipped because nothing was running, which the
+    // helper's outcome flag captures).
+    const anythingHappened = agentSignaled || abortFired || runnerCancelled;
+    return anythingHappened || plan.outcome === 'no_active_work';
   }
 
   /**
@@ -1528,6 +1823,7 @@ export class ConversationManager {
   async invalidateNodes(
     sessionId: string,
     nodeIds: string[],
+    source?: string,
   ): Promise<{ invalidated: string[]; notFound: string[] }> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -1567,11 +1863,55 @@ export class ConversationManager {
       project as Parameters<typeof applyInvalidation>[0],
       nodeIds,
     );
-    nodeFs.writeFileSync(
+    atomicWriteFileSync(
       projectJsonPath,
       JSON.stringify(project, null, 2),
       'utf-8',
     );
+
+    // Tell pi-agent that the project state just changed under it.
+    // Without this, the next "resume" / "what's left?" question
+    // would be answered from pi-agent's stale in-context view — it
+    // would confidently say "everything is done" because its last
+    // mental snapshot predates the user's UI mutation.
+    //
+    // Routed through the same supervisor scheduling as runner asset
+    // events: deferred via setImmediate so the synthetic task runs
+    // when the current event-loop tick clears, and gated by the same
+    // `session.state.status === 'running'` check (we don't talk over
+    // an active turn — the prompt-side "always re-check on resume"
+    // rule covers the case where this event was dropped).
+    //
+    // SKIP entirely when source === 'redo_from_menu': the desktop's
+    // "Redo from…" UI is about to send a runTask immediately as the
+    // user's resume command. If we also emit the user_invalidate
+    // event, pi-agent receives TWO instructions in the same turn —
+    // (1) "DO NOT auto-dispatch from this event" and (2) the user
+    // task "Continue running the pipeline". Pi-agent resolves the
+    // conflict by acking the system rule and ignoring the user task
+    // (observed 2026-05-19 on Soft Seinen: 138 nodes invalidated,
+    // pi-agent replied "I'm paused and ready", runner never
+    // started). The runTask alone is the unambiguous user intent;
+    // no supervisor narration needed.
+    const skipSupervisor = source === 'redo_from_menu';
+    if (result.seeds.length > 0 && !skipSupervisor) {
+      this.scheduleSupervisorInvocation(
+        'user_invalidate',
+        {
+          // Synthesize a TaskRecord-shaped placeholder so the
+          // supervisor's task-id-based circuit breaker treats this as
+          // a fresh non-runner event.
+          id: `user_invalidate_${Date.now()}`,
+          spec: {
+            sessionId,
+            kind: 'user_invalidate',
+            projectName: session.focusedProject ?? '(ambient)',
+          },
+        } as never,
+        { seeds: result.seeds, ...(source ? { source } : {}) },
+      );
+    }
+
     return result;
   }
 
@@ -1590,19 +1930,26 @@ export class ConversationManager {
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-    if (!session.agent) {
-      throw new Error('Session agent not configured. Select a project first.');
-    }
     if (session.state.status === 'running') {
       throw new Error('Session already has a running task — cannot redo while executing');
     }
+    const conflict = this.findCrossProjectConflict(sessionId, session.focusedProject);
+    if (conflict) {
+      throw new Error(
+        `Another project ('${conflict}') has an active task. Cancel it before starting a new regeneration here.`,
+      );
+    }
+    // We need sessionContext to know where the project lives, but we do
+    // NOT need session.agent — redoNode now runs the executor in-process
+    // (see runExecutor below). The agent gate was a relic of the legacy
+    // ExecutorAgent path that was never created in production.
     if (!session.sessionContext) {
-      throw new Error('Session context not initialized. Configure project first.');
+      throw new Error(
+        'Session project not configured. Call configureProject / focusProject first.',
+      );
     }
 
     // If user edited the prompt, save it to disk BEFORE invalidation.
-    // saveEditedPrompt requires an absolute project dir — sessionContext
-    // stores only a basename (see resolveSessionProjectDirAbs).
     const hasEdits = !!(editedPrompt && Object.keys(editedPrompt).length > 0);
     if (hasEdits) {
       const { saveEditedPrompt } = await import('./editAndRedo.js');
@@ -1610,108 +1957,266 @@ export class ConversationManager {
       await saveEditedPrompt(projectDirAbs, nodeId, editedPrompt);
     }
 
-    // Edit-prompt special case: if user edited a shot_image_prompt, we MUST
-    // NOT invalidate that prompt node (invalidation → re-run LLM → overwrite
-    // the user's edits). Instead, keep the prompt as-is and invalidate only
-    // the dependent shot_image so the image regenerates from the edited prompt.
-    // Downstream video/final stay put — user can redo them manually if needed.
+    // Edit-prompt special case: keep the user's edited prompt, regen
+    // only the dependent shot_image. Frame preserved so just that frame
+    // regenerates.
     let redoTargetNodeId = nodeId;
     let redoOpts: { frame?: string; scope?: 'prompt' | 'image_only' } = { frame, scope };
     if (hasEdits && nodeId.startsWith('shot_image_prompt:')) {
       redoTargetNodeId = nodeId.replace('shot_image_prompt:', 'shot_image:');
-      // Preserve the frame so only that frame regenerates (not the whole shot)
       redoOpts = { scope: 'image_only', frame };
     }
 
-    // Legacy ExecutorAgent path: invalidate in-process and resume runTask.
-    if ('redoNode' in session.agent) {
-      const invalidated = (session.agent as {
-        redoNode(id: string, opts?: { frame?: string; scope?: 'prompt' | 'image_only' }): unknown[];
-      }).redoNode(redoTargetNodeId, redoOpts);
-      if (invalidated.length === 0) {
-        throw new Error(`Node '${redoTargetNodeId}' not found in execution graph`);
-      }
-      return this.runTask(sessionId, '', events);
-    }
-
-    // Pi-era fallback: PiSessionAgent has no in-process executor graph,
-    // so spawn scripts/regen-node.ts (same path dhee_regen uses).
-    // Stream stdout through onToolStreaming and surface generated assets
-    // as media_generated events.
-    const projectName = session.sessionContext.projectDir.replace(/\.dhee$/, '');
-    return await this.runRegenSubprocess(sessionId, projectName, redoTargetNodeId, events);
+    return await this.runRegenInProcess(
+      sessionId,
+      redoTargetNodeId,
+      redoOpts,
+      events,
+    );
   }
 
-  private async runRegenSubprocess(
+  /**
+   * In-process surgical regen.
+   *
+   * Replaces the previous subprocess path (which shelled out to
+   * `tsx scripts/regen-node.ts`). That path was dev-only — packaged
+   * kshana-desktop builds ship no `tsx`, no `scripts/` directory, and
+   * no `pnpm`. The canonical packaged-runtime path is
+   * `src/server/runners/runExecutor.ts`, whose own header docs name
+   * this exact trap.
+   *
+   * Flow:
+   *   1. Read project.json from disk
+   *   2. Map (frame, scope) → applyInvalidation options, mirroring
+   *      ExecutorAgent.redoNode's dispatch (src/core/planner/
+   *      ExecutorAgent.ts:1041) so behavior matches the legacy in-process
+   *      redo.
+   *   3. Persist the invalidated state.
+   *   4. Run the executor in-process scoped to `lastInvalidatedIds`
+   *      via `target.runOnly`.
+   *   5. Bridge runExecutor's events (tool / result / notification /
+   *      asset) onto the supplied ConversationEvents so the chat panel
+   *      sees streaming progress just like a normal `runTask`.
+   */
+  private async runRegenInProcess(
     sessionId: string,
-    projectName: string,
     nodeId: string,
+    opts: { frame?: string; scope?: 'prompt' | 'image_only' },
     events?: ConversationEvents,
   ): Promise<GenericAgentResult> {
     const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (!session || !session.sessionContext) {
+      throw new Error(`Session not found or not configured: ${sessionId}`);
+    }
 
+    const { applyInvalidation } = await import(
+      '../core/planner/applyInvalidation.js'
+    );
+    const { runExecutor } = await import('./runners/runExecutor.js');
+
+    const projectDirAbs = this.resolveSessionProjectDirAbs(session);
+    const projectJsonPath = nodePath.join(projectDirAbs, 'project.json');
+    if (!nodeFs.existsSync(projectJsonPath)) {
+      throw new Error(`project.json not found at ${projectJsonPath}`);
+    }
+
+    const projectRaw = nodeFs.readFileSync(projectJsonPath, 'utf-8');
+    const project = JSON.parse(projectRaw) as {
+      executorState?: { nodes?: Record<string, unknown>; lastInvalidatedIds?: string[] };
+    };
+    if (!project.executorState || !project.executorState.nodes) {
+      throw new Error(
+        'Cannot regenerate — project has no executorState. Run the pipeline first.',
+      );
+    }
+
+    // ── Map (frame, scope) → applyInvalidation calls. Same matrix as
+    // ExecutorAgent.redoNode and scripts/regen-node.ts.
+    const { frame, scope } = opts;
+    const projectLike = project as Parameters<typeof applyInvalidation>[0];
+    if (scope === 'prompt') {
+      const shotImageNodeId = nodeId.startsWith('shot_image_prompt:')
+        ? nodeId.replace('shot_image_prompt:', 'shot_image:')
+        : nodeId.startsWith('shot_image:')
+          ? nodeId
+          : null;
+      if (!shotImageNodeId) {
+        throw new Error(
+          `scope='prompt' requires a shot_image_prompt:* or shot_image:* node (got "${nodeId}")`,
+        );
+      }
+      const promptNodeId = shotImageNodeId.replace(
+        'shot_image:',
+        'shot_image_prompt:',
+      );
+      // Two seeds: invalidate the prompt by itself (no cascade), then
+      // the image with cascadeOnlyCompleted so the downstream video
+      // already on disk flips to pending.
+      applyInvalidation(projectLike, [promptNodeId], { cascade: false });
+      applyInvalidation(projectLike, [shotImageNodeId], {
+        cascade: true,
+        cascadeOnlyCompleted: true,
+      });
+    } else if (scope === 'image_only' || frame) {
+      const preserveOthers = frame === 'last_frame' || frame === 'mid_frame';
+      applyInvalidation(projectLike, [nodeId], {
+        cascade: true,
+        cascadeOnlyCompleted: true,
+        ...(preserveOthers
+          ? { preserveFramesOther: true, singleFrame: frame }
+          : {}),
+      });
+    } else {
+      applyInvalidation(projectLike, [nodeId], { cascade: true });
+    }
+
+    atomicWriteFileSync(
+      projectJsonPath,
+      JSON.stringify(project, null, 2),
+      'utf-8',
+    );
+
+    const runOnly =
+      (project.executorState as { lastInvalidatedIds?: string[] })
+        .lastInvalidatedIds ?? [];
+    if (runOnly.length === 0) {
+      throw new Error(
+        `No nodes were invalidated for ${nodeId}. Either it does not exist or its on-disk record is malformed.`,
+      );
+    }
+
+    // ── Stream-events bridge. Mirror the previous subprocess wiring so
+    // the chat panel's tool-card / media-generated handlers light up.
+    const toolCallId = `regen_${Date.now()}`;
     session.state.status = 'running';
     session.state.lastActivity = Date.now();
     session.activeEvents = events;
 
-    const { spawn } = await import('node:child_process');
-    const { join } = await import('node:path');
-    const { createAssetParser, feedChunk } = await import('../agent/pi/tools/parseAssetLines.js');
-    const tsxBin = join(process.cwd(), 'node_modules', '.bin', 'tsx');
-    const scriptPath = join(process.cwd(), 'scripts', 'regen-node.ts');
+    events?.onToolCall?.(
+      sessionId,
+      toolCallId,
+      'kshana_regen',
+      {
+        node: nodeId,
+        run_only: runOnly,
+        ...(frame ? { frame } : {}),
+        ...(scope ? { scope } : {}),
+      },
+      'kshana',
+    );
 
-    const parser = createAssetParser();
-    let stdout = '';
-    let stderr = '';
-    const startedAt = Date.now();
-    const toolCallId = `regen_${startedAt}`;
-
-    events?.onToolCall?.(sessionId, toolCallId, 'dhee_regen', { project: projectName, node: nodeId }, 'dhee');
-
-    return await new Promise<GenericAgentResult>((resolve) => {
-      const child = spawn(tsxBin, [scriptPath, projectName, nodeId], {
-        cwd: process.cwd(),
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      child.stdout.on('data', (chunk: Buffer) => {
-        const text = chunk.toString('utf8');
-        stdout += text;
-        events?.onToolStreaming?.(sessionId, toolCallId, text, false, 'dhee', 'dhee_regen', false);
-        for (const ev of feedChunk(parser, text)) {
+    try {
+      const result = await runExecutor({
+        project: project as Parameters<typeof runExecutor>[0]['project'],
+        projectDir: projectDirAbs,
+        target: { runOnly },
+        name: 'dhee-regen-in-process',
+        onTool: (info) => {
+          const hint = info.nodeId ? ` ${info.nodeId}` : '';
+          events?.onToolStreaming?.(
+            sessionId,
+            toolCallId,
+            `[${info.toolName}]${hint}\n`,
+            false,
+            'dhee',
+            'dhee_regen',
+            false,
+          );
+        },
+        onResult: (info) => {
+          if (info.filePath) {
+            events?.onToolStreaming?.(
+              sessionId,
+              toolCallId,
+              `  → ${info.filePath}\n`,
+              false,
+              'dhee',
+              'dhee_regen',
+              false,
+            );
+          } else if (info.status) {
+            events?.onToolStreaming?.(
+              sessionId,
+              toolCallId,
+              `  → ${info.status}\n`,
+              false,
+              'dhee',
+              'dhee_regen',
+              false,
+            );
+          }
+          if (info.error) {
+            events?.onToolStreaming?.(
+              sessionId,
+              toolCallId,
+              `  ! ${info.error}\n`,
+              false,
+              'dhee',
+              'dhee_regen',
+              false,
+            );
+          }
+        },
+        onNotification: (info) => {
+          events?.onToolStreaming?.(
+            sessionId,
+            toolCallId,
+            `[${info.level}] ${info.message}\n`,
+            false,
+            'dhee',
+            'dhee_regen',
+            false,
+          );
+        },
+        onAsset: (event) => {
           events?.onMediaGenerated?.(sessionId, {
-            kind: ev.kind,
-            project: projectName,
-            path: ev.path,
+            kind: event.kind,
+            project: session.focusedProject ?? '',
+            path: event.filePath,
             source: 'dhee_regen',
           });
-        }
+        },
       });
-      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-      child.on('error', (err) => {
-        events?.onToolResult?.(sessionId, toolCallId, 'dhee_regen', { error: err.message }, true, 'dhee');
-        session.state.status = 'error';
-        session.activeEvents = undefined;
-        resolve({ status: 'error', output: '', todos: [], error: err.message });
-      });
-      child.on('close', (code) => {
-        const ok = code === 0;
-        events?.onToolResult?.(sessionId, toolCallId, 'dhee_regen', {
-          exit_code: code,
-          stdout: stdout.slice(-500),
-          stderr: stderr.slice(-500),
-        }, !ok, 'dhee');
-        session.state.status = ok ? 'completed' : 'error';
-        session.activeEvents = undefined;
-        resolve({
-          status: ok ? 'completed' : 'error',
-          output: ok ? `Regenerated ${nodeId}` : `regen-node exited ${code}`,
-          todos: [],
-          ...(ok ? {} : { error: `regen-node exited ${code}: ${stderr.slice(-200)}` }),
-        });
-      });
-    });
+
+      const ok = result.status === 'completed';
+      events?.onToolResult?.(
+        sessionId,
+        toolCallId,
+        'dhee_regen',
+        {
+          status: result.status,
+          stopReason: result.stopReason ?? null,
+          ...(result.error ? { error: result.error } : {}),
+        },
+        !ok,
+        'dhee',
+      );
+
+      session.state.status = ok ? 'completed' : 'error';
+      session.activeEvents = undefined;
+
+      return {
+        status: ok ? 'completed' : 'error',
+        output: ok
+          ? `Regenerated ${nodeId} (${runOnly.length} node(s))`
+          : `Regen failed: ${result.error ?? result.stopReason ?? 'unknown'}`,
+        todos: [],
+        ...(ok ? {} : { error: result.error ?? `regen status=${result.status}` }),
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      events?.onToolResult?.(
+        sessionId,
+        toolCallId,
+        'dhee_regen',
+        { error: msg },
+        true,
+        'dhee',
+      );
+      session.state.status = 'error';
+      session.activeEvents = undefined;
+      throw err;
+    }
   }
 
   /**
@@ -1728,19 +2233,25 @@ export class ConversationManager {
         session.state.taskHistory.length
       );
 
-      // Cancel any running task
+      // Cancel any running task. Pass 'shutdown' as the abort reason so
+      // ExecutorAgent.stop() (wired up via linkAbortSignalToAgent in
+      // runExecutor) can tag the resulting failed nodes with the
+      // shutdown origin. resetAbortedNodes() then auto-recovers them on
+      // the next run instead of leaving them in failed state requiring
+      // manual invalidation. (Bug 17.)
       if (session.abortController) {
-        session.abortController.abort();
+        session.abortController.abort('shutdown');
       }
       // Clear timer checkpoint interval
       if (session.timerCheckpointInterval) {
         clearInterval(session.timerCheckpointInterval);
         session.timerCheckpointInterval = undefined;
       }
-      // Clean up Remotion session resources (temp dirs, jobs) — fire and forget
-      import('../services/remotion/index.js')
-        .then(({ RemotionRenderer }) => RemotionRenderer.getInstance().cleanupSession(sessionId))
-        .catch(() => { /* Remotion service may not be initialized */ });
+      // Remotion infographic rendering is hosted by the desktop wrapper
+      // (kshana-desktop/src/main/remotionManager.ts) — no kshana-core
+      // cleanup needed. The previous in-kshana-core RemotionRenderer was
+      // removed because its `npx remotion bundle` subprocess only ran in
+      // dev (no npx in packaged builds).
       this.sessions.delete(sessionId);
       return true;
     }

@@ -352,6 +352,22 @@ export interface ExecutionNodeMetadata {
   name?: string;
   /** A 1-line summary surfaced in agent-context tools / UI. */
   summary?: string;
+  /**
+   * 1-2 sentence visual description for items spawned mid-pipeline by
+   * the shot_image_prompt turn-2 reference-extraction LLM. These items
+   * don't have an upstream content-generation node to author a prompt
+   * file, so the description IS the prompt source for downstream image
+   * generation.
+   */
+  description?: string;
+  /**
+   * Phase D — chained setting/character edits. When set on a
+   * `setting_image` (or `character_image`) node, the renderer switches
+   * from text-to-image to image-edit mode: the parent ref's outputPath
+   * becomes the base canvas, and `description` becomes the reframe
+   * prompt. Value is a node id like `setting_image:bus_station_morning`.
+   */
+  derivedFrom?: string;
   // NOTE: approval / regeneration / feedback state is intentionally
   // NOT modeled here. Approval lives in pi-agent (the external
   // orchestrator); dhee-core just runs the executor. Don't

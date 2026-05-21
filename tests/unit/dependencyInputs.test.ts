@@ -63,6 +63,8 @@ beforeAll(() => {
     'setting:house': 'settings/house.md',
     'scene:scene_1': 'chapters/chapter_1/scenes/scene_1.md',
     'scene:scene_2': 'chapters/chapter_1/scenes/scene_2.md',
+    'scene_shot_plan:scene_1': 'prompts/videos/scenes/scene_1.plan.json',
+    'scene_shot_plan:scene_2': 'prompts/videos/scenes/scene_2.plan.json',
     'character_image:alice': 'assets/images/charref_alice.png',
     'character_image:bob': 'assets/images/charref_bob.png',
     'setting_image:park': 'assets/images/settingref_park.png',
@@ -77,6 +79,16 @@ beforeAll(() => {
   executor.expandCollection('setting_image', [
     { itemId: 'park', name: 'Park' },
     { itemId: 'house', name: 'House' },
+  ]);
+  // Hierarchical scene-breakdown flow: scene_shot_plan (Stage A LLM)
+  // expands first; shot_breakdown (Stage B LLM) is created per-shot via
+  // the runtime expansion in ExecutorAgent — this static test stub jumps
+  // straight to the per-scene parents that exist before per-shot
+  // expansion. scene_video_prompt is now the deterministic Stage C
+  // assembler; its dependencies point at scene_shot_plan + shot_breakdown.
+  executor.expandCollection('scene_shot_plan', [
+    { itemId: 'scene_1', name: 'Scene 1' },
+    { itemId: 'scene_2', name: 'Scene 2' },
   ]);
   executor.expandCollection('scene_video_prompt', [
     { itemId: 'scene_1', name: 'Scene 1' },
@@ -154,6 +166,8 @@ beforeAll(() => {
     'prompts/images/characters/bob.json': '{"imagePrompt":"Bob portrait","negativePrompt":"bad","aspectRatio":"1:1"}',
     'prompts/images/settings/park.json': '{"imagePrompt":"Park landscape","negativePrompt":"bad","aspectRatio":"16:9"}',
     'prompts/images/settings/house.json': '{"imagePrompt":"House exterior","negativePrompt":"bad","aspectRatio":"16:9"}',
+    'prompts/videos/scenes/scene_1.plan.json': '{"sceneNumber":1,"sceneTitle":"Arrival","totalDuration":10,"mainSubject":"alice","shotPlan":[{"shotNumber":1,"purpose":"meet_character","duration":5,"oneLineSummary":"Wide shot of alice arriving"}]}',
+    'prompts/videos/scenes/scene_2.plan.json': '{"sceneNumber":2,"sceneTitle":"Meeting","totalDuration":10,"mainSubject":"bob","shotPlan":[{"shotNumber":1,"purpose":"meet_character","duration":10,"oneLineSummary":"Medium shot of bob"}]}',
     'prompts/videos/scenes/scene_1.json': '{"sceneNumber":1,"sceneTitle":"Arrival","totalDuration":10,"shots":[{"shotNumber":1,"shotType":"wide","duration":5,"description":"Wide shot","characters":["alice"],"setting":"park"},{"shotNumber":2,"shotType":"close_up","duration":5,"description":"Close up","characters":["alice","bob"],"setting":"park"}]}',
     'prompts/videos/scenes/scene_2.json': '{"sceneNumber":2,"sceneTitle":"Meeting","totalDuration":10,"shots":[{"shotNumber":1,"shotType":"medium","duration":10,"description":"Medium shot","characters":["bob"],"setting":"house"}]}',
     'prompts/images/shots/scene-1-shot-1.json': '{"imagePrompt":"Wide shot of alice from image 1 in park from image 2","negativePrompt":"bad","aspectRatio":"16:9","generationMode":"image_text_to_image","references":[{"imageNumber":1,"type":"character","refId":"character_image:alice"},{"imageNumber":2,"type":"setting","refId":"setting_image:park"}]}',
@@ -299,9 +313,12 @@ describe('scene dependencies', () => {
 // =====================================================================
 // Scene Video Prompt: should get matching scene + ref images (NOT binary)
 // =====================================================================
-describe('scene_video_prompt dependencies', () => {
+describe('scene_shot_plan dependencies (Stage A of hierarchical breakdown)', () => {
+  // Post-refactor: scene_shot_plan is the LLM call that consumes scene
+  // text. The same "no media deps, no binary contamination" guard that
+  // used to live on scene_video_prompt now applies here.
   it('receives matching scene text but NO image refs (prevents serial mode deadlock)', () => {
-    const node = getNode('scene_video_prompt:scene_1');
+    const node = getNode('scene_shot_plan:scene_1');
     const inputs = resolveInputs(node, executor, projectDir);
 
     // Should read the scene markdown
@@ -310,7 +327,6 @@ describe('scene_video_prompt dependencies', () => {
     expect(inputs.filesRead).not.toContain('chapters/chapter_1/scenes/scene_2.md');
 
     // Should NOT depend on character/setting images (media nodes)
-    // Having media deps here causes serial mode deadlock
     expect(inputs.filesRead).not.toContain('assets/images/charref_alice.png');
     expect(inputs.filesRead).not.toContain('assets/images/settingref_park.png');
 
@@ -320,7 +336,7 @@ describe('scene_video_prompt dependencies', () => {
   });
 
   it('context block is a reasonable size', () => {
-    const node = getNode('scene_video_prompt:scene_1');
+    const node = getNode('scene_shot_plan:scene_1');
     const inputs = resolveInputs(node, executor, projectDir);
 
     // Should be small — just the scene markdown + metadata

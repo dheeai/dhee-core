@@ -1,10 +1,12 @@
 /**
- * Resolve a dhee project's on-disk folder.
+ * Resolve a kshana/dhee project's on-disk folder.
  *
- * Two conventions exist in the wild:
- *   1. `<name>.dhee` — the canonical dhee-core convention (every
- *      `pnpm new` project, every test fixture).
- *   2. `<name>` — what dhee-desktop's NewProjectDialog creates
+ * Three conventions exist in the wild:
+ *   1. `<name>.kshana` — the post-rename canonical convention (every
+ *      project the current kshana-desktop creates).
+ *   2. `<name>.dhee`   — the legacy convention from dhee-core era;
+ *      still supported for older projects on disk.
+ *   3. `<name>` — what early dhee-desktop NewProjectDialog created
  *      (workspace folder + project name, no suffix).
  *
  * Earlier versions hardcoded `.dhee`, which made pi-agent's tools
@@ -47,12 +49,13 @@ export class ProjectDirNotFoundError extends Error {
  *
  * Probe order:
  *   1. Explicit `projectDir` (must be absolute and exist)
- *   2. `<basePath>/<name>.dhee`
- *   3. `<basePath>/<name>`
+ *   2. `<basePath>/<name>.kshana`
+ *   3. `<basePath>/<name>.dhee`   (legacy)
+ *   4. `<basePath>/<name>`        (suffix-less)
  *
- * The `.dhee` form is tried before the bare form so existing
- * projects keep their behavior unchanged when a sibling folder
- * happens to share the bare name.
+ * Suffixed forms are tried before the bare form so existing projects
+ * keep their behavior unchanged when a sibling folder happens to share
+ * the bare name.
  */
 export function resolveProjectDir(opts: ResolveProjectDirOpts): string {
   const attempted: string[] = [];
@@ -65,9 +68,13 @@ export function resolveProjectDir(opts: ResolveProjectDirOpts): string {
     if (existsSync(abs)) return abs;
   }
 
-  const suffixed = resolve(opts.basePath, `${opts.name}.dhee`);
-  attempted.push(suffixed);
-  if (existsSync(suffixed)) return suffixed;
+  const kshana = resolve(opts.basePath, `${opts.name}.kshana`);
+  attempted.push(kshana);
+  if (existsSync(kshana)) return kshana;
+
+  const dhee = resolve(opts.basePath, `${opts.name}.dhee`);
+  attempted.push(dhee);
+  if (existsSync(dhee)) return dhee;
 
   const bare = resolve(opts.basePath, opts.name);
   attempted.push(bare);

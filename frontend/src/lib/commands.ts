@@ -39,6 +39,8 @@ const STAGES: readonly string[] = [
   'character_image',
   'reference_images',
   'setting_image',
+  'scene_shot_plan',
+  'shot_breakdown',
   'scene_video_prompt',
   'shot_image_prompt',
   'shot_motion_directive',

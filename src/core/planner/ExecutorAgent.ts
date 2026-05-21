@@ -11,6 +11,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, statSync, renameSync } from 'fs';
+import { atomicWriteFileSync } from '../../utils/atomicWrite.js';
 import { join, dirname, relative } from 'path';
 import { TypedEventEmitter } from '../../events/EventEmitter.js';
 import type { LLMClient } from '../llm/index.js';
@@ -32,10 +33,22 @@ import { addShotImageNodes } from './addShotImageNodes.js';
 import { executeShotImageLastFrame } from './executeShotImageLastFrame.js';
 import { BackwardPlanner } from './BackwardPlanner.js';
 import { AssetScanner } from './AssetScanner.js';
-import { resolveInputs, writeOutput } from './contentResolver.js';
-import { readShotContextFromSvp, buildShotAwareReferences, shouldForceEditPrevious } from './shotReferenceMapping.js';
+import { resolveInputs, writeOutput, getOutputPath } from './contentResolver.js';
+import { assembleSceneVideoPrompt, type SingleShot } from './sceneVideoPromptAssembler.js';
+import { migrateGraphToTemplate } from './migrateGraphToTemplate.js';
+// (writeFailedAttempt/clearFailedAttempt imported below from ./writeFailedAttempt.js — master replaced ./failedAttempt.js)
+import { classifyValidationError, buildRetrySystemSuffix } from './validationErrorClass.js';
+import { readShotContextFromSvp, readShotAnchorFromSvp, buildShotAwareReferences, shouldForceEditPrevious } from './shotReferenceMapping.js';
+import { enforceAnchorMode } from './enforceAnchorMode.js';
 import { getPreviousShotIdAcrossScenes } from './crossShotChaining.js';
 import { shouldExpandSceneCollectionToShots } from './collectionExpansion.js';
+import {
+  diffShotPlanAgainstGraph,
+  perShotNodeIds,
+  planShotNumbersFromJson,
+} from './reconcileShotPlan.js';
+import { buildOutputContractBlock } from './buildOutputContractBlock.js';
+import { reconcileGraphHygiene, summariseHygieneResult } from './reconcileGraphHygiene.js';
 import {
   normalizeShotImagePrompt as normalizeShotImagePromptFrame,
   normalizeShotImagePromptWithRefs,
@@ -43,7 +56,24 @@ import {
   scanOTSWithSingleChar,
   type AvailableRefMinimal,
 } from './shotImagePromptNormalizer.js';
+import { enforceShotCanonicalRefs } from './enforceShotCanonicalRefs.js';
+import { buildEmptyContentFailureReason, checkEmptyContent } from './checkEmptyContent.js';
+import { retryOnEmptyLLMResponse } from './retryOnEmptyLLMResponse.js';
+import {
+  buildSlotManifestLine,
+  stripInlineFromImageTokens,
+  applyShotImageManifestPostPass,
+  stripSettingFromEditFirstFrameFrames,
+  normalizeDerivedFromRefId,
+  resolveDerivedFromBase,
+  buildReferenceMenu,
+  buildTurn2UserMessage,
+  parseTurn2RefsJson,
+  type Reference,
+  type ReferenceMenuItem,
+} from './shotImagePipeline.js';
 import { extractCollectionItems } from './collectionExtractor.js';
+import { listCollectionItemsFromDisk } from './collectionResumeFromDisk.js';
 import { extractStoryEssence, StoryEssenceParseError, type StoryEssence } from './storyEssenceExtractor.js';
 import { buildFailedNodesNotification } from './buildFailedNodesNotification.js';
 import { findBlockingFailures, shouldAwaitPendingMediaOnExit } from './executorTermination.js';
@@ -90,7 +120,7 @@ import type { Timeline, SegmentDescriptor, TimelineLayerEntry } from '../timelin
 import type { TodoNodeInfo } from '../../events/events.js';
 import { fitShotDurations } from './shotDurationFit.js';
 import { scanMultiSpeakerShots, scanAmbiguousSpeakerTag } from './dialogueValidation.js';
-import { validateWithSchema, normalizeSceneVideoPrompt, getPromptSchema, maxTokensForJsonNode } from './schemas.js';
+import { validateWithSchema, normalizeSceneVideoPrompt, getPromptSchema, maxTokensForJsonNode, shotPlanSchema, singleShotSchema } from './schemas.js';
 import {
   validateContinuitySequence,
   checkPositionContinuity,
@@ -159,18 +189,6 @@ export interface ExecutorAgentConfig {
    * Used for testing — validates prompt structure without calling image/video providers.
    */
   skipMediaGeneration?: boolean;
-  /**
-   * Master switch for vision-LLM calls (the in-executor
-   * `reviewImageWithVLM` retry-once gate AND any sibling oversight
-   * describe-call). When `true` (or undefined → defaults to !DISABLE_VLM
-   * env), VLM is allowed. When `false`, VLM is skipped end-to-end —
-   * the runtime gate enforced by ConversationManager
-   * (`piOversight && vlmJudge`).
-   *
-   * Live-toggleable via `setVLMEnabled()` so flipping the UI mid-run
-   * affects subsequent shots immediately.
-   */
-  vlmEnabled?: boolean;
 }
 
 interface ParsedSceneBreakdownShot {
@@ -270,6 +288,16 @@ export class ExecutorAgent extends TypedEventEmitter {
   private running = false;
   private stopped = false;
   /**
+   * Per-run cancel handle. Reset at the top of every `run()` so a
+   * stop from a previous run doesn't leak into the next one. The
+   * signal is threaded into every `generateForNode` LLM call so
+   * `stop()` aborts in-flight streams immediately — without this,
+   * reasoning-model streams (1-7 min per call) keep running until
+   * natural completion or their internal 200s self-timeout, which
+   * made cancel feel broken.
+   */
+  private runAbortController: AbortController = new AbortController();
+  /**
    * Resolved typeIds for the current `/run-to <stage>` gate. Null when no
    * gate is active. Set from config.stopAtStage at construction time and
    * from `setStopAtStage(stage | null)` at runtime per-task.
@@ -289,17 +317,8 @@ export class ExecutorAgent extends TypedEventEmitter {
    * so the UI can show the right banner.
    */
   private stopReason: 'complete' | 'paused_at_stage' | 'cancelled' | 'failed' | null = null;
-  /**
-   * Inverted config field — internal code already says
-   * "if vlmDisabled skip" all over executeShotImage. Source of
-   * truth: constructor `config.vlmEnabled` (the master switch
-   * resolved from the process-wide `oversightState` global by the
-   * runner singleton). Mutated at runtime by `setVLMEnabled` and by
-   * the 404 self-shutoff in the retry loop. The legacy `DISABLE_VLM`
-   * env shortcut is no longer honored — toggle VLM via the desktop
-   * Settings panel or chat-header toggle.
-   */
-  private vlmDisabled: boolean = false;
+  /** Where the last stop() call came from — used to tag abort errors. */
+  private lastStopOrigin: 'user' | 'shutdown' | null = null;
   /**
    * Loaded from prompts/story_essence.json after the story_essence node
    * completes (or at startup if the file already exists). Threaded into
@@ -409,12 +428,6 @@ export class ExecutorAgent extends TypedEventEmitter {
     if (config.stopAfterNode) {
       this.stopAfterNodeId = config.stopAfterNode;
     }
-    // Resolve initial vlmDisabled. Explicit config wins over env so
-    // ConversationManager's runtime gate (`piOversight && vlmJudge`)
-    // can authoritatively force-off without depending on env state.
-    if (typeof config.vlmEnabled === 'boolean') {
-      this.vlmDisabled = !config.vlmEnabled;
-    }
     // Build per-call router. When LLM_ROUTING_ENABLED=false (default), every
     // purpose resolves to the default client so behavior is unchanged.
     this.router = buildRouterFromEnv(config.projectDir);
@@ -480,6 +493,37 @@ export class ExecutorAgent extends TypedEventEmitter {
         }
       } catch (err) {
         this.log(`State heal skipped: ${(err as Error).message}`);
+      }
+
+      // Graph-template migration: a project persisted under an older
+      // template may be missing per-item nodes the current template now
+      // declares (e.g. scene_shot_plan, shot_breakdown added in the
+      // hierarchical-breakdown refactor), and may carry stale dep edges
+      // on nodes whose contract changed. The migration synthesizes the
+      // missing nodes, prunes deps that are no longer declared, and
+      // cascade-invalidates nodes whose contract drifted so they re-run
+      // under the new flow. Nodes whose contract is unchanged keep
+      // their status + outputPath — no rework of completed upstream.
+      try {
+        const report = migrateGraphToTemplate(this.executor, config.template);
+        if (
+          report.synthesized.length > 0 ||
+          report.rewired.length > 0 ||
+          report.invalidated.length > 0 ||
+          report.deleted.length > 0
+        ) {
+          this.log(
+            `Graph migration: deleted=${report.deleted.length} ` +
+            `synthesized=${report.synthesized.length} ` +
+            `rewired=${report.rewired.length} invalidated=${report.invalidated.length}`,
+          );
+          for (const d of report.deleted) this.log(`  − ${d}`);
+          for (const s of report.synthesized) this.log(`  + ${s.id} (${s.reason})`);
+          for (const r of report.rewired) this.log(`  ~ ${r.id}`);
+          this.persistState();
+        }
+      } catch (err) {
+        this.log(`Graph migration skipped: ${(err as Error).message}`);
       }
     } else {
       const scanner = new AssetScanner(config.template);
@@ -927,9 +971,17 @@ export class ExecutorAgent extends TypedEventEmitter {
    *    upstream, and the BackgroundTaskRunner stayed in 'running'
    *    state for a long time after the user clicked Stop.
    */
-  stop(): void {
+  stop(reason: 'user' | 'shutdown' = 'user'): void {
     this.stopped = true;
     this.stopReason = 'cancelled';
+    this.lastStopOrigin = reason;
+    // Abort in-flight LLM streams immediately. Without this, a
+    // reasoning-model call (1-7 min wall-clock for DeepSeek-R /
+    // o-series / Gemini-thinking) keeps running until natural
+    // completion or its internal 200s self-timeout, making the
+    // user-facing Cancel feel broken. The runAbortController.signal
+    // is threaded into every generateForNode LLM call.
+    this.runAbortController.abort();
 
     // Channel 1 — server-side interrupt with a 5s timeout race so a
     // hanging RPC doesn't keep the cancel pending indefinitely.
@@ -954,9 +1006,12 @@ export class ExecutorAgent extends TypedEventEmitter {
         // Channel 2 — close any in-flight WS so awaiters bail
         // immediately. Synchronous; doesn't depend on the server
         // responding to the interrupt.
-        const closed = abortAllInFlightWorkflows('agent.stop()');
+        // Reason marker (`:user` / `:shutdown`) ends up in failed-node
+        // error strings so auto-recovery and UX can distinguish them
+        // from real failures.
+        const closed = abortAllInFlightWorkflows(`agent.stop():${reason}`);
         if (closed > 0) {
-          this.log(`[stop] aborted ${closed} in-flight ComfyUI WebSocket(s)`);
+          this.log(`[stop:${reason}] aborted ${closed} in-flight ComfyUI WebSocket(s)`);
         }
       },
     ).catch(() => {});
@@ -979,20 +1034,6 @@ export class ExecutorAgent extends TypedEventEmitter {
     this.redoOnlyNodes = ids === null ? null : new Set(ids);
   }
 
-  /**
-   * Live-toggle vision-LLM calls. The next `executeShotImage` shot
-   * picks up the new value at the `if (this.vlmDisabled)` gate.
-   * Used by ConversationManager when the user flips the VLM header
-   * toggle mid-run — switching off mid-run skips review for any
-   * subsequent shot but doesn't interrupt the in-flight one.
-   *
-   * Notes on layering: the runtime constraint
-   * `piOversight && vlmJudge` is computed by ConversationManager;
-   * this setter only sees the resolved boolean.
-   */
-  setVLMEnabled(enabled: boolean): void {
-    this.vlmDisabled = !enabled;
-  }
 
   /**
    * Set or clear the `/run-to <stage>` gate at runtime. Pass a stage name
@@ -1133,7 +1174,12 @@ export class ExecutorAgent extends TypedEventEmitter {
       return invalidated;
     }
 
-    // Prompt scope: invalidate shot_image_prompt + shot_image together, no cascade
+    // Prompt scope: invalidate shot_image_prompt + shot_image, cascade to
+    // already-completed downstream (e.g. shot_video, final_video). Without
+    // the cascade, a prompt re-roll regenerates the image but the existing
+    // shot_video stays `completed` — silently baked from the OLD image.
+    // cascadeOnlyCompleted leaves pending downstream alone; they'll pick up
+    // the new image when their turn comes.
     if (scope === 'prompt') {
       const shotImageNodeId = nodeId.startsWith('shot_image_prompt:')
         ? nodeId.replace('shot_image_prompt:', 'shot_image:')
@@ -1142,7 +1188,7 @@ export class ExecutorAgent extends TypedEventEmitter {
 
       const invalidated: ExecutionNode[] = [];
       invalidated.push(...this.executor.invalidateNode(promptNodeId, { cascade: false }));
-      invalidated.push(...this.executor.invalidateNode(shotImageNodeId, { cascade: false }));
+      invalidated.push(...this.executor.invalidateNode(shotImageNodeId, { cascade: true, cascadeOnlyCompleted: true }));
       if (invalidated.length === 0) {
         this.log(`Redo prompt: nodes not found for '${shotImageNodeId}'`);
         return [];
@@ -1708,8 +1754,21 @@ export class ExecutorAgent extends TypedEventEmitter {
       }
 
       const actualTimelineSegmentIds = this.getSceneTimelineSegmentIds(sceneId);
+      // Post-condition: timeline shot segments for this scene must be the
+      // EXACT set the new plan expects — not a superset. The original
+      // check only required every expected ID to be present, which let
+      // orphan segments from a prior larger plan survive (the 2026-05-19
+      // bug: Stage A re-planned 8 → 4, timeline kept all 8, final video
+      // stitched the orphans). Asserting exact-set match catches any
+      // future drift at the source instead of in the final assembly.
+      const expectedSet = new Set(parsed.expectedTimelineSegmentIds);
+      const orphanSegmentIds = actualTimelineSegmentIds.filter(id => !expectedSet.has(id));
+      const missingSegmentIds = parsed.expectedTimelineSegmentIds.filter(
+        id => !actualTimelineSegmentIds.includes(id),
+      );
       const timelineSatisfied =
-        parsed.expectedTimelineSegmentIds.every(id => actualTimelineSegmentIds.includes(id))
+        missingSegmentIds.length === 0
+        && orphanSegmentIds.length === 0
         && !actualTimelineSegmentIds.includes(sceneId);
       return {
         sceneId,
@@ -1721,7 +1780,9 @@ export class ExecutorAgent extends TypedEventEmitter {
         timelineSatisfied,
         success: graphSatisfied && timelineSatisfied,
         failureReason: graphSatisfied
-          ? (timelineSatisfied ? undefined : `timeline_postcondition_failed:${parsed.expectedTimelineSegmentIds.filter(id => !actualTimelineSegmentIds.includes(id)).join(',') || sceneId}`)
+          ? (timelineSatisfied
+              ? undefined
+              : `timeline_postcondition_failed:missing=${missingSegmentIds.join(',') || '-'} orphans=${orphanSegmentIds.join(',') || '-'}`)
           : 'graph_postcondition_failed',
         outputPath: parsed.outputPath,
       };
@@ -1808,6 +1869,306 @@ export class ExecutorAgent extends TypedEventEmitter {
       message,
     });
     throw new Error(message);
+  }
+
+  /**
+   * Prune per-shot graph children whose shotNumber is no longer in the
+   * scene's `scene_shot_plan` output. Returns `true` if any node was
+   * removed so the caller can re-run dependent passes.
+   *
+   * Pure decision logic (which shots are stale) lives in
+   * `reconcileShotPlan.ts`; this method does the file read and graph
+   * mutation. The set of per-shot types we remove is the full chain
+   * (`shot_breakdown` through `shot_video`) — leaving a downstream
+   * orphan would tie the assembler in knots, the same way the bug
+   * this fixes did.
+   *
+   * Plans that GROW (new shotNumbers that aren't in the graph yet)
+   * are detected too, but only logged for now — the executor's
+   * existing "spawn missing per-shot chain" path requires the parent
+   * collection node, which doesn't exist after the first expansion.
+   * Emit a notification so the user can redo from "Scene breakdowns"
+   * (one step deeper) to force a fresh expansion if needed.
+   */
+  private reconcilePerShotChildrenForScene(
+    planNode: ExecutionNode,
+    sceneId: string,
+  ): boolean {
+    if (!planNode.outputPath) return false;
+    let planJson: unknown;
+    try {
+      const fullPath = join(this.config.projectDir, planNode.outputPath);
+      let content = readFileSync(fullPath, 'utf-8').trim();
+      if (content.startsWith('```')) {
+        content = content.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      planJson = JSON.parse(content);
+    } catch {
+      // Plan unreadable / malformed — leave the graph alone. The
+      // normal expand path will report the error when it tries.
+      return false;
+    }
+    const planShotNums = planShotNumbersFromJson(planJson);
+    if (planShotNums.size === 0) return false;
+
+    const childPrefix = `${sceneId}_shot_`;
+    const graphShotNums = new Set<number>();
+    for (const candidate of this.executor.getAllNodes()) {
+      if (candidate.typeId !== 'shot_breakdown') continue;
+      if (!candidate.itemId?.startsWith(childPrefix)) continue;
+      const m = candidate.itemId.match(/_shot_(\d+)$/);
+      if (!m || !m[1]) continue;
+      graphShotNums.add(parseInt(m[1], 10));
+    }
+    if (graphShotNums.size === 0) {
+      // No per-shot children yet; the regular expansion path will
+      // create them. Nothing to reconcile.
+      return false;
+    }
+
+    const diff = diffShotPlanAgainstGraph(planShotNums, graphShotNums);
+    if (diff.stale.length === 0 && diff.missing.length === 0) {
+      return false;
+    }
+
+    let mutated = false;
+    for (const shotNum of diff.stale) {
+      const removedIds: string[] = [];
+      for (const nodeId of perShotNodeIds(sceneId, shotNum)) {
+        if (this.executor.removeNode(nodeId)) removedIds.push(nodeId);
+      }
+      if (removedIds.length > 0) {
+        mutated = true;
+        this.log(
+          `  Pruned ${removedIds.length} stale per-shot node(s) for ${sceneId} shot ${shotNum} (not in updated plan): ${removedIds.join(', ')}`,
+        );
+        this.emit({
+          type: 'notification',
+          level: 'info',
+          message: `Pruned shot ${shotNum} of ${sceneId} — the updated plan no longer includes it.`,
+        });
+      }
+    }
+
+    if (diff.missing.length > 0) {
+      // Plan grew — the new plan introduces shotNumbers that have no
+      // per-shot graph chain yet. Spawn each missing shot's full chain
+      // (shot_breakdown, motion, image_prompt, image, last_frame,
+      // video) and wire it into the scene's existing parents. Then
+      // reset scene_video_prompt:scene_N to pending so the assembler
+      // re-runs once the new shot_breakdown nodes complete.
+      const planShotPlan = (planJson as { shotPlan?: Array<{ shotNumber?: number; oneLineSummary?: string }> }).shotPlan ?? [];
+      let spawnedAny = false;
+      for (const shotNum of diff.missing) {
+        const entry = planShotPlan.find((p) => p?.shotNumber === shotNum);
+        const summary = typeof entry?.oneLineSummary === 'string'
+          ? entry.oneLineSummary.substring(0, 60)
+          : `shot ${shotNum}`;
+        const added = this.spawnMissingPerShotChain(sceneId, shotNum, summary);
+        if (added.length > 0) {
+          spawnedAny = true;
+          mutated = true;
+          this.log(
+            `  Spawned per-shot chain for ${sceneId} shot ${shotNum}: ${added.join(', ')}`,
+          );
+          this.emit({
+            type: 'notification',
+            level: 'info',
+            message: `Spawned shot ${shotNum} of ${sceneId} — the updated plan added it.`,
+          });
+        }
+      }
+      // The assembler likely failed because of the missing shots
+      // (status='failed' after exhausting retries). Reset it back to
+      // pending so the executor schedules a fresh assembly once the
+      // new shot_breakdown deps complete. Mirror the same flip on
+      // scene_shot_plan's downstream cascade so anything else that
+      // looked at the failed state can recover too.
+      if (spawnedAny) {
+        const svp = this.executor.getNode(`scene_video_prompt:${sceneId}`);
+        if (svp && (svp.status === 'failed' || svp.status === 'skipped')) {
+          svp.status = 'pending';
+          this.log(`  Reset ${svp.id} from ${svp.status} to pending so the assembler retries with new shot deps`);
+        }
+      }
+    }
+
+    return mutated;
+  }
+
+  /**
+   * Build the full per-shot graph chain for ONE shot (six nodes:
+   * shot_breakdown, shot_motion_directive, shot_image_prompt,
+   * shot_image, shot_image_last_frame, shot_video). Wires deps both
+   * directions. Skips any node that already exists (idempotent).
+   *
+   * Used by `reconcilePerShotChildrenForScene` when the updated plan
+   * introduces a shotNumber that has no graph chain yet — after the
+   * first per-scene expansion, the parent collection nodes are gone
+   * and there's no longer a single seam where the executor would
+   * spawn them. This is that seam.
+   *
+   * Mirrors the inline chain-creation in `expandPendingCollections`
+   * (~line 4209), reusing the same `addShotImageNodes` helper for the
+   * image-pair so anchor logic stays in one place.
+   *
+   * Returns the ids of the nodes actually added (in spawn order).
+   */
+  private spawnMissingPerShotChain(
+    sceneId: string,
+    shotNumber: number,
+    shotName: string,
+  ): string[] {
+    const itemId = `${sceneId}_shot_${shotNumber}`;
+    const added: string[] = [];
+
+    const wireUpstream = (childId: string, parentIds: string[]) => {
+      for (const parentId of parentIds) {
+        const parent = this.executor.getNode(parentId);
+        if (parent && !parent.dependents.includes(childId)) {
+          parent.dependents.push(childId);
+        }
+      }
+    };
+
+    // 1. shot_breakdown (Stage B LLM call) — deps from template.
+    const shotBreakdownId = `shot_breakdown:${itemId}`;
+    if (!this.executor.getNode(shotBreakdownId)) {
+      const deps = [`scene_shot_plan:${sceneId}`, 'world_style'];
+      this.executor.addNode({
+        id: shotBreakdownId,
+        typeId: 'shot_breakdown',
+        itemId,
+        status: 'pending',
+        displayName: `Shot Breakdown: ${shotName}`,
+        isExpensive: false,
+        isCollection: false,
+        dependencies: deps,
+        dependents: [],
+      });
+      wireUpstream(shotBreakdownId, deps);
+      added.push(shotBreakdownId);
+    }
+
+    // 2. shot_motion_directive — depends on shot_breakdown.
+    const motionId = `shot_motion_directive:${itemId}`;
+    if (!this.executor.getNode(motionId)) {
+      const deps = [shotBreakdownId];
+      this.executor.addNode({
+        id: motionId,
+        typeId: 'shot_motion_directive',
+        itemId,
+        status: 'pending',
+        displayName: `Shot Motion: ${shotName}`,
+        isExpensive: false,
+        isCollection: false,
+        dependencies: deps,
+        dependents: [],
+      });
+      wireUpstream(motionId, deps);
+      added.push(motionId);
+    }
+
+    // 3. shot_image_prompt — depends on scene_video_prompt + world_style
+    //    only. Reference images (character_image, setting_image) are
+    //    resolved by refId at ComfyUI generation time, NOT at prompt
+    //    generation time — see narrative.ts shotImagePromptArtifact
+    //    deps for the canonical wiring. Including character/setting
+    //    image deps here was wrong and produced a serial-mode deadlock:
+    //    shot_image_prompt is `content`, character/setting images are
+    //    `visual_ref` (media), so the executor's "content first, then
+    //    media" gate refuses to start the media until content drains —
+    //    but content was waiting on media → no-progress.
+    const shotImagePromptId = `shot_image_prompt:${itemId}`;
+    if (!this.executor.getNode(shotImagePromptId)) {
+      const deps = [
+        `scene_video_prompt:${sceneId}`,
+        'world_style',
+      ];
+      this.executor.addNode({
+        id: shotImagePromptId,
+        typeId: 'shot_image_prompt',
+        itemId,
+        status: 'pending',
+        displayName: `Shot Composition: ${shotName}`,
+        isExpensive: false,
+        isCollection: false,
+        dependencies: deps,
+        dependents: [],
+      });
+      wireUpstream(shotImagePromptId, deps);
+      added.push(shotImagePromptId);
+    }
+
+    // 4 + 5. shot_image + shot_image_last_frame via the shared helper
+    //   (handles firstFrameAnchor → prior-frame dep). We don't know
+    //   the anchor yet (assembler stamps it later), so pass null —
+    //   the helper falls back to chaining on the previous shot's
+    //   first frame when present.
+    const shotImageId = `shot_image:${itemId}`;
+    if (!this.executor.getNode(shotImageId)) {
+      const allCharImageIds = this.executor.getAllNodes()
+        .filter((n) => n.typeId === 'character_image' && n.itemId)
+        .map((n) => n.id);
+      const allSettingImageIds = this.executor.getAllNodes()
+        .filter((n) => n.typeId === 'setting_image' && n.itemId)
+        .map((n) => n.id);
+      let prevShotImageId: string | null = null;
+      for (let prev = shotNumber - 1; prev >= 1; prev -= 1) {
+        const candidate = `shot_image:${sceneId}_shot_${prev}`;
+        if (this.executor.getNode(candidate)) {
+          prevShotImageId = candidate;
+          break;
+        }
+      }
+      addShotImageNodes({
+        executor: this.executor,
+        shot: { itemId, name: shotName },
+        allCharImageIds,
+        allSettingImageIds,
+        prevShotImageId,
+        firstFrameAnchor: null,
+        sceneId,
+      });
+      added.push(shotImageId, `shot_image_last_frame:${itemId}`);
+    }
+
+    // 6. shot_video — depends on shot_image_last_frame + motion.
+    //    Skip the V2V prev-shot edge: it's only added on initial
+    //    expansion when useV2V is on; reconstructing it here without
+    //    re-running the whole scene's chain risks cascade-invalidating
+    //    sibling shots. The user can re-run the scene to pick up
+    //    full V2V chaining if they want it.
+    const shotVideoId = `shot_video:${itemId}`;
+    if (!this.executor.getNode(shotVideoId)) {
+      const deps = [`shot_image_last_frame:${itemId}`, motionId];
+      this.executor.addNode({
+        id: shotVideoId,
+        typeId: 'shot_video',
+        itemId,
+        status: 'pending',
+        displayName: `Shot Videos: ${shotName}`,
+        isExpensive: true,
+        isCollection: false,
+        dependencies: deps,
+        dependents: [],
+      });
+      wireUpstream(shotVideoId, deps);
+      added.push(shotVideoId);
+    }
+
+    // Wire the new shot_breakdown into scene_video_prompt's deps so
+    // the assembler waits on it. (scene_video_prompt is a single
+    // per-scene node — it aggregates ALL shot_breakdowns for the
+    // scene.) Skip if already wired.
+    const svp = this.executor.getNode(`scene_video_prompt:${sceneId}`);
+    if (svp && !svp.dependencies.includes(shotBreakdownId)) {
+      svp.dependencies.push(shotBreakdownId);
+      const sb = this.executor.getNode(shotBreakdownId);
+      if (sb && !sb.dependents.includes(svp.id)) sb.dependents.push(svp.id);
+    }
+
+    return added;
   }
 
   private reconcileCompletedSceneTimelineSegments(): void {
@@ -1910,18 +2271,28 @@ export class ExecutorAgent extends TypedEventEmitter {
    * actual execution is driven by the graph.
    */
   async run(_task: string, _userResponse?: string): Promise<GenericAgentResult> {
-    // Handle /reset command: run the reset script, reload state, then continue execution
+    // Handle /reset command: run the in-process reset, reload state, then
+    // continue execution. Was previously a subprocess shell-out to
+    // `npx tsx scripts/reset-project.ts`, which only works in dev. Now
+    // calls `resetProjectStage` directly so the path is identical in
+    // packaged builds.
     const resetMatch = _task.match(/^\/reset\s+(\S+)\s+(\S+)/);
     if (resetMatch) {
       const [, projectName, stage] = resetMatch;
       this.log(`Handling /reset: project=${projectName}, stage=${stage}`);
       try {
-        const { execSync } = await import('child_process');
+        const { resetProjectStage } = await import('../../server/runners/resetProjectStage.js');
         const projectRoot = dirname(this.config.projectDir); // parent of .dhee dir
-        const scriptPath = join(projectRoot, 'scripts', 'reset-project.ts');
-        const cmd = `npx tsx "${scriptPath}" "${projectName}" "${stage}"`;
-        this.log(`Running: ${cmd} (cwd: ${projectRoot})`);
-        const output = execSync(cmd, { cwd: projectRoot, encoding: 'utf-8', timeout: 30000 });
+        const logLines: string[] = [];
+        const result = resetProjectStage({
+          basePath: projectRoot,
+          projectName: projectName!,
+          stage: stage!,
+          onLog: (line) => logLines.push(line),
+        });
+        const output =
+          `Reset ${result.resetCount} type-level + ${result.removedCount} per-item + ${result.schemaCleared} schema slot(s)\n` +
+          logLines.join('\n');
         this.log(`Reset output:\n${output}`);
 
         // Reload project.json and executor state
@@ -1970,6 +2341,20 @@ export class ExecutorAgent extends TypedEventEmitter {
 
     this.running = true;
     this.stopped = false;
+    // Fresh AbortController per run — discard any aborted signal from
+    // a prior cancelled run so LLM calls in this run aren't aborted
+    // before they start.
+    this.runAbortController = new AbortController();
+
+    // Bug 16 / Bug 17: auto-recover from prior abort-induced failures.
+    // A user Stop click or a desktop process restart leaves nodes in
+    // `status='failed'` with abort-flavored errors. On the next run,
+    // those should resume cleanly rather than requiring manual
+    // invalidation. Real (non-abort) failures are left alone.
+    const recovered = this.executor.resetAbortedNodes();
+    if (recovered.length > 0) {
+      this.log(`Auto-recovered ${recovered.length} abort-failed nodes: ${recovered.join(', ')}`);
+    }
 
     // Load existing timeline from disk (survives session resume / server restart)
     if (!this.timeline) {
@@ -2579,6 +2964,16 @@ export class ExecutorAgent extends TypedEventEmitter {
                 return;
               }
               finalOutputPath = essenceResult;
+            } else if (node.typeId === 'scene_video_prompt') {
+              // Stage C of the hierarchical breakdown — deterministic
+              // assembly of scene_shot_plan + N shot_breakdown outputs into
+              // the existing sceneVideoPromptSchema shape. No LLM call.
+              const assemblyResult = await this.executeSceneVideoPromptAssembly(node, toolCallId, agentName);
+              if (!assemblyResult) {
+                // markFailed already called inside the helper.
+                return;
+              }
+              finalOutputPath = assemblyResult;
             } else {
               // Non-deterministic node — needs LLM (or skip-if-exists)
               // 1. Resolve inputs
@@ -2680,9 +3075,28 @@ export class ExecutorAgent extends TypedEventEmitter {
                 }
               }
 
-              // Generate content via LLM (pure completion, no tools)
+              // Generate content via LLM (pure completion, no tools).
+              // Bug 13: one-shot retry for empty LLM responses. Transient
+              // model-API hiccups (rate limit recovery, brief content-policy
+              // false positive, network blip mid-stream) commonly return
+              // 0 chars. Before the empty-content guard hard-fails the
+              // node and forces the user to manually invalidate, give the
+              // LLM exactly one more chance — same prompt, fresh call.
+              // If the retry also returns empty, fail-fast as before.
               this.log(`  Calling LLM...`);
-              let content = await this.generateForNode(node, system, user, toolCallId, toolName);
+              let content = await retryOnEmptyLLMResponse(
+                () => this.generateForNode(node, system, user, toolCallId, toolName),
+                {
+                  log: (m) => this.log(`  ${m}`),
+                  onRetry: () => {
+                    this.emit({
+                      type: 'notification',
+                      level: 'info',
+                      message: `LLM returned empty response for ${node.displayName} — retrying once.`,
+                    });
+                  },
+                },
+              );
               this.log(`  LLM returned ${content.length} chars`);
 
               // Motion-directive soft-warn: scan for ambiguous speaker
@@ -2697,14 +3111,28 @@ export class ExecutorAgent extends TypedEventEmitter {
               }
 
               // Validate JSON output for nodes that require it
-              const jsonValidatedTypes = ['scene_video_prompt', 'shot_image_prompt', 'character_image', 'setting_image'];
+              const jsonValidatedTypes = ['scene_shot_plan', 'shot_breakdown', 'scene_video_prompt', 'shot_image_prompt', 'character_image', 'setting_image'];
               if (jsonValidatedTypes.includes(node.typeId)) {
                 const validation = this.validateJsonOutput(content, node);
                 if (validation.valid && validation.normalizedContent) {
                   content = validation.normalizedContent;
                 }
                 if (!validation.valid) {
-                  this.log(`  JSON validation failed: ${validation.error} — asking LLM to fix...`);
+                  // Classify before routing. Structural errors (bad JSON
+                  // syntax, missing fields, type mismatches) get the
+                  // legacy json_repair → retry path — json_repair can
+                  // plausibly fix syntax-level issues. Semantic errors
+                  // (the JSON parses fine but violates a project rule —
+                  // hallucinated character refs, OTS-with-single-char,
+                  // shotNumber mismatch) skip json_repair entirely
+                  // because it can't help: the syntax was already valid.
+                  // Instead they go directly to a targeted retry with
+                  // the actual validation message injected into the
+                  // system prompt as corrective guidance.
+                  const errorClass = classifyValidationError(validation.error ?? '');
+                  let currentError = validation.error ?? '';
+                  let recovered = false;
+                  this.log(`  JSON validation failed (${errorClass}): ${currentError}`);
                   // Persist the first broken attempt to the .failed sidecar
                   // immediately, so it's visible in the project tree while
                   // the repair / retry path runs. If repair or retry
@@ -2721,67 +3149,88 @@ export class ExecutorAgent extends TypedEventEmitter {
                   this.emit({
                     type: 'notification',
                     level: 'warning',
-                    message: `Invalid JSON from LLM for ${node.displayName} — attempting repair`,
+                    message: errorClass === 'structural'
+                      ? `Invalid JSON from LLM for ${node.displayName} — attempting repair`
+                      : `Output rejected for ${node.displayName} — retrying with targeted guidance`,
                   });
 
-                  // Close the original tool card as error
+                  // Close the original tool card as error.
                   this.emit({
                     type: 'tool_result',
                     toolCallId,
                     toolName,
-                    result: { status: 'error', error: `Invalid JSON: ${validation.error}` },
+                    result: { status: 'error', error: `Invalid JSON: ${currentError}` },
                     agentName,
                     isError: true,
                   });
 
-                  // Step 1: Ask the LLM to fix the broken JSON — new card
-                  const repairCallId = `repair_${node.id}_${Date.now()}`;
-                  this.emit({
-                    type: 'tool_call',
-                    toolCallId: repairCallId,
-                    toolName: 'json_repair',
-                    arguments: {
-                      item: node.displayName,
-                      error: validation.error,
-                      model: this.modelFor('utility.json_repair'),
-                    },
-                    agentName,
-                  });
-                  const fixPrompt = `The following JSON output has an error. Fix it and return ONLY the corrected valid JSON — no explanation, no markdown fences, no extra text.\n\nError: ${validation.error}\n\nBroken JSON:\n${content.substring(0, 8000)}`;
-                  const fixedContent = await this.generateForNode(
-                    node,
-                    'You are a JSON repair tool. Return ONLY valid JSON. No markdown, no explanation.',
-                    fixPrompt,
-                    repairCallId,
-                    'json_repair',
-                    'utility.json_repair',
-                  );
-                  const fixValidation = this.validateJsonOutput(fixedContent, node);
-                  if (fixValidation.valid) {
-                    content = fixValidation.normalizedContent ?? fixedContent;
-                    this.log(`  LLM JSON repair succeeded`);
-                    // Repair worked — drop the .failed sidecar we wrote
-                    // above so the project tree doesn't carry a stale
-                    // "broken" marker next to the now-good artefact.
-                    clearFailedAttempt(node, this.config.projectDir, this.config.template);
+                  // Step 1 (structural only): try json_repair. Skipped
+                  // for semantic AND truncated failures — repair can't
+                  // fix either: semantic JSON is already valid syntax,
+                  // and truncated input has missing content that
+                  // repair would AUTHOR as filler (we hit this exact
+                  // bug on Stage A when "Unexpected end of JSON" was
+                  // classified as structural and repair produced a
+                  // stub plan with "Default scene"/"Default shot.").
+                  // Both classes fall through to the full retry which
+                  // has the original scene-script + available_refs +
+                  // output_contract context, so it can author content
+                  // — not just patch syntax.
+                  if (errorClass === 'structural') {
+                    const repairCallId = `repair_${node.id}_${Date.now()}`;
                     this.emit({
-                      type: 'tool_result',
+                      type: 'tool_call',
                       toolCallId: repairCallId,
                       toolName: 'json_repair',
-                      result: { status: 'completed' },
+                      arguments: {
+                        item: node.displayName,
+                        error: currentError,
+                        model: this.modelFor('utility.json_repair'),
+                      },
                       agentName,
                     });
-                  } else {
-                    this.log(`  LLM repair failed: ${fixValidation.error} — full retry...`);
-                    this.emit({
-                      type: 'tool_result',
-                      toolCallId: repairCallId,
-                      toolName: 'json_repair',
-                      result: { status: 'error', error: fixValidation.error },
-                      agentName,
-                      isError: true,
-                    });
-                    // Step 2: Fall back to full regeneration — new card
+                    const fixPrompt = `The following JSON output has an error. Fix it and return ONLY the corrected valid JSON — no explanation, no markdown fences, no extra text.\n\nError: ${currentError}\n\nBroken JSON:\n${content.substring(0, 8000)}`;
+                    const fixedContent = await this.generateForNode(
+                      node,
+                      'You are a JSON repair tool. Return ONLY valid JSON. No markdown, no explanation.',
+                      fixPrompt,
+                      repairCallId,
+                      'json_repair',
+                      'utility.json_repair',
+                    );
+                    const fixValidation = this.validateJsonOutput(fixedContent, node);
+                    if (fixValidation.valid) {
+                      content = fixValidation.normalizedContent ?? fixedContent;
+                      recovered = true;
+                      this.log(`  LLM JSON repair succeeded`);
+                      this.emit({
+                        type: 'tool_result',
+                        toolCallId: repairCallId,
+                        toolName: 'json_repair',
+                        result: { status: 'completed' },
+                        agentName,
+                      });
+                    } else {
+                      this.log(`  LLM repair failed: ${fixValidation.error} — full retry...`);
+                      this.emit({
+                        type: 'tool_result',
+                        toolCallId: repairCallId,
+                        toolName: 'json_repair',
+                        result: { status: 'error', error: fixValidation.error },
+                        agentName,
+                        isError: true,
+                      });
+                      // Use the most recent error as the retry's
+                      // corrective guidance — it reflects the current
+                      // state of the content after one repair attempt.
+                      currentError = fixValidation.error ?? currentError;
+                    }
+                  }
+
+                  // Step 2: full retry. Fires when:
+                  //   - semantic error (skipped step 1), or
+                  //   - structural error AND step 1's repair also failed.
+                  if (!recovered) {
                     const retryCallId = `retry_${node.id}_${Date.now()}`;
                     this.emit({
                       type: 'tool_call',
@@ -2790,13 +3239,22 @@ export class ExecutorAgent extends TypedEventEmitter {
                       arguments: {
                         item: node.displayName,
                         retry: true,
+                        errorClass,
                         model: this.modelFor(this.purposeForNode(node)),
                       },
                       agentName,
                     });
+                    // Class-aware retry guidance: structural retries get
+                    // the generic "must be valid JSON" reminder; semantic
+                    // retries get the actual validation message injected
+                    // so the LLM has a specific thing to correct.
+                    const retrySystem = system + buildRetrySystemSuffix(
+                      errorClass,
+                      currentError,
+                    );
                     const retryContent = await this.generateForNode(
                       node,
-                      system + '\n\nCRITICAL: Your output MUST be valid JSON. Do not include markdown, backticks, or any text outside the JSON object.',
+                      retrySystem,
                       user,
                       retryCallId,
                       toolName,
@@ -2835,6 +3293,123 @@ export class ExecutorAgent extends TypedEventEmitter {
                       return;
                     }
                   }
+                }
+              }
+
+              // Empty-content guard. The JSON validator above only
+              // fires for nodes in `jsonValidatedTypes`; plain-text
+              // nodes (shot_motion_directive, world_style, story,
+              // etc.) had no post-LLM guard at all. Pre-fix, an empty
+              // LLM response sailed straight through `writeOutput`,
+              // wrote 0 bytes, and got marked `completed` — the
+              // 2026-05-19 Soft Seinen scene_2_shot_2 incident, where
+              // the motion-directive LLM returned nothing, the file
+              // was 0 bytes, the downstream `shot_video` reader's
+              // JSON.parse silently fell back to empty string, and
+              // LTX-V produced a 5-second video with no motion
+              // directive. Fail fast so the next dispatch (or a
+              // Redo-from-menu cycle) cleanly regenerates instead of
+              // shipping a broken shot.
+              const empty = checkEmptyContent(content);
+              if (empty.isEmpty) {
+                const reason = buildEmptyContentFailureReason(node.id, empty);
+                this.log(`  [empty-content-guard] ${reason}`);
+                this.emit({
+                  type: 'notification',
+                  level: 'error',
+                  message: `Empty LLM output for ${node.displayName} — node marked failed (not writing 0-byte file).`,
+                });
+                this.emit({
+                  type: 'tool_result',
+                  toolCallId,
+                  toolName,
+                  result: { status: 'failed', error: reason },
+                  agentName,
+                });
+                this.executor.markFailed(node.id, reason);
+                this.emitTodoUpdate();
+                return;
+              }
+
+              // shot_motion_directive uses the LTX-V official prompt-
+              // enhancer style guide, which yields plain text starting
+              // with "Style: realistic - …". The on-disk contract is a
+              // JSON object `{ "motionDirective": "<text>" }` — the
+              // PromptsView panel parses motion files as JSON and the
+              // downstream readers at ExecutorAgent.ts:5901/7594/7956
+              // expect `motionDirective` as a string field. Wrap once
+              // here so the writer-side contract is deterministic
+              // regardless of what the LLM produced. If the LLM already
+              // emitted valid JSON with a motionDirective field, we
+              // re-canonicalize the indentation but otherwise pass it
+              // through.
+              if (node.typeId === 'shot_motion_directive') {
+                const trimmed = content.trim();
+                let directive = trimmed;
+                if (trimmed.startsWith('{')) {
+                  try {
+                    const parsed = JSON.parse(trimmed) as { motionDirective?: unknown };
+                    if (typeof parsed?.motionDirective === 'string') {
+                      directive = parsed.motionDirective;
+                    }
+                  } catch {
+                    // LLM returned text starting with '{' but not valid
+                    // JSON — treat as raw text and let the wrap fix it.
+                  }
+                }
+                content = JSON.stringify({ motionDirective: directive }, null, 2);
+              }
+
+              // shot_image_prompt — turn 2 ref-extraction refinement.
+              //
+              // Turn 1 (the generateForNode call above) produces the JSON
+              // including an LLM-emitted `references[]` array. That array
+              // is unreliable: the LLM commits to refs before it has
+              // authored the prose, so OTS / dialogue shots end up with
+              // wrong Side A/B assignments and identical backgrounds.
+              //
+              // Turn 2 takes the prose the LLM just wrote, hands it the
+              // current existing-refs menu, and asks for a structured
+              // refined `references[]`. This is a SECOND USER TURN on
+              // the SAME conversation — turn 1's response stays in the
+              // messages array as `assistant` so the LLM has its own
+              // prose in context when extracting refs.
+              //
+              // Side A/B falls out naturally: the LLM sees its own
+              // framing language ("from over Ruby's shoulder…") and
+              // assigns Ruby='B', Angel='A' for that shot. The reverse
+              // shot's prose gets the mirrored assignment.
+              //
+              // Failure mode: any error in turn 2 falls back to keeping
+              // turn 1's refs as-is. The pipeline never blocks on the
+              // refinement.
+              if (node.typeId === 'shot_image_prompt') {
+                try {
+                  const refined = await this.refineShotImageRefs(
+                    node, system, user, content, toolCallId, toolName,
+                  );
+                  if (refined) {
+                    content = refined;
+                    // Re-run the deterministic post-pass on the refined
+                    // content. validateJsonOutput's manifest-rebuild step
+                    // (lines ~5852-5858) reads each frame's `references`
+                    // and prepends a fresh `<Label> from image N.` line,
+                    // stripping any stale inline tokens. Without this,
+                    // the manifest baked in by turn-1 — built from turn-1's
+                    // possibly incomplete refs — survives and the setting
+                    // (slot 1) gets silently dropped from Klein's
+                    // conditioning even though `references[]` lists it.
+                    // See 2026-05-20 Ruby V3 s1s1 ("Ruby from image 1."
+                    // with no setting line) for the symptom.
+                    const postValidation = this.validateJsonOutput(content, node);
+                    if (postValidation.valid && postValidation.normalizedContent) {
+                      content = postValidation.normalizedContent;
+                    }
+                  }
+                } catch (err) {
+                  this.log(
+                    `  [shot_image_prompt turn-2] refinement skipped: ${(err as Error).message}`,
+                  );
                 }
               }
 
@@ -3127,10 +3702,12 @@ export class ExecutorAgent extends TypedEventEmitter {
     const effectiveCategory = node.typeId === 'shot_image_prompt' ? 'visual_ref' : category;
 
     let systemPrompt: string;
-    if (node.typeId === 'scene_video_prompt') {
-      // Minimal system prompt — all rules and field definitions are in the guide
-      // (scene_breakdown_guide.md) which autoresearch optimizes end-to-end
-      systemPrompt = `You are a cinematic shot planner. Output ONLY valid JSON.`;
+    if (node.typeId === 'scene_shot_plan') {
+      // Stage A — lightweight shot plan. All rules in scene_breakdown_plan_guide.md.
+      systemPrompt = `You are a cinematic shot planner. Plan the SHOT LIST for this scene — number of shots, ordering, purpose, duration, and a one-line summary per shot. Output ONLY valid JSON.`;
+    } else if (node.typeId === 'shot_breakdown') {
+      // Stage B — single-shot expansion. All rules in scene_breakdown_shot_guide.md.
+      systemPrompt = `You are a cinematographer expanding a single shot from a pre-approved scene plan. Output ONLY valid JSON for ONE shot object.`;
     } else if (node.typeId === 'shot_image_prompt') {
       // Minimal system prompt — all rules and JSON structure are in the guide
       // (shot_composition_guide.md) which autoresearch optimizes end-to-end
@@ -3141,7 +3718,7 @@ export class ExecutorAgent extends TypedEventEmitter {
 
     // Inject guides/skills for relevant categories
     const loadedSkills: string[] = [];
-    const needsSkills = effectiveCategory === 'visual_ref' || effectiveCategory === 'clip' || effectiveCategory === 'segment' || node.typeId === 'plot' || node.typeId === 'story' || node.typeId === 'scene_video_prompt' || node.typeId === 'world_style' || node.typeId === 'shot_motion_directive';
+    const needsSkills = effectiveCategory === 'visual_ref' || effectiveCategory === 'clip' || effectiveCategory === 'segment' || node.typeId === 'plot' || node.typeId === 'story' || node.typeId === 'scene_shot_plan' || node.typeId === 'shot_breakdown' || node.typeId === 'world_style' || node.typeId === 'shot_motion_directive';
     if (needsSkills) {
       const skills = this.loadSkillsForNode(node);
       if (skills.content) {
@@ -3175,8 +3752,12 @@ export class ExecutorAgent extends TypedEventEmitter {
       parts.push(`**Target video duration:** ${duration} seconds (${Math.floor(duration / 60)}m ${duration % 60}s)`);
     }
 
-    // Scene-level: inject this scene's duration allocation
-    if (node.typeId === 'scene' || node.typeId === 'scene_video_prompt') {
+    // Scene-level: inject this scene's duration allocation. The plan stage
+    // (scene_shot_plan) needs the same shot-count cap that the legacy
+    // single-call scene_video_prompt got — it's the stage that decides
+    // shot count, so the cap MUST land here. shot_breakdown gets it too
+    // for context (e.g. so a shot can self-check its duration).
+    if (node.typeId === 'scene' || node.typeId === 'scene_shot_plan' || node.typeId === 'shot_breakdown') {
       if (perSceneDuration > 0) {
         // HARD shot-count cap derived from the scene's duration budget. Each
         // shot is at least 3s (LTX 2.3 minimum), so the maximum shot count
@@ -3206,13 +3787,14 @@ export class ExecutorAgent extends TypedEventEmitter {
       }
     }
 
-    // scene_video_prompt: inject the canonical refId list so the LLM uses
-    // exact strings for mainSubject/secondarySubject/focus refs. Without
-    // this, the LLM invents IDs from prose in the scene script (e.g.
+    // scene_shot_plan / shot_breakdown: inject the canonical refId list so
+    // the LLM uses exact strings for mainSubject/secondarySubject/focus refs.
+    // Without this, the LLM invents IDs from prose in the scene script (e.g.
     // "Johnathan O'Hare" → `johnathan` or `johnathan_o_hare` when the
-    // canonical refId is `johnathan_o'hare`). See scene_breakdown_guide.md.
+    // canonical refId is `johnathan_o'hare`). Both stages need it: Stage A
+    // sets mainSubject/secondarySubject; Stage B sets perspectiveOf/focus.*.
     let availableRefsBlock = '';
-    if (node.typeId === 'scene_video_prompt') {
+    if (node.typeId === 'scene_shot_plan' || node.typeId === 'shot_breakdown') {
       const refLines: string[] = [];
       for (const n of allNodes) {
         if (!n.itemId) continue;
@@ -3256,11 +3838,12 @@ How to use this list:
    \`description\`/\`audio\`. Don't invent a new refId.
 
 Examples of common failure modes to avoid:
-- Inserting \`glitch\` (the apartment cat) as secondarySubject of a
-  dock-confrontation scene just because glitch is on this list.
-- Setting \`focus.primary\` to \`lazarus_drive\` when the shot's
-  description is about guards raising rifles — the Drive isn't yet
-  the subject of that shot.
+- Inserting a refId as secondarySubject just because it's listed
+  here, even though the scene script doesn't bring that character
+  into the action of THIS scene.
+- Setting \`focus.primary\` to a prop or object refId when the shot's
+  description is about something else entirely — focus must name
+  what the shot is actually about, not a random pick from this list.
 </available_refs>`;
       }
     }
@@ -3394,6 +3977,36 @@ Examples of common failure modes to avoid:
       // Flux 4-slot contract: at most 4 refs, slot 1 = setting, no global
       // imageNumbers leaking in (which used to produce "from image 8" prose).
       const { refs: allRefs } = buildAvailableReferences(this.executor);
+
+      // Compute scene-canonical setting (most common setting across all
+      // shots in this scene). Used as a fallback when this shot's own
+      // focus doesn't name a setting — see ShotContext.canonicalSceneSetting.
+      let canonicalSceneSetting: string | null = null;
+      if (sceneId) {
+        const svpNode2 = this.executor.getNode(`scene_video_prompt:${sceneId}`);
+        if (svpNode2?.outputPath) {
+          try {
+            const svpPath2 = join(this.config.projectDir, svpNode2.outputPath);
+            if (existsSync(svpPath2)) {
+              let raw2 = readFileSync(svpPath2, 'utf-8').trim();
+              if (raw2.startsWith('```')) raw2 = raw2.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+              const svp2 = JSON.parse(raw2);
+              const counts = new Map<string, number>();
+              for (const sh of svp2.shots ?? []) {
+                if (typeof sh?.setting === 'string' && sh.setting) counts.set(sh.setting, (counts.get(sh.setting) ?? 0) + 1);
+                const bg2 = Array.isArray(sh?.focus?.background) ? sh.focus.background : [];
+                for (const b of bg2) if (typeof b === 'string') counts.set(b, (counts.get(b) ?? 0) + 1);
+              }
+              const settingLabels = new Set(allRefs.filter(r => r.type === 'setting').map(r => r.label));
+              let bestN = 0;
+              for (const [refId, n] of counts.entries()) {
+                if (settingLabels.has(refId) && n > bestN) { canonicalSceneSetting = refId; bestN = n; }
+              }
+            }
+          } catch { /* keep null */ }
+        }
+      }
+
       const shotRefs = buildShotAwareReferences(allRefs, {
         mainSubject: sceneMainSubject,
         secondarySubject: sceneSecondarySubject,
@@ -3401,6 +4014,7 @@ Examples of common failure modes to avoid:
         focusBackground: shotFocusBackground,
         focusLurking: shotFocusLurking,
         purpose: shotPurpose,
+        canonicalSceneSetting,
       });
       referenceImageContext = formatReferencesForPrompt(shotRefs);
       this.log(`  Refs (shot-aware) for ${node.itemId}: ${allRefs.length} global → ${shotRefs.length} in-shot (purpose=${shotPurpose || 'unknown'})`);
@@ -3654,6 +4268,80 @@ Examples of common failure modes to avoid:
       ? `\n\n${[shotAudioBlock, shotNarrationBlock].filter(Boolean).join('\n\n')}`
       : '';
 
+    // Bharata cues block. For shot_image_prompt + shot_motion_directive nodes,
+    // read scene.rasa from the scene_video_prompt JSON and per-shot
+    // sattvika/drishti/vyabhichariBhava tags, compose the deterministic
+    // palette/lighting/cue strings via rasaModifiers, and inject as a
+    // <bharata_cues> block in the user message. The image/motion guides
+    // instruct the LLM to surface these tokens in their output.
+    let bharataCuesBlock = '';
+    if (
+      (node.typeId === 'shot_image_prompt' || node.typeId === 'shot_motion_directive') &&
+      node.itemId
+    ) {
+      const sceneId = node.itemId.match(/(scene_\d+)/)?.[1];
+      const shotNum = parseInt(node.itemId.match(/shot_(\d+)/)?.[1] ?? '0', 10);
+      if (sceneId && shotNum > 0) {
+        const svpNode = this.executor.getNode(`scene_video_prompt:${sceneId}`);
+        if (svpNode?.outputPath) {
+          try {
+            const svpPath = join(this.config.projectDir, svpNode.outputPath);
+            if (existsSync(svpPath)) {
+              let raw = readFileSync(svpPath, 'utf-8').trim();
+              if (raw.startsWith('```')) {
+                raw = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+              }
+              const svp = JSON.parse(raw);
+              const shot = (Array.isArray(svp.shots) ? svp.shots : [])
+                .find((s: { shotNumber?: number }) => s.shotNumber === shotNum);
+              const rasa = svp.rasa ?? null;
+              const sattvika = shot?.sattvika ?? null;
+              const drishti = shot?.drishti ?? null;
+              const vyabhichari = shot?.vyabhichariBhava ?? null;
+              if (rasa || sattvika || drishti || vyabhichari) {
+                const { RASA_MODIFIERS, composeBharataCues } = await import('./rasaModifiers.js');
+                const lines: string[] = [];
+                if (rasa && rasa in RASA_MODIFIERS) {
+                  const m = RASA_MODIFIERS[rasa as keyof typeof RASA_MODIFIERS];
+                  lines.push(`scene rasa: ${rasa}`);
+                  lines.push(`palette: ${m.paletteTokens}`);
+                  lines.push(`lighting: ${m.lightingKey}`);
+                  if (node.typeId === 'shot_motion_directive') {
+                    lines.push(`camera bias: ${m.cameraBias}`);
+                    lines.push(`lens preference: ${m.lensPreference}`);
+                  }
+                  if (m.negativePrompt) lines.push(`negative-prompt fragment: ${m.negativePrompt}`);
+                }
+                const cues = composeBharataCues({ sattvika, drishti, vyabhichariBhava: vyabhichari });
+                if (cues) lines.push(`per-shot physical cues: ${cues}`);
+                if (lines.length > 0) {
+                  bharataCuesBlock = `\n\n<bharata_cues>\n${lines.join('\n')}\n</bharata_cues>\n\nSurface these palette/lighting tokens AND physical cues in your output. The cues are explicit directives, not optional flavor — a tag without prose presence is silently lost.`;
+                  this.log(`  Injected bharata_cues for ${node.itemId}: rasa=${rasa} sattvika=${sattvika} drishti=${drishti} vyabhichari=${vyabhichari}`);
+                }
+              }
+            }
+          } catch (err) {
+            this.log(`  bharata_cues: failed to read SVP for ${node.itemId}: ${(err as Error).message}`);
+          }
+        }
+      }
+    }
+
+    // Render-style anchor for shot_image_prompt nodes. Closes the
+    // 2026-05-19 Soft Seinen gap where project.style='anime' didn't
+    // reach the shot prompt's leading clause — character_image_guide
+    // had its own anchor, but shot_composition_guide didn't, so Flux
+    // Klein produced photorealistic shots opening on style-neutral
+    // clauses ("A wide overhead shot of Tokyo's night skyline…"). The
+    // helper produces an EXACT anchor string the LLM is told to paste
+    // verbatim at the start of every positive prompt, plus the
+    // anti-modality negative tokens. See renderStyleAnchor.ts.
+    let renderStyleAnchorBlock = '';
+    if (node.typeId === 'shot_image_prompt') {
+      const { buildRenderStyleAnchorBlock } = await import('../prompts/renderStyleAnchor.js');
+      renderStyleAnchorBlock = buildRenderStyleAnchorBlock(style ?? null);
+    }
+
     // For scene nodes: inject scene_assignment with summaries and boundaries
     let sceneAssignment = '';
     if (node.typeId === 'scene' && node.itemId && this.sceneSummaries.size > 0) {
@@ -3686,9 +4374,47 @@ Examples of common failure modes to avoid:
       }
     }
 
+    // For shot_breakdown (Stage B of hierarchical breakdown): inject the
+    // full scene plan as <scene_plan> (so the LLM has continuity context
+    // for what shots come before / after) and the single plan entry for
+    // THIS shot as <this_shot>. Without these blocks the per-shot LLM
+    // would see only the scene script and have no idea where this shot
+    // sits in the sequence.
+    let shotBreakdownPlanBlock = '';
+    if (node.typeId === 'shot_breakdown' && node.itemId) {
+      const sceneId = node.itemId.match(/(scene_\d+)/)?.[1];
+      const shotNum = parseInt(node.itemId.match(/shot_(\d+)/)?.[1] ?? '0', 10);
+      if (sceneId && shotNum > 0) {
+        const planNode = this.executor.getNode(`scene_shot_plan:${sceneId}`);
+        if (planNode?.outputPath) {
+          try {
+            const planPath = join(this.config.projectDir, planNode.outputPath);
+            let planContent = readFileSync(planPath, 'utf-8').trim();
+            if (planContent.startsWith('```')) {
+              planContent = planContent.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+            }
+            const planJson = JSON.parse(planContent);
+            const thisEntry = (planJson.shotPlan ?? []).find((p: { shotNumber?: number }) => p.shotNumber === shotNum);
+            const thisEntryStr = thisEntry ? JSON.stringify(thisEntry, null, 2) : `(no plan entry found for shotNumber ${shotNum})`;
+            shotBreakdownPlanBlock = `\n\n<scene_plan>\n${planContent}\n</scene_plan>\n\n<this_shot>\n${thisEntryStr}\n</this_shot>\n\nExpand THIS shot only. Copy shotNumber, purpose, and duration verbatim from <this_shot>. Use <scene_plan> for continuity context (what comes before / after).`;
+            this.log(`  shot_breakdown: injected scene_plan (${(planJson.shotPlan ?? []).length} shots) + this_shot for ${node.itemId}`);
+          } catch (err) {
+            this.log(`  shot_breakdown: failed to read scene plan for ${node.itemId}: ${(err as Error).message}`);
+          }
+        }
+      }
+    }
+
+    // Hard post-anchor for Stage A/B (scene_shot_plan + shot_breakdown):
+    // forces the model to ground every refId in the scene script + the
+    // canonical <available_refs> block — never in the demonstration
+    // tokens it just saw inside the loaded skill guides. See
+    // buildOutputContractBlock.ts for the rationale and full text.
+    const outputContractBlock = buildOutputContractBlock(node.typeId);
+
     const user = inputs.contextBlock
-      ? `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}\n\n${inputs.contextBlock}`
-      : `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}`;
+      ? `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}${shotBreakdownPlanBlock}${bharataCuesBlock}${renderStyleAnchorBlock}\n\n${inputs.contextBlock}${outputContractBlock}`
+      : `${task}${projectContext}${availableRefsBlock}${referenceImageContext}${sceneStateContext}${characterTagsBlock}${perspectiveContext}${focusContext}${shotContextHint}${storyEssenceBlock}${sceneAssignment}${motionAudioContext}${shotBreakdownPlanBlock}${bharataCuesBlock}${renderStyleAnchorBlock}${outputContractBlock}`;
 
     return { system: systemPrompt, user, loadedSkills };
   }
@@ -3790,14 +4516,20 @@ Examples of common failure modes to avoid:
     const parts: string[] = [];
     const loadedFiles: string[] = [];
 
-    // Map node types to guide names and content types for skill resolution
+    // Map node types to guide names and content types for skill resolution.
+    //
+    // Hierarchical scene-breakdown flow:
+    //  - scene_shot_plan (Stage A) → scene_breakdown_plan_guide
+    //  - shot_breakdown  (Stage B) → scene_breakdown_shot_guide
+    //  - scene_video_prompt (Stage C, deterministic) — no guide; no LLM call
     const guideMap: Record<string, string> = {
       plot: 'plot_guide',
       story: 'screenplay_guide',
       character_image: 'character_image_guide',
       setting_image: 'setting_image_guide',
       shot_image_prompt: 'shot_composition_guide',
-      scene_video_prompt: 'scene_breakdown_guide',
+      scene_shot_plan: 'scene_breakdown_plan_guide',
+      shot_breakdown: 'scene_breakdown_shot_guide',
       shot_video: 'scene_video_guide',
       scene: 'scene_guide',
       world_style: 'world_style_guide',
@@ -3809,7 +4541,8 @@ Examples of common failure modes to avoid:
       character_image: 'character_image_prompt',
       setting_image: 'setting_image_prompt',
       shot_image_prompt: 'shot_image_prompt',
-      scene_video_prompt: 'scene_video_prompt',
+      scene_shot_plan: 'scene_video_prompt',
+      shot_breakdown: 'scene_video_prompt',
       shot_video: 'scene_video_prompt',
     };
 
@@ -4029,6 +4762,21 @@ Examples of common failure modes to avoid:
    * where type-level collections exist but haven't been expanded yet.
    */
   private async expandPendingCollections(): Promise<void> {
+    // Graph hygiene — first thing every pass does. Self-heals orphan
+    // collection parents and dangling dep refs that accumulate
+    // across reset / redo / migration cycles. Steady-state no-op; only
+    // emits a notification when something was actually repaired.
+    const hygiene = reconcileGraphHygiene(this.executor, this.config.template);
+    const summary = summariseHygieneResult(hygiene);
+    if (summary) {
+      this.log(`  Graph hygiene: ${summary}`);
+      this.emit({
+        type: 'notification',
+        level: 'info',
+        message: `Graph hygiene: ${summary}`,
+      });
+    }
+
     // Load saved scene summaries from disk (survive restarts)
     if (this.sceneSummaries.size === 0) {
       const summaryPath = join(this.config.projectDir, 'prompts', 'scene_summaries.json');
@@ -4102,13 +4850,47 @@ Examples of common failure modes to avoid:
     while (expanded) {
       expanded = false;
 
+      // Reconcile per-shot graph children against newly-completed
+      // scene_shot_plan outputs. When the user redoes a stage upstream
+      // of scene_shot_plan (e.g. "Scene scripts"), the cascade marks
+      // existing shot_breakdown children pending but never removes
+      // them. If the new plan has fewer shots than the previous one,
+      // those leftover children re-run with a node id that no plan
+      // entry matches (`shot_breakdown:scene_1_shot_8` when the new
+      // plan tops out at 7) — the LLM hallucinates a shot 8 anyway,
+      // and the assembler later rejects the assembled output with
+      // "shot output has shotNumber 8 but the plan does not list it".
+      //
+      // Prune those orphans before the expand-loop runs its other
+      // strategies so we avoid wasting LLM calls + assembler failures.
+      // Anchored on scene_shot_plan being COMPLETED (the new plan is
+      // on disk and authoritative).
+      for (const planNode of this.executor.getAllNodes()) {
+        if (planNode.typeId !== 'scene_shot_plan') continue;
+        if (planNode.status !== 'completed' || !planNode.outputPath) continue;
+        const sceneId = planNode.itemId;
+        if (!sceneId) continue;
+        if (this.reconcilePerShotChildrenForScene(planNode, sceneId)) {
+          expanded = true; // re-run the outer while to pick up the pruned graph
+        }
+      }
+
       for (const node of this.executor.getAllNodes()) {
         // Strategy B2: Scene-level → shot-level re-expansion (runs for completed OR pending nodes with itemId)
         // Template is authoritative for isCollection — stale saved state (e.g. noir_detective_story_setup-3
         // persisted shot_motion_directive:scene_1 with isCollection=false) must not block expansion.
         if (shouldExpandSceneCollectionToShots(node, this.config.template)) {
           const sceneId = node.itemId!;
-          const svpNode = this.executor.getNode(`scene_video_prompt:${sceneId}`);
+          // shot_breakdown reads from scene_shot_plan (Stage A output);
+          // every other expandable shot type reads from scene_video_prompt
+          // (which is now the deterministic Stage C assembled output).
+          const sourceNodeId = node.typeId === 'shot_breakdown'
+            ? `scene_shot_plan:${sceneId}`
+            : `scene_video_prompt:${sceneId}`;
+          const sourceShotsField = node.typeId === 'shot_breakdown'
+            ? 'shotPlan'
+            : 'shots';
+          const svpNode = this.executor.getNode(sourceNodeId);
           if (svpNode?.status === 'completed' && svpNode.outputPath) {
             const hasChildren = this.executor.getAllNodes().some(
               n => n.typeId === node.typeId && n.itemId?.startsWith(`${sceneId}_shot_`),
@@ -4119,15 +4901,79 @@ Examples of common failure modes to avoid:
                 let content = readFileSync(fullPath, 'utf-8').trim();
                 if (content.startsWith('```')) content = content.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
                 const parsed = JSON.parse(content);
-                const shots = parsed.shots ?? (Array.isArray(parsed) ? parsed : []);
+                const shots = parsed[sourceShotsField] ?? (Array.isArray(parsed) ? parsed : []);
                 if (shots.length > 0) {
                   const sceneLabel = sceneId.replace('scene_', 'S');
-                  const shotItems = shots.map((s: any) => ({
-                    itemId: `${sceneId}_shot_${s.shotNumber}`,
-                    name: `${sceneLabel} Shot ${s.shotNumber}: ${s.cameraWork?.split(',')[0] || 'shot'}`,
-                  }));
-                  this.log(`  Re-expanding ${node.id} → ${shotItems.length} per-shot nodes`);
+                  const shotItems = shots.map((s: any) => {
+                    // Per-shot label: prefer cameraWork (post-breakdown),
+                    // fall back to oneLineSummary (plan-only), then a
+                    // generic label.
+                    const label = (typeof s.cameraWork === 'string' && s.cameraWork.split(',')[0])
+                      || (typeof s.oneLineSummary === 'string' && s.oneLineSummary.substring(0, 60))
+                      || 'shot';
+                    return {
+                      itemId: `${sceneId}_shot_${s.shotNumber}`,
+                      name: `${sceneLabel} Shot ${s.shotNumber}: ${label}`,
+                      // Carry the first-frame anchor through to the
+                      // graph-wiring step below so shot_image deps
+                      // point at the right prior frame (or none for
+                      // a fresh start).
+                      firstFrameAnchor: s.firstFrameAnchor ?? null,
+                    };
+                  });
+                  // BEFORE expanding shot_breakdown into per-shot children:
+                  // lock scene_video_prompt:scene_N (the deterministic
+                  // assembler) from being further expanded by
+                  // expandCollection's matching-scope cascade. Without
+                  // this, the cascade sees scene_video_prompt:scene_N as
+                  // a per-item-with-isCollection=true (preserved from the
+                  // template via the earlier cascade from scene_shot_plan),
+                  // matching scope on shot_breakdown, and promotes it to
+                  // per-shot — creating phantom scene_video_prompt:
+                  // scene_N_shot_M nodes that have no scene_shot_plan to
+                  // assemble from and deadlock the pipeline.
+                  //
+                  // scene_video_prompt is per-scene by construction; it
+                  // doesn't need shot-level granularity. Setting
+                  // isCollection=false before the cascade makes
+                  // expandMatchingDependent's matching branch (which
+                  // requires dependent.isCollection) skip it. The manual
+                  // rewire below then wires its deps correctly.
+                  if (node.typeId === 'shot_breakdown') {
+                    const svpDeterministic = this.executor.getNode(`scene_video_prompt:${sceneId}`);
+                    if (svpDeterministic) {
+                      svpDeterministic.isCollection = false;
+                    }
+                  }
+
+                  this.log(`  Re-expanding ${node.id} → ${shotItems.length} per-shot nodes (source: ${sourceNodeId})`);
                   this.executor.expandCollection(node.id, shotItems);
+
+                  // shot_breakdown special-case: scene_video_prompt:scene_N
+                  // depends on shot_breakdown (scope=matching). Because we
+                  // just locked it to isCollection=false above,
+                  // expandCollection's built-in dependent rewiring fell
+                  // through without touching it. Wire deps manually so
+                  // the assembler waits on every per-shot child instead
+                  // of the now-deleted parent collection.
+                  if (node.typeId === 'shot_breakdown') {
+                    const svpDeterministic = this.executor.getNode(`scene_video_prompt:${sceneId}`);
+                    if (svpDeterministic) {
+                      const oldParentDepId = node.id;
+                      svpDeterministic.dependencies = svpDeterministic.dependencies.filter(d => d !== oldParentDepId);
+                      for (const child of shotItems) {
+                        const childId = `shot_breakdown:${child.itemId}`;
+                        if (!svpDeterministic.dependencies.includes(childId)) {
+                          svpDeterministic.dependencies.push(childId);
+                        }
+                        const childNode = this.executor.getNode(childId);
+                        if (childNode && !childNode.dependents.includes(svpDeterministic.id)) {
+                          childNode.dependents.push(svpDeterministic.id);
+                        }
+                      }
+                      this.log(`  Rewired ${svpDeterministic.id} → depends on ${shotItems.length} shot_breakdown children`);
+                    }
+                  }
 
                   // For shot_image_prompt: also create shot_image and shot_video per-shot nodes
                   if (node.typeId === 'shot_image_prompt') {
@@ -4152,6 +4998,8 @@ Examples of common failure modes to avoid:
                         allCharImageIds: allCharImages,
                         allSettingImageIds: allSettingImages,
                         prevShotImageId,
+                        firstFrameAnchor: (shot as { firstFrameAnchor?: any }).firstFrameAnchor ?? null,
+                        sceneId,
                       });
                       if (!this.executor.getNode(shotVideoId)) {
                         const videoDeps = [shotImageLastFrameId, motionId];
@@ -4329,6 +5177,9 @@ Examples of common failure modes to avoid:
                   const shotItems = shots.map((s: any) => ({
                     itemId: `${sceneId}_shot_${s.shotNumber}`,
                     name: `${sceneLabel} Shot ${s.shotNumber}: ${s.cameraWork?.split(',')[0] || 'shot'}`,
+                    // Carry anchor through (same as the
+                    // shot_breakdown-driven expansion above).
+                    firstFrameAnchor: s.firstFrameAnchor ?? null,
                   }));
                   this.log(`  Re-expanding ${node.id} → ${shotItems.length} per-shot nodes from scene_video_prompt`);
                   this.executor.expandCollection(node.id, shotItems);
@@ -4353,6 +5204,8 @@ Examples of common failure modes to avoid:
                         allCharImageIds: allCharImages,
                         allSettingImageIds: allSettingImages,
                         prevShotImageId,
+                        firstFrameAnchor: (shot as { firstFrameAnchor?: any }).firstFrameAnchor ?? null,
+                        sceneId,
                       });
                       if (!this.executor.getNode(shotVideoId)) {
                         this.executor.addNode({
@@ -4380,6 +5233,38 @@ Examples of common failure modes to avoid:
         }
 
         if (didExpand) continue;
+
+        // Strategy B3: Disk-authoritative resume. Before falling through
+        // to Strategy C's LLM extraction, look for per-item content
+        // files that already exist in the type's `filePattern` directory
+        // and rebuild the item list from them. Critical for hard-restart
+        // recovery: if the previous process was killed before flushing
+        // per-item nodes to executorState, Strategy A misses; Strategy
+        // B only works for flat-list parents; Strategy C re-runs the
+        // LLM and produces a non-deterministic extraction that may
+        // disagree with the on-disk artifacts (5 scenes one run, 3 the
+        // next — leaving downstream `scene_3_shot_*` files orphaned).
+        // Same files in, same items out — alignment preserved.
+        if (!didExpand) {
+          const onDiskItems = listCollectionItemsFromDisk(
+            this.config.projectDir,
+            typeDef,
+          );
+          if (onDiskItems.length > 0) {
+            this.log(
+              `  Strategy B3: resumed ${onDiskItems.length} items for ${node.id} from on-disk content files`,
+            );
+            this.executor.expandCollection(node.id, onDiskItems);
+            this.emit({
+              type: 'notification',
+              level: 'info',
+              message: `Resumed ${node.displayName}: ${onDiskItems.map((i) => i.name).join(', ')}`,
+            });
+            didExpand = true;
+            expanded = true;
+            continue;
+          }
+        }
 
         // Strategy C: For collections that depend on 'story' (scene, character, setting),
         // run extractCollectionItems on the story output to determine items.
@@ -4452,7 +5337,7 @@ Examples of common failure modes to avoid:
                   if (this.sceneSummaries.size > 0) {
                     const promptsDir = join(this.config.projectDir, 'prompts');
                     if (!existsSync(promptsDir)) mkdirSync(promptsDir, { recursive: true });
-                    writeFileSync(
+                    atomicWriteFileSync(
                       join(promptsDir, 'scene_summaries.json'),
                       JSON.stringify(Object.fromEntries(this.sceneSummaries), null, 2),
                     );
@@ -4460,7 +5345,7 @@ Examples of common failure modes to avoid:
                   if (this.sceneEstimatedDurations.size > 0) {
                     const promptsDir = join(this.config.projectDir, 'prompts');
                     if (!existsSync(promptsDir)) mkdirSync(promptsDir, { recursive: true });
-                    writeFileSync(
+                    atomicWriteFileSync(
                       join(promptsDir, 'scene_durations.json'),
                       JSON.stringify(Object.fromEntries(this.sceneEstimatedDurations), null, 2),
                     );
@@ -4861,10 +5746,10 @@ Examples of common failure modes to avoid:
             this.log(`  [dialogue-fit] ${node.id}: adjusted ${adjustments.length} shot(s): ${adjustments.map(a => `shot${a.shotNumber} ${a.from}s→${a.to}s (dialogue=${a.dialogueSeconds}s)`).join(', ')}`);
           }
           // Soft-warn: flag any shot with 2+ speakers in its audio
-          // field. See scene_breakdown_guide.md "Step 2a: One speaker
-          // per shot" — video models mis-attribute dialogue when one
-          // shot tries to carry two speakers. Warning only; not a
-          // validation failure, to avoid blocking legacy projects.
+          // field. See scene_breakdown_plan_guide.md "Step 2a: One
+          // speaker per shot" — video models mis-attribute dialogue
+          // when one shot tries to carry two speakers. Warning only;
+          // not a validation failure, to avoid blocking legacy projects.
           const multiSpeaker = scanMultiSpeakerShots(parsed.shots as Array<Record<string, unknown>>);
           if (multiSpeaker.length > 0) {
             this.log(`  [multi-speaker] ${node.id}: ${multiSpeaker.length} shot(s) carry 2+ speakers — video model will likely mis-attribute: ${multiSpeaker.map(w => `shot${w.shotNumber}(${w.speakers.join('+')})`).join(', ')}`);
@@ -4896,35 +5781,126 @@ Examples of common failure modes to avoid:
         const availableRefs = this.buildAvailableRefsForShot(node);
         const allInjected: Array<{ frame: string; label: string; imageNumber: number; kind: string }> = [];
 
-        // (1) first_frame normalization.
+        // (0) Enforce the canonical reference set from scene_video_prompt's
+        // focus / perspectiveOf fields on first_frame. The LLM frequently
+        // forgets to list a character it named in prose by its narrative
+        // name (e.g. wrote "Kaito Nakamura sits at the news anchor desk"
+        // but emitted references: []). The SVP's focus.primary /
+        // perspectiveOf / focus.lurking name characters by refId — the
+        // authoritative identity slug — so this pass MERGES any missing
+        // canonical refs into first_frame.references. alignFramesToFirstFrame
+        // then propagates them to every other frame in step (2). Pure
+        // post-LLM enforcement; project-agnostic.
         const ffKey = 'first_frame';
-        const ff = parsed.frames[ffKey];
-        if (ff && typeof ff === 'object' && typeof ff.imagePrompt === 'string' && Array.isArray(ff.references)) {
-          const result = normalizeShotImagePromptWithRefs(ff, availableRefs);
-          parsed.frames[ffKey] = result.frame;
-          for (const ev of result.injected) {
-            allInjected.push({ frame: ffKey, ...ev });
+        const ff0 = parsed.frames[ffKey];
+        if (ff0 && typeof ff0 === 'object' && Array.isArray(ff0.references) && node.itemId) {
+          const sceneId0 = node.itemId.match(/^(scene_\d+)/)?.[1];
+          const shotNum0 = parseInt(node.itemId.match(/shot_(\d+)/)?.[1] ?? '0', 10);
+          if (sceneId0 && shotNum0 > 0) {
+            const ctx0 = readShotContextFromSvp(this.config.projectDir, sceneId0, shotNum0);
+            if (ctx0) {
+              const enforceResult = enforceShotCanonicalRefs(
+                {
+                  perspectiveOf: ctx0.perspectiveOf ?? null,
+                  focus: {
+                    primary: ctx0.focusPrimary ?? null,
+                    background: ctx0.focusBackground ?? [],
+                    lurking: ctx0.focusLurking ?? null,
+                  },
+                  canonicalSceneSetting: ctx0.canonicalSceneSetting ?? null,
+                },
+                ff0.references,
+                availableRefs,
+              );
+              if (enforceResult.addedRefIds.length > 0) {
+                ff0.references = enforceResult.references;
+                this.log(`  [canonical-refs] ${node.id}: enforced ${enforceResult.addedRefIds.length} missing canonical ref(s) on first_frame from SVP focus/perspectiveOf: ${enforceResult.addedRefIds.join(', ')}`);
+              }
+            }
           }
         }
 
-        // (2) Align other frames to first_frame's canonical mapping.
-        alignFramesToFirstFrame(parsed, availableRefs);
+        // Gate: when turn-2 ref refinement succeeded, every frame already
+        // has the canonical refs (refineShotImageRefs overwrites BOTH
+        // first_frame.references and last_frame.references with the same
+        // parseTurn2RefsJson output — see ExecutorAgent.refineShotImageRefs
+        // line ~6502). The legacy normalizer pipeline (injectMissingShotRefs
+        // + alignFramesToFirstFrame) was built for the pre-turn-2 era where
+        // each frame's refs were independently LLM-emitted and mutually
+        // inconsistent. Running it post-turn-2 has only one observable
+        // effect: it injects `from image N` tags into prose that nothing
+        // downstream needs (applyShotImageManifestPostPass builds the
+        // canonical slot binding from references[] alone). The injected
+        // tags then become noise in the saved JSON, contradicting the
+        // skill guide that tells the LLM not to write them.
+        //
+        // Detection: both frames' references arrays match (canonical-equal).
+        const ffRefs = parsed.frames[ffKey]?.references;
+        const lfRefs = parsed.frames['last_frame']?.references;
+        const canonicalKey = (rs: Reference[]): string =>
+          [...rs]
+            .sort((a, b) => a.imageNumber - b.imageNumber)
+            .map(r => `${r.imageNumber}|${r.type}|${r.refId}`)
+            .join(',');
+        const turn2Succeeded =
+          Array.isArray(ffRefs) && ffRefs.length > 0 &&
+          Array.isArray(lfRefs) && lfRefs.length > 0 &&
+          canonicalKey(ffRefs as Reference[]) === canonicalKey(lfRefs as Reference[]);
 
-        // (3) Per-frame normalization for non-first frames.
-        for (const frameKey of Object.keys(parsed.frames)) {
-          if (frameKey === ffKey) continue;
-          const f = parsed.frames[frameKey];
-          if (f && typeof f === 'object' && typeof f.imagePrompt === 'string' && Array.isArray(f.references)) {
-            const result = normalizeShotImagePromptWithRefs(f, availableRefs);
-            parsed.frames[frameKey] = result.frame;
+        if (!turn2Succeeded) {
+          // (1) first_frame normalization.
+          const ff = parsed.frames[ffKey];
+          if (ff && typeof ff === 'object' && typeof ff.imagePrompt === 'string' && Array.isArray(ff.references)) {
+            const result = normalizeShotImagePromptWithRefs(ff, availableRefs);
+            parsed.frames[ffKey] = result.frame;
             for (const ev of result.injected) {
-              allInjected.push({ frame: frameKey, ...ev });
+              allInjected.push({ frame: ffKey, ...ev });
+            }
+          }
+
+          // (2) Align other frames to first_frame's canonical mapping.
+          alignFramesToFirstFrame(parsed, availableRefs);
+
+          // (3) Per-frame normalization for non-first frames.
+          for (const frameKey of Object.keys(parsed.frames)) {
+            if (frameKey === ffKey) continue;
+            const f = parsed.frames[frameKey];
+            if (f && typeof f === 'object' && typeof f.imagePrompt === 'string' && Array.isArray(f.references)) {
+              const result = normalizeShotImagePromptWithRefs(f, availableRefs);
+              parsed.frames[frameKey] = result.frame;
+              for (const ev of result.injected) {
+                allInjected.push({ frame: frameKey, ...ev });
+              }
             }
           }
         }
 
         if (allInjected.length > 0) {
           this.log(`  [ref-inject] ${node.id}: injected ${allInjected.length} ref(s): ${allInjected.map(i => `${i.frame}/${i.label}#${i.imageNumber}(${i.kind})`).join(', ')}`);
+        }
+
+        // (3.5) Enforce first_frame.generationMode against the
+        // deterministic anchor decision the assembler wrote on the
+        // parent scene_video_prompt. The LLM picks generationMode
+        // itself; if it picked something inconsistent with the anchor
+        // (e.g. image_text_to_image when the anchor says chain on the
+        // prior shot), we override here. Logged so the override is
+        // visible in executor.log.
+        if (node.itemId) {
+          const sceneId2 = node.itemId.match(/^(scene_\d+)/)?.[1];
+          const shotNum2 = parseInt(node.itemId.match(/shot_(\d+)/)?.[1] ?? '0', 10);
+          if (sceneId2 && shotNum2 > 0) {
+            const anchor = readShotAnchorFromSvp(this.config.projectDir, sceneId2, shotNum2);
+            if (anchor) {
+              const r = enforceAnchorMode(
+                parsed,
+                anchor as Parameters<typeof enforceAnchorMode>[1],
+              );
+              if (r.changed) {
+                this.log(`  [anchor-mode] ${node.id}: first_frame.generationMode ${r.previousMode} → ${r.enforcedMode} (anchor: ${anchor.reason}${anchor.sourceShotNumber ? `:${anchor.sourceShotNumber}` : ''})`);
+              }
+            }
+          }
         }
 
         // (4) Hard gate: OTS prose + <2 character refs ⇒ reject.
@@ -4950,6 +5926,29 @@ Examples of common failure modes to avoid:
         if (!refCheck.valid) {
           return { valid: false, error: refCheck.error ?? 'ref-mention check failed' };
         }
+
+        // (5.5) Invariant I3 — strip setting refs from any frame whose
+        // generationMode is `edit_first_frame`. Klein uses the prior
+        // frame's rendered image as slot 1 in that mode; the setting
+        // is already baked into the canvas. Carrying a separate
+        // `setting_image:X` ref produces two slot-1 candidates and
+        // undefined binding. Deterministic by mode — NOT via prose
+        // tag scanning (that was the inconsistent old heuristic).
+        // Must run BEFORE the manifest post-pass so the manifest line
+        // reflects the stripped ref set, not the pre-strip ref set.
+        stripSettingFromEditFirstFrameFrames(parsed as { frames: Record<string, { generationMode?: string; references?: Reference[] } | undefined> });
+
+        // (6) Pin the slot manifest at the TOP of every frame's
+        // imagePrompt. Slot binding is authoritative via the manifest;
+        // without this the 2026-05-20 Ruby V3 s1s1 frame had "Ruby
+        // from image 1" buried mid-paragraph and no manifest at the
+        // top — Flux Klein had no deterministic top-of-prompt anchor
+        // to bind the character slot.
+        //
+        // This same helper is re-invoked after the turn-2 ref-refinement
+        // LLM pass — the manifest must always reflect the CURRENT
+        // references array, not whatever turn-1 wrote.
+        applyShotImageManifestPostPass(parsed as { frames: Record<string, { imagePrompt?: string; references?: Reference[] } | undefined> });
 
         mutated = true;
       }
@@ -5296,6 +6295,307 @@ Examples of common failure modes to avoid:
   // ===========================================================================
 
   /**
+   * Turn 2 of the shot_image_prompt pipeline. Continues the same
+   * conversation as turn 1 (the LLM's prose-emitting call) with a
+   * new user message that hands the LLM the current existing-refs
+   * menu and asks for a refined `references[]` per frame.
+   *
+   * Returns the same JSON string the caller already has, but with
+   * each frame's `references` replaced by turn-2's authoritative
+   * extraction. Returns null on any error (caller falls back to
+   * turn-1's refs).
+   *
+   * Side A/B assignments emerge naturally because the LLM sees its
+   * own prose in `turn1Content` as the assistant turn — OTS framing
+   * language in the prose drives the side flag.
+   */
+  private async refineShotImageRefs(
+    node: ExecutionNode,
+    system: string,
+    user: string,
+    turn1Content: string,
+    toolCallId: string | undefined,
+    toolName: string,
+  ): Promise<string | null> {
+    // Parse turn-1 JSON. If it's not the expected shape, bail —
+    // turn-1 content stays as-is.
+    let turn1Parsed: {
+      frames?: {
+        first_frame?: { references?: unknown; imagePrompt?: string };
+        last_frame?: { references?: unknown; imagePrompt?: string };
+      };
+    };
+    try {
+      turn1Parsed = JSON.parse(turn1Content);
+    } catch {
+      return null;
+    }
+    if (!turn1Parsed?.frames?.first_frame) return null;
+
+    // Build the existing-refs menu from the project's
+    // character_image / setting_image / object_image nodes that
+    // have already been generated (status === 'completed'). Lazy
+    // refs that haven't been rendered yet are excluded — they'd
+    // create a chicken-and-egg cycle.
+    const allNodes = this.executor.getAllNodes();
+    const imageNodes = allNodes
+      .filter(n =>
+        n.itemId !== undefined &&
+        (n.typeId === 'character_image' ||
+          n.typeId === 'setting_image' ||
+          n.typeId === 'object_image'),
+      )
+      .map(n => ({
+        id: n.id,
+        typeId: n.typeId,
+        itemId: n.itemId,
+        status: n.status,
+      }));
+    // Read the actual content file for each upstream collection item so
+    // the turn-2 LLM has real visual context — not just a humanized
+    // refId. This is what lets the LLM reason about Side A vs Side B
+    // framing ("what's behind the camera in this bus station?"),
+    // propose appropriate reverse-angle settings (Phase D), and assign
+    // character roles (foreground vs OTS silhouette) consistently with
+    // the prose it just wrote in turn 1.
+    //
+    // Path conventions come from narrative.ts:
+    //   character → characters/{{name}}.md
+    //   setting   → settings/{{name}}.md
+    //   object    → objects/{{name}}.md
+    //
+    // Content is trimmed to a per-item budget so the menu stays small —
+    // a 1000-word setting doc would blow up the turn-2 prompt.
+    const PER_ITEM_DESC_CHARS = 600;
+    const descFor = (
+      type: 'character' | 'setting' | 'object',
+      itemId: string,
+    ): { label: string; description: string } => {
+      const label = itemId
+        .split('_')
+        .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+        .join(' ');
+      const folder = type === 'character' ? 'characters' :
+        type === 'setting' ? 'settings' : 'objects';
+      const contentPath = join(this.config.projectDir, folder, `${itemId}.md`);
+      let description = '';
+      try {
+        if (existsSync(contentPath)) {
+          const raw = readFileSync(contentPath, 'utf-8');
+          // Strip the leading "# Title" heading and collapse whitespace
+          // so the LLM sees prose rather than markdown chrome.
+          const stripped = raw.replace(/^#[^\n]*\n+/, '').replace(/\s+/g, ' ').trim();
+          description = stripped.length > PER_ITEM_DESC_CHARS
+            ? `${stripped.slice(0, PER_ITEM_DESC_CHARS)}…`
+            : stripped;
+        }
+      } catch {
+        // File unreadable — leave description empty rather than crash.
+      }
+      return { label, description };
+    };
+    const menu: ReferenceMenuItem[] = buildReferenceMenu(imageNodes, descFor);
+    if (menu.length === 0) {
+      // Cold start: no existing refs yet. Without a menu the LLM has
+      // nothing to anchor on — let turn-1's refs stand.
+      return null;
+    }
+
+    // Build turn-2 user message. Pull an OTS hint from the shot
+    // brief if it has perspective='ots' or framing keywords.
+    const otsHint = this.shotBriefSuggestsOts(node);
+    const turn2User = buildTurn2UserMessage(menu, { otsHint });
+
+    // Run the LLM with [system, user, assistant(turn1), user(turn2)].
+    // Non-streaming generate() — output is small.
+    const purpose = this.purposeForNode(node);
+    const client = this.llmFor(purpose);
+    const messages: Message[] = [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+      { role: 'assistant', content: turn1Content },
+      { role: 'user', content: turn2User },
+    ];
+    const result = await client.generate({
+      messages,
+      temperature: 0.2,
+      maxTokens: 2000,
+      responseFormat: { type: 'json_object' },
+      signal: this.runAbortController.signal,
+    });
+    const turn2Raw = result.content ?? '';
+    if (!turn2Raw.trim()) return null;
+
+    // Surface turn-2 in the tool stream so it's visible in the chat.
+    if (toolCallId) {
+      this.emit({
+        type: 'tool_streaming',
+        toolCallId,
+        chunk: `\n[ref-extraction turn 2]\n${turn2Raw}\n`,
+        done: false,
+        agentName: this.config.name ?? 'dhee-executor',
+        toolName,
+      });
+    }
+
+    const refinedRefs: Reference[] = parseTurn2RefsJson(turn2Raw);
+    if (refinedRefs.length === 0) {
+      this.log(`  [shot_image_prompt turn-2] no refs parsed — keeping turn-1's array`);
+      return null;
+    }
+
+    // Phase B+D: walk new refs and request collection expansion so the
+    // executor creates corresponding character_image / setting_image
+    // nodes before this shot's downstream shot_image runs.
+    //
+    // Dedup contract (Phase C-lite): expandCollection on an already-
+    // expanded type-level node is a no-op and existing per-item nodes
+    // are NOT overwritten. Two shots proposing the same canonical refId
+    // (e.g. both ask for `setting_image:bus_station_morning_reverse`)
+    // resolve to the SAME per-item node — same render, no duplicate
+    // Klein call. The naming convention in turn-2's user message
+    // ("name things by what they ARE, not which shot introduced them")
+    // is what makes this work at the LLM layer; the no-op at the
+    // executor layer is the safety net.
+    const imageTypeIdFor = (refType: 'character' | 'setting' | 'object'): string =>
+      refType === 'character' ? 'character_image' :
+      refType === 'setting' ? 'setting_image' :
+      'object_image';
+    for (const ref of refinedRefs) {
+      if (ref.status !== 'new') continue;
+      const upstreamTypeId =
+        ref.type === 'character' ? 'character' :
+        ref.type === 'setting' ? 'setting' :
+        'object';
+      const imageTypeId = imageTypeIdFor(ref.type);
+      const itemId = ref.refId.includes(':') ? ref.refId.split(':')[1]! : ref.refId;
+      const label = itemId
+        .split('_')
+        .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+        .join(' ');
+      const itemMetadata: import('./types.js').ExecutionNodeMetadata = {
+        name: label,
+        ...(ref.newRefDescription ? { description: ref.newRefDescription, summary: ref.newRefDescription } : {}),
+      };
+      try {
+        this.executor.expandCollection(upstreamTypeId, [
+          { itemId, name: label, metadata: itemMetadata },
+        ]);
+        this.log(
+          `  [shot_image_prompt turn-2] expanded ${upstreamTypeId} with new item '${itemId}'`,
+        );
+      } catch (err) {
+        // Already exists or expansion not applicable — non-fatal.
+        this.log(
+          `  [shot_image_prompt turn-2] expandCollection for ${upstreamTypeId}:${itemId} skipped: ${(err as Error).message}`,
+        );
+      }
+      // Phase D: write derivedFrom + description directly onto the
+      // cascaded image-level node so the renderer can switch to
+      // chained-edit generation. The cascade from upstream collection
+      // expansion creates `<imageTypeId>:<itemId>` via expandMatchingDependent,
+      // which doesn't propagate metadata — set it here.
+      const imageNodeId = `${imageTypeId}:${itemId}`;
+      const imageNode = this.executor.getNode(imageNodeId);
+      if (imageNode) {
+        const merged: import('./types.js').ExecutionNodeMetadata = {
+          ...(imageNode.metadata ?? {}),
+          ...(ref.newRefDescription ? { description: ref.newRefDescription } : {}),
+          ...(ref.derivedFrom ? { derivedFrom: this.normalizeDerivedFromRefId(ref.derivedFrom, ref.type) } : {}),
+        };
+        if (Object.keys(merged).length > 0) {
+          imageNode.metadata = merged;
+          if (ref.derivedFrom) {
+            this.log(
+              `  [shot_image_prompt turn-2] ${imageNodeId} marked derivedFrom=${merged.derivedFrom}`,
+            );
+          }
+        }
+      }
+    }
+
+    // Stitch the refined refs into the JSON. Both frames share the
+    // same refs — the existing assembler at shotImagePipeline.ts
+    // already collapses last_frame.references to [] in the final
+    // canonical shape; here we keep turn-1's per-frame structure but
+    // overwrite first_frame.references and let last_frame.references
+    // mirror it (the deterministic slot manifest uses first_frame's
+    // refs for both frames).
+    //
+    // The caller re-runs `validateJsonOutput` after this — its
+    // post-pass at line ~5852 rebuilds the manifest prefix in each
+    // frame's imagePrompt from the references array. That's what
+    // keeps the manifest in sync with turn-2's authoritative refs.
+    // We must NOT prepend the manifest here ourselves — that would
+    // double up when the post-pass runs.
+    if (turn1Parsed.frames) {
+      if (turn1Parsed.frames.first_frame) {
+        (turn1Parsed.frames.first_frame as { references: Reference[] }).references = refinedRefs;
+      }
+      if (turn1Parsed.frames.last_frame) {
+        (turn1Parsed.frames.last_frame as { references: Reference[] }).references = refinedRefs;
+      }
+    }
+    return JSON.stringify(turn1Parsed, null, 2);
+  }
+
+  /**
+   * Coerce the LLM's `derivedFrom` value into a canonical image-node
+   * refId. The LLM may emit the bare itemId (`bus_station_morning`),
+   * the image-typed refId (`setting_image:bus_station_morning`), or
+   * the upstream-typed refId (`setting:bus_station_morning`). Normalize
+   * to the image typeId — that's what the renderer looks up.
+   */
+  private normalizeDerivedFromRefId(
+    raw: string,
+    refType: 'character' | 'setting' | 'object',
+  ): string {
+    const imageTypeId =
+      refType === 'character' ? 'character_image' :
+      refType === 'setting' ? 'setting_image' :
+      'object_image';
+    if (raw.startsWith(`${imageTypeId}:`)) return raw;
+    if (raw.includes(':')) {
+      // Other type prefix (e.g. `setting:`) — strip and re-prefix.
+      const after = raw.split(':')[1]!;
+      return `${imageTypeId}:${after}`;
+    }
+    return `${imageTypeId}:${raw}`;
+  }
+
+  /**
+   * Heuristic check: does this shot's brief look like an OTS /
+   * reverse-shot framing? Used to inject a hint into the turn-2
+   * ref-extraction user message so Side A/B gets assigned even
+   * when the prose's framing language is subtle.
+   *
+   * Reads the shot brief file on disk if present. False is the
+   * safe default — turn-2 still works without an OTS hint, just
+   * less aggressively flagged.
+   */
+  private shotBriefSuggestsOts(node: ExecutionNode): boolean {
+    if (!node.itemId) return false;
+    const match = node.itemId.match(/^scene_(\d+)_shot_(\d+)$/);
+    if (!match) return false;
+    const briefPath = join(
+      this.config.projectDir,
+      `prompts/videos/scenes/scene_${match[1]}.shots/${match[2]}.json`,
+    );
+    try {
+      if (!existsSync(briefPath)) return false;
+      const brief = JSON.parse(readFileSync(briefPath, 'utf-8')) as {
+        perspective?: string;
+        cameraWork?: string;
+      };
+      if (brief.perspective === 'ots') return true;
+      const camera = (brief.cameraWork ?? '').toLowerCase();
+      return /\b(over.the.shoulder|ots|reverse shot)\b/.test(camera);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Call the LLM to generate content for a node.
    * Pure completion — no tools, no agent loop.
    */
@@ -5320,10 +6620,15 @@ Examples of common failure modes to avoid:
     const options: GenerateOptions = {
       messages,
       temperature: isFormulaic ? 0.3 : 0.7,
+      // Propagate `agent.stop()` into the LLM stream so user-cancel
+      // aborts in-flight HTTP requests, not just the executor loop.
+      signal: this.runAbortController.signal,
     };
 
-    // Force JSON output for all structured/image prompt nodes
-    const jsonNodeTypes = ['scene_video_prompt', 'shot_image_prompt', 'character_image', 'setting_image'];
+    // Force JSON output for all structured/image prompt nodes.
+    // scene_video_prompt is intentionally NOT here — it's a deterministic
+    // assembler post-refactor and never reaches this LLM path.
+    const jsonNodeTypes = ['scene_shot_plan', 'shot_breakdown', 'shot_image_prompt', 'character_image', 'setting_image'];
     const isJsonNode = jsonNodeTypes.includes(node.typeId) || typeDef?.outputFormat === 'json';
     if (isJsonNode) {
       options.responseFormat = { type: 'json_object' };
@@ -5589,12 +6894,12 @@ Examples of common failure modes to avoid:
         if (this.sceneSummaries.size > 0) {
           const summaryPath = join(this.config.projectDir, 'prompts', 'scene_summaries.json');
           if (!existsSync(join(this.config.projectDir, 'prompts'))) mkdirSync(join(this.config.projectDir, 'prompts'), { recursive: true });
-          writeFileSync(summaryPath, JSON.stringify(Object.fromEntries(this.sceneSummaries), null, 2));
+          atomicWriteFileSync(summaryPath, JSON.stringify(Object.fromEntries(this.sceneSummaries), null, 2));
         }
         if (this.sceneEstimatedDurations.size > 0) {
           const durPath = join(this.config.projectDir, 'prompts', 'scene_durations.json');
           if (!existsSync(join(this.config.projectDir, 'prompts'))) mkdirSync(join(this.config.projectDir, 'prompts'), { recursive: true });
-          writeFileSync(durPath, JSON.stringify(Object.fromEntries(this.sceneEstimatedDurations), null, 2));
+          atomicWriteFileSync(durPath, JSON.stringify(Object.fromEntries(this.sceneEstimatedDurations), null, 2));
         }
       }
 
@@ -5848,7 +7153,12 @@ Examples of common failure modes to avoid:
       // instead — the user's rule is "within a scene only camera-angle
       // changes" and "scene N+1 picks up from scene N's last frame when
       // an `entry` is declared." See shouldForceEditPrevious.
-      if (node.itemId && firstFrameMode !== 'edit_previous_shot') {
+      //
+      // Skip the override when the anchor already picked
+      // `reuse_prior_frame` — that's the strongest signal ("view
+      // matches the source, no new image needed"), so we must NOT
+      // demote it to edit_previous_shot.
+      if (node.itemId && firstFrameMode !== 'edit_previous_shot' && firstFrameMode !== 'reuse_prior_frame') {
         const peekPrevItemId = getPreviousShotIdAcrossScenes(node.itemId, this.executor);
         const peekPrevNode = peekPrevItemId ? this.executor.getNode(`shot_image:${peekPrevItemId}`) : null;
         const previousShotAvailable = peekPrevNode?.status === 'completed';
@@ -5869,6 +7179,61 @@ Examples of common failure modes to avoid:
           // Mirror the override into the on-disk JSON so downstream
           // (e.g. last_frame, motion directive) sees the corrected mode.
           firstFrameData.generationMode = 'edit_previous_shot';
+        }
+      }
+
+      if (firstFrameMode === 'reuse_prior_frame') {
+        // View matches the source shot — its last_frame IS this shot's
+        // first_frame. Copy the file verbatim instead of running the
+        // image-edit pipeline. The source's scene+shot is encoded in
+        // the anchor; resolve to the live `shot_image_last_frame` node
+        // (or the upstream `shot_image:X.outputPaths.last_frame` for
+        // legacy projects) and `copyFileSync` to this shot's first_frame
+        // path. Byte-identical cut points are the goal.
+        const sceneIdFromItem = node.itemId?.match(/(scene_\d+)/)?.[1];
+        const shotNumFromItem = parseInt(node.itemId?.match(/shot_(\d+)/)?.[1] ?? '0', 10);
+        const anchor = sceneIdFromItem && shotNumFromItem > 0
+          ? readShotAnchorFromSvp(this.config.projectDir, sceneIdFromItem, shotNumFromItem)
+          : null;
+        const sourceSceneId = anchor?.sourceSceneId ?? sceneIdFromItem;
+        const sourceShotNum = anchor?.sourceShotNumber ?? 0;
+        if (sourceSceneId && sourceShotNum > 0) {
+          const sourceItemId = `${sourceSceneId}_shot_${sourceShotNum}`;
+          const { getLastFramePath } = await import('./crossShotChaining.js');
+          const sourceBridge = this.executor.getNode(`shot_image_last_frame:${sourceItemId}`);
+          const sourceShotNode = this.executor.getNode(`shot_image:${sourceItemId}`);
+          const sourceLastFrame =
+            (sourceBridge?.status === 'completed' && sourceBridge.outputPath
+              ? sourceBridge.outputPath
+              : null)
+            ?? (sourceShotNode ? getLastFramePath(sourceShotNode) : null);
+          if (sourceLastFrame) {
+            const assetsDir = join(this.config.projectDir, 'assets', 'images');
+            if (!existsSync(assetsDir)) mkdirSync(assetsDir, { recursive: true });
+            const sourceAbs = sourceLastFrame.startsWith('/')
+              ? sourceLastFrame
+              : join(this.config.projectDir, sourceLastFrame);
+            const ext = (sourceAbs.match(/\.(png|jpe?g|webp)$/i)?.[1] ?? 'png').toLowerCase();
+            const destAbs = join(assetsDir, `${node.itemId}_first_frame_reuse.${ext}`);
+            try {
+              const { copyFileSync } = await import('fs');
+              copyFileSync(sourceAbs, destAbs);
+              firstFramePath = relative(this.config.projectDir, destAbs);
+              this.log(`  first_frame (reuse_prior_frame): copied from ${sourceLastFrame} → ${firstFramePath}`);
+            } catch (err) {
+              this.log(`  reuse_prior_frame copy failed (${(err as Error).message}) — falling back to edit_previous_shot`);
+              // Fall through to edit_previous_shot path below by
+              // re-tagging the mode. The fallback handles the same
+              // cross-shot scenario.
+              firstFrameMode = 'edit_previous_shot';
+            }
+          } else {
+            this.log(`  reuse_prior_frame: no source last_frame found (${sourceItemId}) — falling back to edit_previous_shot`);
+            firstFrameMode = 'edit_previous_shot';
+          }
+        } else {
+          this.log(`  reuse_prior_frame: anchor missing source — falling back to edit_previous_shot`);
+          firstFrameMode = 'edit_previous_shot';
         }
       }
 
@@ -6393,160 +7758,17 @@ Examples of common failure modes to avoid:
             // Log but don't block — basic validation failures are warnings, not hard stops
           } else {
             this.log(`  Image validation passed`);
-
-            // VLM review — send image to vision model for quality check
-            // Skipped entirely if VLM was unavailable on first attempt (404)
-            const vlmCallId = `vlm_${node.id}_${Date.now()}`;
-            const vlmToolName = 'vlm_image_review';
-            if (this.vlmDisabled) {
-              this.log(`  VLM review skipped (disabled after previous 404)`);
-            } else try {
-              const { reviewImageWithVLM } = await import('./imageValidator.js');
-
-              this.emit({
-                type: 'tool_call',
-                toolCallId: vlmCallId,
-                toolName: vlmToolName,
-                arguments: { image: filePath, prompt: shotJson.imagePrompt.substring(0, 100) + '...' },
-                agentName,
-              });
-              this.emit({
-                type: 'tool_streaming',
-                toolCallId: vlmCallId,
-                chunk: 'Reviewing generated image with vision model...',
-                done: false,
-                agentName,
-                toolName: vlmToolName,
-              });
-
-              const vlmResult = await reviewImageWithVLM(absPath, shotJson.imagePrompt, this.llmFor('utility.image_review'));
-
-              // Check if VLM endpoint doesn't exist — disable for rest of session
-              if (!vlmResult.pass && vlmResult.issues.some(i => i.includes('404') || i.includes('No endpoints'))) {
-                this.vlmDisabled = true;
-                this.log(`  VLM disabled for session — endpoint not available`);
-                // Skip the retry — image is fine, just no VLM to review it
-                this.emit({
-                  type: 'tool_streaming',
-                  toolCallId: vlmCallId,
-                  chunk: 'VLM not available — skipping review for all remaining images',
-                  done: true,
-                  agentName,
-                  toolName: vlmToolName,
-                });
-                this.emit({
-                  type: 'tool_result',
-                  toolCallId: vlmCallId,
-                  toolName: vlmToolName,
-                  result: { status: 'skipped', reason: 'VLM endpoint not available' },
-                  agentName,
-                });
-              } else if (!vlmResult.pass) {
-                this.log(`  VLM review FAILED (attempt 1): ${vlmResult.issues.join('; ')}`);
-                this.emit({
-                  type: 'tool_streaming',
-                  toolCallId: vlmCallId,
-                  chunk: `REJECTED: ${vlmResult.issues.join('; ')}\nRegenerating image...`,
-                  done: false,
-                  agentName,
-                  toolName: vlmToolName,
-                });
-
-                // Retry: regenerate the image once
-                const retryResult = await submitImageGeneration({
-                  scene_number: sceneNumber,
-                  prompt: shotJson.imagePrompt,
-                  negative_prompt: shotJson.negativePrompt,
-                  aspect_ratio: shotJson.aspectRatio ?? '16:9',
-                  width: shotWidth,
-                  height: shotHeight,
-                  image_type: 'scene',
-                  generation_mode: generationMode,
-                  reference_images: hasRefs ? resolvedRefs : undefined,
-                });
-
-                const retryJob = mediaJobs.get(retryResult.jobId);
-                const retryPath = retryJob?.result?.path;
-
-                if (retryResult.status === 'completed' && retryPath) {
-                  this.log(`  Retry image generated: ${retryPath}`);
-                  const retryAbsPath = retryPath.startsWith('/') ? retryPath : join(this.config.projectDir, retryPath);
-
-                  const retryVlm = await reviewImageWithVLM(retryAbsPath, shotJson.imagePrompt, this.llmFor('utility.image_review'));
-                  if (retryVlm.pass) {
-                    this.log(`  VLM review passed on retry`);
-                    filePath = retryPath;
-                    this.emit({
-                      type: 'tool_streaming',
-                      toolCallId: vlmCallId,
-                      chunk: 'Retry image PASSED review',
-                      done: true,
-                      agentName,
-                      toolName: vlmToolName,
-                    });
-                  } else {
-                    this.log(`  VLM review FAILED again: ${retryVlm.issues.join('; ')} — accepting with warning`);
-                    this.emit({
-                      type: 'tool_streaming',
-                      toolCallId: vlmCallId,
-                      chunk: `Retry also rejected: ${retryVlm.issues.join('; ')}\nProceeding anyway`,
-                      done: true,
-                      agentName,
-                      toolName: vlmToolName,
-                    });
-                  }
-                } else {
-                  this.emit({
-                    type: 'tool_streaming',
-                    toolCallId: vlmCallId,
-                    chunk: 'Retry generation failed — proceeding with original',
-                    done: true,
-                    agentName,
-                    toolName: vlmToolName,
-                  });
-                }
-
-                this.emit({
-                  type: 'tool_result',
-                  toolCallId: vlmCallId,
-                  toolName: vlmToolName,
-                  result: { status: 'rejected_then_retried', issues: vlmResult.issues },
-                  agentName,
-                });
-              } else {
-                this.log(`  VLM review passed`);
-                this.emit({
-                  type: 'tool_streaming',
-                  toolCallId: vlmCallId,
-                  chunk: 'PASSED — image matches prompt',
-                  done: true,
-                  agentName,
-                  toolName: vlmToolName,
-                });
-                this.emit({
-                  type: 'tool_result',
-                  toolCallId: vlmCallId,
-                  toolName: vlmToolName,
-                  result: { status: 'passed' },
-                  agentName,
-                });
-              }
-            } catch (vlmErr) {
-              const vlmErrMsg = (vlmErr as Error).message;
-              this.log(`  VLM review skipped: ${vlmErrMsg}`);
-              // Disable VLM for rest of session if endpoint doesn't exist
-              if (vlmErrMsg.includes('404') || vlmErrMsg.includes('No endpoints') || vlmErrMsg.includes('not found')) {
-                this.vlmDisabled = true;
-                this.log(`  VLM disabled for this session (endpoint not available)`);
-              }
-              this.emit({
-                type: 'tool_result',
-                toolCallId: vlmCallId,
-                toolName: vlmToolName,
-                result: { status: 'skipped', error: (vlmErr as Error).message },
-                agentName,
-              });
-            }
+            // Semantic image-quality judgment is the supervisor's job:
+            // ConversationManager subscribes to BackgroundTaskRunner
+            // 'asset' events, calls `describeImageWithVLM` against the
+            // dedicated VLM_* config, and re-engages pi-agent with a
+            // `[SYSTEM EVENT]` turn. Pi-agent decides whether to call
+            // `kshana_invalidate` on the shot's node — that's where
+            // a regenerate gets driven from. The legacy in-executor
+            // `reviewImageWithVLM` + inline retry that lived here was
+            // removed: it used the WRONG llm config (utility tier, not
+            // the VLM_* env block), couldn't reflect pi-agent judgment,
+            // and duplicated the supervisor path.
           }
         } catch (valErr) {
           this.log(`  Image validation skipped: ${(valErr as Error).message}`);
@@ -6669,6 +7891,33 @@ Examples of common failure modes to avoid:
         imageType = 'object_ref';
         objectName = node.itemId;
       }
+
+      // Phase D — chained-edit (derivedFrom). If this ref node was
+      // spawned by the shot_image_prompt turn-2 LLM as a reframe /
+      // variant of an existing ref, render it as a Klein image-edit
+      // using the parent's outputPath as the base canvas instead of
+      // a plain text-to-image call.
+      const derivedFromRefId = node.metadata?.derivedFrom;
+      let chainedEditRef: { artifactId: string; type: 'character' | 'setting'; name: string } | null = null;
+      if (derivedFromRefId) {
+        const parentNode = this.executor.getNode(derivedFromRefId);
+        if (parentNode?.outputPath && parentNode.artifactId) {
+          const parentType: 'character' | 'setting' =
+            parentNode.typeId === 'setting_image' ? 'setting' : 'character';
+          chainedEditRef = {
+            artifactId: parentNode.artifactId,
+            type: parentType,
+            name: parentNode.itemId ?? parentNode.id,
+          };
+          this.log(
+            `  [${node.id}] derivedFrom=${derivedFromRefId} → chained edit using parent canvas ${parentNode.outputPath}`,
+          );
+        } else {
+          this.log(
+            `  [${node.id}] derivedFrom=${derivedFromRefId} but parent has no outputPath/artifactId yet — falling back to text-to-image`,
+          );
+        }
+      }
       progressHandler = (event) => {
         // Use reset: true so each progress update REPLACES the previous one
         // Format matches webui.ts progress bar detector: "Step N/M (X%)"
@@ -6694,8 +7943,12 @@ Examples of common failure modes to avoid:
         toolName,
       });
 
-      // Call the actual image generation (blocks until done)
-      // Character/setting images are always text_to_image (no references)
+      // Call the actual image generation (blocks until done).
+      // Default: character/setting images are text_to_image with no refs.
+      // Phase D: when this node was spawned with `derivedFrom`, switch
+      // to image_text_to_image and pass the parent's artifact as the
+      // single reference — Klein renders the new ref as a reframe of
+      // the parent canvas.
       const result = await submitImageGeneration({
         scene_number: sceneNumber,
         prompt,
@@ -6705,7 +7958,18 @@ Examples of common failure modes to avoid:
         character_name: characterName,
         setting_name: settingName,
         object_name: objectName,
-        generation_mode: 'text_to_image',
+        generation_mode: chainedEditRef ? 'image_text_to_image' : 'text_to_image',
+        ...(chainedEditRef
+          ? {
+              reference_images: [
+                {
+                  image_id: chainedEditRef.artifactId,
+                  type: chainedEditRef.type,
+                  name: chainedEditRef.name,
+                },
+              ],
+            }
+          : {}),
       });
 
       // Unsubscribe from progress
@@ -7469,7 +8733,7 @@ Examples of common failure modes to avoid:
     const outputAbs = join(this.config.projectDir, outputRel);
     const outputDir = join(this.config.projectDir, 'prompts');
     if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
-    writeFileSync(outputAbs, JSON.stringify(essence, null, 2));
+    atomicWriteFileSync(outputAbs, JSON.stringify(essence, null, 2));
 
     this.storyEssence = essence;
     this.log(`  story_essence: wrote ${outputRel} (genre=${essence.genre})`);
@@ -7484,6 +8748,196 @@ Examples of common failure modes to avoid:
     this.emit({
       type: 'agent_text',
       text: `**Story Essence** → \`${outputRel}\` — genre: ${essence.genre}; throughline: ${essence.throughline}`,
+      isFinal: false,
+    });
+
+    return outputRel;
+  }
+
+  /**
+   * Stage C of the hierarchical scene-breakdown flow — deterministic
+   * assembly of scene_shot_plan + N shot_breakdown outputs into the
+   * existing sceneVideoPromptSchema shape, with all the post-validators
+   * the legacy single-call path ran (continuity, one-setting, dialogue
+   * fit, multi-speaker scan).
+   *
+   * Returns the relative output path on success, null on failure (and
+   * marks the node failed via executor.markFailed).
+   */
+  private async executeSceneVideoPromptAssembly(
+    node: ExecutionNode,
+    toolCallId: string,
+    agentName: string,
+  ): Promise<string | null> {
+    const sceneId = node.itemId;
+    if (!sceneId) {
+      this.executor.markFailed(node.id, `scene_video_prompt node has no itemId`);
+      return null;
+    }
+
+    const toolName = 'assemble_scene_breakdown';
+    this.emit({
+      type: 'tool_call',
+      toolCallId,
+      toolName,
+      arguments: { item: node.displayName, deterministic: true, scene: sceneId },
+      agentName,
+    });
+
+    // 1. Load the scene_shot_plan (Stage A output) for this scene.
+    const planNode = this.executor.getNode(`scene_shot_plan:${sceneId}`);
+    if (!planNode || planNode.status !== 'completed' || !planNode.outputPath) {
+      const msg = `scene_shot_plan:${sceneId} is not completed (status=${planNode?.status ?? 'missing'})`;
+      this.executor.markFailed(node.id, msg);
+      this.emit({ type: 'tool_result', toolCallId, toolName, result: { status: 'error', error: msg }, agentName, isError: true });
+      this.emitTodoUpdate();
+      return null;
+    }
+    let plan;
+    try {
+      const planPath = join(this.config.projectDir, planNode.outputPath);
+      const planContent = readFileSync(planPath, 'utf-8').trim();
+      const cleaned = planContent.startsWith('```')
+        ? planContent.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
+        : planContent;
+      const parsed = JSON.parse(cleaned);
+      const r = shotPlanSchema.safeParse(parsed);
+      if (!r.success) {
+        throw new Error(`shotPlanSchema mismatch: ${r.error.issues.map(i => i.path.join('.') + ': ' + i.message).join('; ')}`);
+      }
+      plan = r.data;
+    } catch (err) {
+      const msg = `Failed to load scene_shot_plan for ${sceneId}: ${(err as Error).message}`;
+      this.executor.markFailed(node.id, msg);
+      this.emit({ type: 'tool_result', toolCallId, toolName, result: { status: 'error', error: msg }, agentName, isError: true });
+      this.emitTodoUpdate();
+      return null;
+    }
+
+    // 2. Load every shot_breakdown:{sceneId}_shot_* output. Order doesn't
+    // matter — the assembler sorts by shotNumber.
+    const shotNodes = this.executor.getAllNodes().filter(n =>
+      n.typeId === 'shot_breakdown' && n.itemId?.startsWith(`${sceneId}_shot_`),
+    );
+    if (shotNodes.length === 0) {
+      const msg = `No shot_breakdown nodes found for ${sceneId}`;
+      this.executor.markFailed(node.id, msg);
+      this.emit({ type: 'tool_result', toolCallId, toolName, result: { status: 'error', error: msg }, agentName, isError: true });
+      this.emitTodoUpdate();
+      return null;
+    }
+    const shots: SingleShot[] = [];
+    for (const shotNode of shotNodes) {
+      if (shotNode.status !== 'completed' || !shotNode.outputPath) {
+        const msg = `${shotNode.id} is not completed (status=${shotNode.status})`;
+        this.executor.markFailed(node.id, msg);
+        this.emit({ type: 'tool_result', toolCallId, toolName, result: { status: 'error', error: msg }, agentName, isError: true });
+        this.emitTodoUpdate();
+        return null;
+      }
+      try {
+        const shotPath = join(this.config.projectDir, shotNode.outputPath);
+        const shotContent = readFileSync(shotPath, 'utf-8').trim();
+        const cleaned = shotContent.startsWith('```')
+          ? shotContent.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '')
+          : shotContent;
+        const parsed = JSON.parse(cleaned);
+        const r = singleShotSchema.safeParse(parsed);
+        if (!r.success) {
+          throw new Error(`singleShotSchema mismatch: ${r.error.issues.map(i => i.path.join('.') + ': ' + i.message).join('; ')}`);
+        }
+        shots.push(r.data);
+      } catch (err) {
+        const msg = `Failed to load ${shotNode.id}: ${(err as Error).message}`;
+        this.executor.markFailed(node.id, msg);
+        this.emit({ type: 'tool_result', toolCallId, toolName, result: { status: 'error', error: msg }, agentName, isError: true });
+        this.emitTodoUpdate();
+        return null;
+      }
+    }
+
+    // 3. Stitch.
+    //
+    // Look up the prior scene's last shot so the first shot of THIS
+    // scene can anchor on its last_frame (cross-scene continuity:
+    // "exits door A in scene N → enters door B in scene N+1"). For
+    // scene 1, or when the prior scene's plan isn't on disk yet,
+    // we pass null and the assembler falls back to `fresh` for the
+    // first shot.
+    const sceneNumMatch = sceneId.match(/^scene_(\d+)$/);
+    const sceneNum = sceneNumMatch ? parseInt(sceneNumMatch[1]!, 10) : 0;
+    let priorSceneLastShot: { sceneId: string; shotNumber: number } | null = null;
+    if (sceneNum >= 2) {
+      const priorSceneId = `scene_${sceneNum - 1}`;
+      const priorShotBreakdowns = this.executor.getAllNodes()
+        .filter((n) => n.typeId === 'shot_breakdown' && n.itemId?.startsWith(`${priorSceneId}_shot_`))
+        .map((n) => {
+          const m = n.itemId!.match(/_shot_(\d+)$/);
+          return m ? parseInt(m[1]!, 10) : 0;
+        })
+        .filter((n) => n > 0)
+        .sort((a, b) => b - a);
+      if (priorShotBreakdowns.length > 0) {
+        priorSceneLastShot = { sceneId: priorSceneId, shotNumber: priorShotBreakdowns[0]! };
+      }
+    }
+
+    let assembled;
+    try {
+      assembled = assembleSceneVideoPrompt(plan, shots, priorSceneLastShot);
+    } catch (err) {
+      const msg = `Assembler rejected inputs for ${sceneId}: ${(err as Error).message}`;
+      this.executor.markFailed(node.id, msg);
+      this.emit({ type: 'tool_result', toolCallId, toolName, result: { status: 'error', error: msg }, agentName, isError: true });
+      this.emitTodoUpdate();
+      return null;
+    }
+
+    // 4. Run the existing post-validators by routing the assembled JSON
+    // through validateJsonOutput — that path runs normalizeSceneVideoPrompt,
+    // continuity-sequence, one-setting-per-scene, dialogue-fit and
+    // multi-speaker checks. Any of them rejecting marks the node failed
+    // so the user sees the same error semantics as the legacy LLM path.
+    const content = JSON.stringify(assembled, null, 2);
+    const validation = this.validateJsonOutput(content, node);
+    if (!validation.valid) {
+      // Persist the assembled-but-rejected content so the user can
+      // inspect what was stitched (often the post-validators flag a
+      // continuity / dialogue-fit issue and the user wants to see
+      // exactly which shot tripped which rule).
+      const sidecar = writeFailedAttempt(
+        node,
+        content,
+        validation.error ?? 'unknown validation error',
+        this.config.projectDir,
+        this.config.template,
+      );
+      const hint = sidecar.contentPath
+        ? ` Assembled output saved to ${sidecar.contentPath} (.failed).`
+        : '';
+      const msg = `Assembled scene_video_prompt failed post-validation: ${validation.error}.${hint}`;
+      this.executor.markFailed(node.id, msg);
+      this.emit({ type: 'tool_result', toolCallId, toolName, result: { status: 'error', error: msg }, agentName, isError: true });
+      this.emitTodoUpdate();
+      return null;
+    }
+    const finalContent = validation.normalizedContent ?? content;
+
+    // 5. Write to disk and emit completion.
+    const outputRel = writeOutput(node, finalContent, this.config.projectDir, this.config.template);
+    // Clean up any prior .failed sidecars from a previous broken run.
+    clearFailedAttempt(node, this.config.projectDir, this.config.template);
+    this.log(`  scene_video_prompt assembled: ${outputRel} (${shots.length} shots)`);
+    this.emit({
+      type: 'tool_result',
+      toolCallId,
+      toolName,
+      result: { status: 'completed', file: outputRel, shots: shots.length },
+      agentName,
+    });
+    this.emit({
+      type: 'agent_text',
+      text: `**Scene Breakdown** → \`${outputRel}\` (assembled ${shots.length} shots from plan + per-shot LLM outputs)`,
       isFinal: false,
     });
 
@@ -7901,7 +9355,7 @@ Examples of common failure modes to avoid:
         mkdirSync(dir, { recursive: true });
       }
       const filePath = join(dir, 'project.json');
-      writeFileSync(filePath, JSON.stringify(this.config.project, null, 2), 'utf-8');
+      atomicWriteFileSync(filePath, JSON.stringify(this.config.project, null, 2), 'utf-8');
     } catch (error) {
       // Non-fatal — execution can continue without persistence
       this.emit({

@@ -11,13 +11,14 @@
  *
  * Pure-ish: reads/writes project.json, no async-local context.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   retireShotSlots,
   type Shot,
   type ShotHistoryEntry,
 } from "./projectSchema.js";
+import { atomicWriteFileSync } from "../../utils/atomicWrite.js";
 
 export interface VerifyResult {
   dropped: number;
@@ -66,6 +67,6 @@ export function verifyShotPaths(basePath: string): VerifyResult {
     dropped += 1;
   }
 
-  writeFileSync(projectPath, JSON.stringify(project, null, 2) + "\n", "utf8");
+  atomicWriteFileSync(projectPath, JSON.stringify(project, null, 2) + "\n", "utf8");
   return { dropped };
 }

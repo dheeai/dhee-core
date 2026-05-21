@@ -1,38 +1,14 @@
 /**
- * TDD Tests for self-healing corrupt shot_image_prompt JSON.
- *
- * When a prompt file has invalid JSON, the executor should:
- * 1. Detect the parse error
- * 2. Invalidate the prompt node (reset to pending)
- * 3. On next run, the LLM regenerates the prompt
+ * Schema validation for shot_image_prompt — the "self-healing" name
+ * comes from the original TDD context (executor detects corrupt JSON
+ * and re-invokes the LLM). The executor-side detection used to be
+ * tested by grepping the source for sentinel strings; those tests
+ * were deleted because they pinned text, not behavior. What's left
+ * here is the load-bearing schema contract.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { validateWithSchema } from '../../src/core/planner/schemas.js';
-
-describe('Corrupt prompt self-healing: detection', () => {
-  it('executor code detects corrupt JSON and invalidates prompt node', () => {
-    const code = readFileSync(join(process.cwd(), 'src/core/planner/ExecutorAgent.ts'), 'utf-8');
-    // Must detect JSON parse failure
-    expect(code).toContain('Shot image prompt JSON is corrupt');
-    // Must invalidate the prompt node
-    expect(code).toContain('invalidateNode(promptDep.id)');
-    // Must persist state after invalidation
-    expect(code).toContain('persistState()');
-  });
-
-  it('executor validates structure: rejects prompt without imagePrompt or frames', () => {
-    const code = readFileSync(join(process.cwd(), 'src/core/planner/ExecutorAgent.ts'), 'utf-8');
-    expect(code).toContain('no frames or imagePrompt');
-  });
-
-  it('executor validates structure: rejects frames without first_frame.imagePrompt', () => {
-    const code = readFileSync(join(process.cwd(), 'src/core/planner/ExecutorAgent.ts'), 'utf-8');
-    expect(code).toContain('frames missing first_frame.imagePrompt');
-  });
-});
 
 describe('Corrupt prompt self-healing: schema validation', () => {
   it('valid single-frame prompt passes schema', () => {

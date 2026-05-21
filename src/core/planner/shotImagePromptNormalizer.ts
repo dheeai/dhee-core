@@ -30,6 +30,8 @@
  *    lockstep.
  */
 
+import { validateSidePair } from './validateSidePair.js';
+
 export interface ShotImagePromptRef {
   imageNumber: number;
   type: 'character' | 'setting' | string;
@@ -506,6 +508,14 @@ export function alignFramesToFirstFrame(
       finalRefs.push({ ...r });
       seen.add(r.refId);
     }
+
+    // Bug 3 (Ruby V3 s3s6): when the prose-tag-based drop above removes
+    // a character from a pair, the surviving lone-side label becomes a
+    // half-specified OTS pair. Re-validate side invariants after every
+    // mutation. The same rule fires on turn-2 LLM output via
+    // parseTurn2RefsJson — extracting it here closes the gap where a
+    // post-turn mutation could leave the half-pair on the rendered frame.
+    validateSidePair(finalRefs);
 
     frame.references = finalRefs;
     frame.imagePrompt = prose;

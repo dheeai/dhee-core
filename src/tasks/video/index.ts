@@ -39,11 +39,10 @@ export {
   VIDEO_COMPLEX_TOOLS,
 } from './tools.js';
 
-// Re-export infographic tools
-export {
-  getInfographicTools,
-  INFOGRAPHIC_COMPLEX_TOOLS,
-} from './infographic-tools.js';
+// Infographic tools removed: the Remotion render path lived inside a
+// `npx remotion bundle` subprocess that doesn't ship in packaged
+// builds. Infographic rendering is now handled by the host wrapper
+// (kshana-desktop/src/main/remotionManager.ts) over IPC.
 
 // Re-export state types
 export { resetProjectState, setCurrentProjectId } from './state.js';

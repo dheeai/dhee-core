@@ -520,6 +520,30 @@ export async function submitImageGeneration(params: ImageGenerationParams): Prom
       });
     };
 
+    // [SUBMIT_PROMPT_TRACE] Capture the exact prompt going into the provider.
+    // Paired with [ZIMAGE_PROMPT_TRACE] (in WorkflowLoader.ts) so we can
+    // diff the upstream prompt against the downstream workflow JSON.
+    // Use this to isolate caching / wrong-prompt-substitution bugs that
+    // produce byte-identical PNGs across runs (officer-as-Doraemon, 2026-05-19).
+    {
+      const { createHash } = await import('crypto');
+      const posMd5 = createHash('md5')
+        .update(enhancedPrompt)
+        .digest('hex')
+        .slice(0, 12);
+      const negMd5 = createHash('md5')
+        .update(enhancedNegativePrompt)
+        .digest('hex')
+        .slice(0, 12);
+      debugLog(
+        `[SUBMIT_PROMPT_TRACE] image_type=${image_type} character_name=${character_name ?? '-'} setting_name=${setting_name ?? '-'} ` +
+          `seed=${seed} pos_md5=${posMd5} neg_md5=${negMd5} ` +
+          `pos_first_160="${enhancedPrompt.slice(0, 160)}" ` +
+          `pos_len=${enhancedPrompt.length} neg_len=${enhancedNegativePrompt.length} ` +
+          `filenamePrefix="${filenamePrefix}"`,
+      );
+    }
+
     let result;
     try {
       result = await provider.generateImage!(
@@ -731,6 +755,16 @@ async function waitForComfyUIJob(
       });
     }
 
+    if (completionResult.status === 'cancelled') {
+      // User-initiated cancel via the activeJobs registry. Mark the
+      // job cancelled (not failed) so the runner / executor can
+      // distinguish "user said stop" from "ComfyUI exploded" — the
+      // 2026-05-19 stuck-Stopping fix.
+      job.status = 'failed';
+      job.error = 'Cancelled by user';
+      job.updatedAt = Date.now();
+      return { status: 'failed', error: 'Cancelled by user' };
+    }
     if (
       completionResult.status !== 'completed' &&
       completionResult.status !== 'completed_with_timeout'
@@ -2351,9 +2385,8 @@ export const waitForJobTool: ToolDefinition = createTool(
   'wait_for_job',
   `Wait for a generation job to complete and get the result.
 
-Use this after submitting generate_image, generate_video, edit_image, or generate_all_infographics to check status.
-When job completes, returns the artifact ID and file path.
-Supports both ComfyUI jobs and Remotion infographic jobs (prefixed with "remotion-").`,
+Use this after submitting generate_image, generate_video, or edit_image to check status.
+When job completes, returns the artifact ID and file path.`,
   {
     type: 'object',
     properties: {
@@ -2361,48 +2394,11 @@ Supports both ComfyUI jobs and Remotion infographic jobs (prefixed with "remotio
         type: 'string',
         description: 'The job ID returned from a generation tool',
       },
-      timeout: {
-        type: 'number',
-        description: 'Timeout in seconds for Remotion jobs only (default: 300). ComfyUI jobs poll indefinitely.',
-      },
     },
     required: ['job_id'],
   },
   async args => {
     const jobId = args['job_id'] as string;
-    const timeout = (args['timeout'] as number) || 300;
-
-    // Handle Remotion infographic jobs
-    if (jobId.startsWith('remotion-')) {
-      const { RemotionRenderer } = await import('../../services/remotion/index.js');
-      const renderer = RemotionRenderer.getInstance();
-
-      const startTime = Date.now();
-      const timeoutMs = timeout * 1000;
-
-      while (Date.now() - startTime < timeoutMs) {
-        const renderJob = renderer.getJobStatus(jobId);
-        if (!renderJob) {
-          return { status: 'error', error: `Remotion job not found: ${jobId}` };
-        }
-
-        if (renderJob.status === 'completed' || renderJob.status === 'failed') {
-          return {
-            job_id: renderJob.id,
-            type: 'infographic' as const,
-            status: renderJob.status,
-            progress: renderJob.progress,
-            results: renderJob.results,
-            error: renderJob.error,
-          };
-        }
-
-        // Poll every 2 seconds
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-
-      return { status: 'error', error: `Remotion job timed out after ${timeout}s`, job_id: jobId };
-    }
 
     // Handle ComfyUI jobs
     const job = jobs.get(jobId);

@@ -8,8 +8,9 @@
  * Pure-ish: reads/writes project.json + manifest.json under `basePath`,
  * uses no async-local session context.
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteFileSync } from "../../utils/atomicWrite.js";
 import {
   ensureScene,
   ensureShot,
@@ -192,7 +193,7 @@ export function backfillProjectSchema(basePath: string): BackfillResult {
   result.scenesAdded = after.scenes - before.scenes;
   result.shotsAdded = after.shots - before.shots;
 
-  writeFileSync(projectPath, JSON.stringify(project, null, 2) + "\n", "utf8");
+  atomicWriteFileSync(projectPath, JSON.stringify(project, null, 2) + "\n", "utf8");
   return result;
 }
 

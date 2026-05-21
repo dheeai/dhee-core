@@ -6,9 +6,10 @@
  * into each shot's LLM context to maintain visual continuity.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { z } from 'zod';
+import { atomicWriteFileSync } from '../../utils/atomicWrite.js';
 
 /**
  * Character-kind discriminator. Controls which pose fields apply.
@@ -140,7 +141,7 @@ export function saveSceneState(projectDir: string, sceneId: string, state: Scene
   const stateDir = join(projectDir, 'prompts', 'videos', 'scenes');
   if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
   const statePath = join(stateDir, `${sceneId}.state.json`);
-  writeFileSync(statePath, JSON.stringify(state, null, 2));
+  atomicWriteFileSync(statePath, JSON.stringify(state, null, 2));
 }
 
 /**
@@ -502,7 +503,7 @@ export function saveShotStateDiff(
   const stateDir = join(projectDir, 'prompts', 'videos', 'scenes');
   if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
   const diffPath = join(stateDir, `${sceneId}_shot_${shotNumber}.state_diff.json`);
-  writeFileSync(diffPath, JSON.stringify({ previous, target }, null, 2));
+  atomicWriteFileSync(diffPath, JSON.stringify({ previous, target }, null, 2));
 }
 
 /**

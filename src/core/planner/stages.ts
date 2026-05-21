@@ -37,7 +37,15 @@ export const STAGE_ALIASES: Record<string, string[]> = {
   character_image: ['character_image', 'setting_image', 'object_image'],  // all three reference-image siblings
   reference_images: ['character_image', 'setting_image', 'object_image'], // explicit alias for all three
   setting_image: ['setting_image'],
-  scene_video_prompt: ['scene_video_prompt'],
+  // The user-facing "scene_video_prompt" stage covers all three layers of
+  // the hierarchical breakdown: the lightweight plan (Stage A), the
+  // per-shot expansions (Stage B), and the deterministic assembler
+  // (Stage C). Resetting at this stage clears the upstream LLM stages
+  // so the user gets a fresh breakdown — not just a re-stitch of the
+  // existing plan + shots.
+  scene_video_prompt: ['scene_shot_plan', 'shot_breakdown', 'scene_video_prompt'],
+  scene_shot_plan: ['scene_shot_plan'],
+  shot_breakdown: ['shot_breakdown'],
   shot_image_prompt: ['shot_image_prompt'],
   shot_motion_directive: ['shot_motion_directive'],
   shot_image: ['shot_image'],
@@ -64,11 +72,22 @@ export const TEMPLATE_DEPS: Record<string, string[]> = {
   character_image: ['character', 'world_style'],
   setting_image: ['setting', 'world_style'],
   object_image: ['object', 'world_style'],
-  scene_video_prompt: ['scene', 'world_style'],
+  scene_shot_plan: ['scene', 'world_style'],
+  shot_breakdown: ['scene_shot_plan', 'world_style'],
+  scene_video_prompt: ['scene_shot_plan', 'shot_breakdown'],
   shot_image_prompt: ['scene_video_prompt'],
   shot_motion_directive: ['scene_video_prompt', 'shot_image_prompt', 'world_style'],
   shot_image: ['shot_image_prompt', 'character_image', 'setting_image', 'object_image'],
-  shot_video: ['shot_image', 'shot_motion_directive'],
+  // shot_image_last_frame was previously absent from this map. Its omission
+  // meant `pnpm reset <stage>` (and the desktop reset path that calls the
+  // same resetProjectStage) never invalidated last_frame nodes via the BFS
+  // that walks TEMPLATE_DEPS — so after a reset the executor's
+  // "outputPath exists on disk" short-circuit in executeShotImageLastFrame.ts
+  // returned the stale prior render as the node's output, and last frames
+  // silently survived across resets. Adding it puts last frames on the same
+  // invalidation chain as first frames so resets are symmetric.
+  shot_image_last_frame: ['shot_image_prompt', 'shot_image', 'character_image', 'setting_image', 'object_image'],
+  shot_video: ['shot_image', 'shot_image_last_frame', 'shot_motion_directive'],
   final_video: ['shot_video'],
 };
 

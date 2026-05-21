@@ -42,7 +42,16 @@ describe('STAGE_ALIASES', () => {
   it('single-type stages map to a one-element array', () => {
     expect(STAGE_ALIASES.plot).toEqual(['plot']);
     expect(STAGE_ALIASES.story).toEqual(['story']);
-    expect(STAGE_ALIASES.scene_video_prompt).toEqual(['scene_video_prompt']);
+    // The user-facing scene_video_prompt stage now spans the full
+    // hierarchical breakdown (Stage A plan + Stage B per-shot + Stage C
+    // assembler) so /reset scene_video_prompt clears all three layers.
+    expect(STAGE_ALIASES.scene_video_prompt).toEqual([
+      'scene_shot_plan',
+      'shot_breakdown',
+      'scene_video_prompt',
+    ]);
+    expect(STAGE_ALIASES.scene_shot_plan).toEqual(['scene_shot_plan']);
+    expect(STAGE_ALIASES.shot_breakdown).toEqual(['shot_breakdown']);
   });
 });
 
@@ -50,8 +59,14 @@ describe('TEMPLATE_DEPS', () => {
   it('includes every required template dependency edge', () => {
     // Sanity: reset-script's downstream-computation depends on these edges.
     expect(TEMPLATE_DEPS.story).toContain('plot');
-    expect(TEMPLATE_DEPS.scene_video_prompt).toContain('scene');
-    expect(TEMPLATE_DEPS.scene_video_prompt).toContain('world_style');
+    // After the hierarchical breakdown refactor, scene text feeds into
+    // scene_shot_plan (Stage A LLM) — not directly into scene_video_prompt
+    // (which is now the deterministic Stage C assembler).
+    expect(TEMPLATE_DEPS.scene_shot_plan).toContain('scene');
+    expect(TEMPLATE_DEPS.scene_shot_plan).toContain('world_style');
+    expect(TEMPLATE_DEPS.shot_breakdown).toContain('scene_shot_plan');
+    expect(TEMPLATE_DEPS.scene_video_prompt).toContain('scene_shot_plan');
+    expect(TEMPLATE_DEPS.scene_video_prompt).toContain('shot_breakdown');
     expect(TEMPLATE_DEPS.shot_video).toContain('shot_image');
     expect(TEMPLATE_DEPS.shot_video).toContain('shot_motion_directive');
     expect(TEMPLATE_DEPS.final_video).toContain('shot_video');

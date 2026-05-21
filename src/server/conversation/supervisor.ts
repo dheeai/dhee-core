@@ -19,7 +19,7 @@
  * subscription) lives in ConversationManager.
  */
 
-export type SupervisorEvent = "failed" | "completed" | "asset";
+export type SupervisorEvent = "failed" | "completed" | "asset" | "user_invalidate";
 
 /**
  * Per-session supervisor bookkeeping. Keyed by task.id so a fresh
@@ -66,6 +66,13 @@ export function shouldFireSupervisor(
   const failedCount = sameTask ? state.failedCompletedCount : 0;
   const assetCount = sameTask ? state.assetCount : 0;
   if (event === "asset") return assetCount < MAX_ASSET_PER_TASK;
+  // user_invalidate is a user-driven event (Prompts-tab edit, Redo-
+  // from menu) — uncapped on purpose. Each one is an explicit act
+  // the user took; pi-agent needs to learn about every one so its
+  // mental model of project state stays current. The circuit
+  // breaker exists to keep pi-agent from hammering itself on
+  // failure loops; user actions aren't a loop.
+  if (event === "user_invalidate") return true;
   return failedCount < MAX_FAILED_COMPLETED_PER_TASK;
 }
 
@@ -87,6 +94,12 @@ export function recordSupervisorInvocation(
       failedCompletedCount,
       assetCount: assetCount + 1,
     };
+  }
+  if (event === "user_invalidate") {
+    // No counter change — user_invalidate is uncapped per
+    // `shouldFireSupervisor`. We still bump `taskId` so a fresh
+    // task with the same name doesn't inherit stale counts.
+    return { taskId, failedCompletedCount, assetCount };
   }
   return {
     taskId,
@@ -125,10 +138,36 @@ interface AssetEventInfo extends BaseSupervisorEventInfo {
   vlmDescription?: string;
 }
 
+/**
+ * The user did something to the project state OUTSIDE of pi-agent's
+ * conversation — saved an edit in the Prompts tab, picked "Redo
+ * from..." in the dropdown, etc. The desktop's IPC layer calls
+ * ConversationManager.invalidateNodes, which routes that mutation
+ * through here so pi-agent learns about it.
+ *
+ * Without this event, pi-agent's in-context memory of project state
+ * stays stuck at "everything was completed when I last looked", and
+ * a follow-up "resume" instruction confidently reports "nothing to
+ * do". The cooldown/prompt fixes shipped earlier nag pi-agent to
+ * recheck — this event tells it WHAT changed and why.
+ */
+interface UserInvalidateEventInfo extends BaseSupervisorEventInfo {
+  event: "user_invalidate";
+  /** Node ids the user invalidated (seed set). Cascade ids are NOT
+   *  included — pi-agent can derive them with kshana_status if it
+   *  cares; the seeds are the user's intent. */
+  seeds: string[];
+  /** Where the invalidation originated. Free-form string so the
+   *  desktop can pass "prompts_tab_save" / "redo_from_menu" /
+   *  whatever — pi-agent doesn't dispatch on it, just for context. */
+  source?: string;
+}
+
 export type SupervisorEventInfo =
   | FailedEventInfo
   | CompletedEventInfo
-  | AssetEventInfo;
+  | AssetEventInfo
+  | UserInvalidateEventInfo;
 
 /**
  * Format a runner event as a `[SYSTEM EVENT]` task message that
@@ -147,6 +186,21 @@ export function buildSupervisorTask(info: SupervisorEventInfo): string {
   }
   if (info.event === "completed") {
     return `${head}\nstatus=completed\n\nIf there's anything worth flagging from this run, do it now. Otherwise a one-line ack is fine.`;
+  }
+  if (info.event === "user_invalidate") {
+    const sourceLine = info.source ? `source: ${info.source}` : `source: ui`;
+    const seedList = info.seeds.length > 0
+      ? info.seeds.map((s) => `  - ${s}`).join("\n")
+      : "  (none)";
+    return [
+      head,
+      `status=user_invalidated`,
+      sourceLine,
+      `seeds:`,
+      seedList,
+      ``,
+      `The user invalidated the above nodes via the desktop UI (NOT via chat). Your prior view of "everything is completed" is now stale — the seeds + their dependents are pending again. When the user next asks you to "resume" / "run" / "what's left", call kshana_status FIRST to refresh, then act on the fresh state. A one-line ack here is fine ("Noted — N nodes pending, ready when you say go."). Do NOT auto-dispatch kshana_run_to from this event — the user decides when to resume.`,
+    ].join("\n");
   }
   // asset
   const visionLine = info.vlmDescription

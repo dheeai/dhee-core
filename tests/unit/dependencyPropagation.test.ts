@@ -99,19 +99,22 @@ describe('expandCollection cascades matching-scope deps to dependent collections
     expect(executor.getNode('object_image')).toBeUndefined();
   });
 
-  it('scene expansion cascades to scene_video_prompt per-item nodes', () => {
+  it('scene expansion cascades to scene_shot_plan per-item nodes (Stage A of hierarchical breakdown)', () => {
     executor.expandCollection('scene', [
       { itemId: 'scene_1', name: 'Scene 1' },
       { itemId: 'scene_2', name: 'Scene 2' },
     ]);
 
-    const svp1 = executor.getNode('scene_video_prompt:scene_1');
-    const svp2 = executor.getNode('scene_video_prompt:scene_2');
-    expect(svp1, 'scene_video_prompt:scene_1 should exist').toBeDefined();
-    expect(svp2, 'scene_video_prompt:scene_2 should exist').toBeDefined();
-    expect(svp1!.dependencies).toContain('scene:scene_1');
-    expect(svp2!.dependencies).toContain('scene:scene_2');
-    expect(executor.getNode('scene_video_prompt')).toBeUndefined();
+    // Post-refactor: scene text feeds scene_shot_plan (Stage A LLM),
+    // not scene_video_prompt (which is now a deterministic assembler
+    // that consumes the plan + per-shot breakdowns).
+    const plan1 = executor.getNode('scene_shot_plan:scene_1');
+    const plan2 = executor.getNode('scene_shot_plan:scene_2');
+    expect(plan1, 'scene_shot_plan:scene_1 should exist').toBeDefined();
+    expect(plan2, 'scene_shot_plan:scene_2 should exist').toBeDefined();
+    expect(plan1!.dependencies).toContain('scene:scene_1');
+    expect(plan2!.dependencies).toContain('scene:scene_2');
+    expect(executor.getNode('scene_shot_plan')).toBeUndefined();
   });
 
   it('parent per-item nodes record expanded dependents (reverse edges)', () => {
@@ -122,9 +125,9 @@ describe('expandCollection cascades matching-scope deps to dependent collections
 
     const scene1 = executor.getNode('scene:scene_1');
     expect(scene1).toBeDefined();
-    // The per-item scene_video_prompt:scene_1 must be in scene:scene_1's
+    // The per-item scene_shot_plan:scene_1 must be in scene:scene_1's
     // dependents — otherwise ready-node detection can't propagate completion.
-    expect(scene1!.dependents).toContain('scene_video_prompt:scene_1');
+    expect(scene1!.dependents).toContain('scene_shot_plan:scene_1');
   });
 });
 
@@ -157,12 +160,20 @@ describe('per-item nodes keep their matching-scope deps across full expansion se
     ]);
 
     // All downstream per-item deps must be correctly wired to their parents.
+    // Post-refactor: scene → scene_shot_plan (Stage A) is the matching-scope
+    // edge that must survive the cascade. scene_video_prompt:N depends on
+    // scene_shot_plan:N + shot_breakdown:N instead.
+    const plan1 = executor.getNode('scene_shot_plan:scene_1');
+    expect(plan1).toBeDefined();
+    expect(plan1!.dependencies).toContain('scene:scene_1');
+    expect(plan1!.dependencies).toContain('world_style');
+    // Never leak the parent type-level name as a dangling dep.
+    expect(plan1!.dependencies).not.toContain('scene');
+
     const svp1 = executor.getNode('scene_video_prompt:scene_1');
     expect(svp1).toBeDefined();
-    expect(svp1!.dependencies).toContain('scene:scene_1');
-    expect(svp1!.dependencies).toContain('world_style');
-    // Never leak the parent type-level name as a dangling dep.
-    expect(svp1!.dependencies).not.toContain('scene');
+    expect(svp1!.dependencies).toContain('scene_shot_plan:scene_1');
+    expect(svp1!.dependencies).not.toContain('scene_shot_plan');
 
     const charImg = executor.getNode('character_image:alice');
     expect(charImg).toBeDefined();
@@ -261,17 +272,20 @@ describe('state-heal on session resume repairs missing matching-scope deps', () 
 
     // Simulate the exact lazarus_drive corruption: strip every matching-scope
     // dep from per-item children.
+    // Post-hierarchical-refactor: scene → scene_shot_plan is the matching-
+    // scope edge that needs healing (scene_video_prompt no longer has a
+    // direct scene dep — it depends on scene_shot_plan + shot_breakdown).
     const victims = [
       'character_image:alice',
       'setting_image:park',
       'object_image:drive',
-      'scene_video_prompt:scene_1',
+      'scene_shot_plan:scene_1',
     ];
     const matchingDepsByType: Record<string, string> = {
       character_image: 'character:alice',
       setting_image: 'setting:park',
       object_image: 'object:drive',
-      scene_video_prompt: 'scene:scene_1',
+      scene_shot_plan: 'scene:scene_1',
     };
     for (const id of victims) {
       const n = executor.getNode(id)!;
@@ -375,13 +389,15 @@ describe('lazarus_drive production scenario regression', () => {
     expect(objNode!.dependencies).toContain('object:lazarus_drive');
 
     // Scene breakdowns must see the scene script — this is what drove the
-    // hallucinated plot in the observed failure.
+    // hallucinated plot in the observed failure. Post-refactor that edge
+    // lives on scene_shot_plan (Stage A LLM), not scene_video_prompt
+    // (deterministic Stage C assembler).
     for (const sceneId of ['scene_1', 'scene_2', 'scene_3']) {
-      const n = executor.getNode(`scene_video_prompt:${sceneId}`);
-      expect(n, `scene_video_prompt:${sceneId} missing`).toBeDefined();
+      const n = executor.getNode(`scene_shot_plan:${sceneId}`);
+      expect(n, `scene_shot_plan:${sceneId} missing`).toBeDefined();
       expect(
         n!.dependencies,
-        `scene_video_prompt:${sceneId} should depend on scene:${sceneId}`,
+        `scene_shot_plan:${sceneId} should depend on scene:${sceneId}`,
       ).toContain(`scene:${sceneId}`);
       // And must NOT still carry the stripped type-level ref.
       expect(n!.dependencies).not.toContain('scene');
@@ -390,7 +406,7 @@ describe('lazarus_drive production scenario regression', () => {
     // Reverse edges must reflect the expanded relationships so
     // getNextReady() can propagate completion.
     expect(executor.getNode('scene:scene_1')!.dependents)
-      .toContain('scene_video_prompt:scene_1');
+      .toContain('scene_shot_plan:scene_1');
     expect(executor.getNode('character:johnathan')!.dependents)
       .toContain('character_image:johnathan');
   });

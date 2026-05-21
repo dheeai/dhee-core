@@ -146,4 +146,64 @@ describe("buildSupervisorTask", () => {
     expect(msg).toContain("asset");
     expect(msg.toLowerCase()).toMatch(/no vision|vlm.*off|vlm_description.*(none|null|absent)/i);
   });
+
+  it("for 'user_invalidate' events surfaces the seeds + tells pi-agent to re-check before resuming", () => {
+    const msg = buildSupervisorTask({
+      event: "user_invalidate",
+      taskId: "task-1",
+      taskKind: "user_invalidate",
+      projectName: "noir",
+      seeds: [
+        "shot_image_prompt:scene_1_shot_2",
+        "shot_image_last_frame:scene_1_shot_2",
+      ],
+      source: "prompts_tab_save",
+    });
+    expect(msg).toContain("[SYSTEM EVENT]");
+    expect(msg).toContain("user_invalidated");
+    expect(msg).toContain("shot_image_prompt:scene_1_shot_2");
+    expect(msg).toContain("shot_image_last_frame:scene_1_shot_2");
+    expect(msg).toContain("prompts_tab_save");
+    // The directive: pi-agent must call kshana_status FIRST on the
+    // next resume turn — the seeds + dependents are pending now.
+    expect(msg.toLowerCase()).toMatch(/kshana_status/);
+    // And: do NOT auto-dispatch run_to from this event. The user
+    // decides when to resume.
+    expect(msg.toLowerCase()).toMatch(/do not auto-dispatch|do not.*run_to|user decides/i);
+  });
+
+  it("user_invalidate without a source defaults to 'source: ui' so pi-agent always sees a tag", () => {
+    const msg = buildSupervisorTask({
+      event: "user_invalidate",
+      taskId: "task-1",
+      taskKind: "user_invalidate",
+      projectName: "noir",
+      seeds: ["shot_image:scene_1_shot_2"],
+    });
+    expect(msg).toContain("source: ui");
+  });
+});
+
+describe("supervisor circuit breaker — user_invalidate is uncapped", () => {
+  it("user_invalidate fires every time regardless of count (it's a user-driven event, not a failure loop)", () => {
+    let state = emptySupervisorState();
+    for (let i = 0; i < 100; i++) {
+      expect(shouldFireSupervisor(state, "user_invalidate", "task-1")).toBe(true);
+      state = recordSupervisorInvocation(state, "user_invalidate", "task-1");
+    }
+  });
+
+  it("user_invalidate does NOT consume the failed/completed cap", () => {
+    let state = emptySupervisorState();
+    // Burn 50 user_invalidate events.
+    for (let i = 0; i < 50; i++) {
+      state = recordSupervisorInvocation(state, "user_invalidate", "task-1");
+    }
+    // failed should still have its full budget of 2.
+    expect(shouldFireSupervisor(state, "failed", "task-1")).toBe(true);
+    state = recordSupervisorInvocation(state, "failed", "task-1");
+    expect(shouldFireSupervisor(state, "failed", "task-1")).toBe(true);
+    state = recordSupervisorInvocation(state, "failed", "task-1");
+    expect(shouldFireSupervisor(state, "failed", "task-1")).toBe(false);
+  });
 });

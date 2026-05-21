@@ -47,7 +47,7 @@
     "inputs": {
       "cfg": 1,
       "model": [
-        "214",
+        "215",
         0
       ],
       "positive": [
@@ -330,32 +330,48 @@
     }
   },
   "35": {
+    "class_type": "LTXVImgToVideoInplaceKJ",
+    "_meta": {
+      "title": "LTXVImgToVideoInplaceKJ (Stage 2 \u2014 FML2V conditioning, patched per task #6)"
+    },
     "inputs": {
-      "strength": 1,
-      "bypass": false,
+      "num_images": "3",
+      "num_images.strength_1": 1,
+      "num_images.strength_2": 0.5,
+      "num_images.strength_3": 1,
+      "num_images.index_1": 0,
+      "num_images.index_2": [
+        "62",
+        1
+      ],
+      "num_images.index_3": -1,
       "vae": [
         "181",
-        0
-      ],
-      "image": [
-        "42",
         0
       ],
       "latent": [
         "25",
         0
+      ],
+      "num_images.image_1": [
+        "31",
+        0
+      ],
+      "num_images.image_2": [
+        "59",
+        0
+      ],
+      "num_images.image_3": [
+        "50",
+        0
       ]
-    },
-    "class_type": "LTXVImgToVideoInplace",
-    "_meta": {
-      "title": "LTXVImgToVideoInplace"
     }
   },
   "36": {
     "inputs": {
       "cfg": 1,
       "model": [
-        "214",
+        "215",
         0
       ],
       "positive": [
@@ -829,6 +845,20 @@
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "Load LoRA (LTX I2V)"
+    }
+  },
+  "215": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA (OmniNFT-RL @ 0.8)"
+    },
+    "inputs": {
+      "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
+      "strength_model": 0.8,
+      "model": [
+        "214",
+        0
+      ]
     }
   }
 }

@@ -105,7 +105,6 @@
     }
   ],
   "promptKeywords": {
-    "prepend": "Make this image come alive with cinematic motion, smooth animation.",
     "negativeAppend": "static, blurry, low quality, distorted"
   },
   "builtIn": false,

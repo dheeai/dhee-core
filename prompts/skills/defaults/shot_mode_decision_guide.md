@@ -36,4 +36,4 @@ You decide the image generation mode for a shot's first frame. Output ONLY a JSO
 }
 ```
 
-`existingSubjects` lists characters/settings already visible in the previous shot (by name, not image number). These will be described by name in the prompt, not by "from image N".
+`existingSubjects` lists characters/settings already visible in the previous shot by name. The downstream prompt describes them by name.

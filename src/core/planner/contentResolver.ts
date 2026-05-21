@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ExecutionNode, ResolvedInputs } from './types.js';
 import type { DependencyGraphExecutor } from './DependencyGraphExecutor.js';
+import { atomicWriteFileSync } from '../../utils/atomicWrite.js';
 
 /**
  * Safely read a file from a project directory.
@@ -179,6 +180,30 @@ export function getOutputPath(
     filePath = `prompts/videos/scenes/${safeName}.json`;
   }
 
+  // scene_shot_plan (Stage A of hierarchical breakdown): lightweight plan
+  // JSON, sits next to the assembled scene_video_prompt output.
+  if (node.typeId === 'scene_shot_plan' && node.itemId) {
+    const safeName = node.itemId.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    filePath = `prompts/videos/scenes/${safeName}.plan.json`;
+  }
+
+  // shot_breakdown (Stage B): per-shot JSON, grouped under a per-scene
+  // subdirectory so the project tree groups intermediates per scene
+  // (e.g. prompts/videos/scenes/scene_1.shots/3.json).
+  if (node.typeId === 'shot_breakdown' && node.itemId) {
+    // itemId is `scene_N_shot_M`. Compute the per-scene subdir from the
+    // scene portion and the shot number for the filename.
+    const sceneMatch = node.itemId.match(/^(scene_\d+)_shot_(\d+)$/);
+    if (sceneMatch) {
+      const sceneSafe = sceneMatch[1]!.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      const shotNum = sceneMatch[2]!;
+      filePath = `prompts/videos/scenes/${sceneSafe}.shots/${shotNum}.json`;
+    } else {
+      const safeName = node.itemId.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      filePath = `prompts/videos/scenes/${safeName}.shot.json`;
+    }
+  }
+
   // shot_motion_directive: structured JSON alongside other prompts
   if (node.typeId === 'shot_motion_directive') {
     const safeName = node.itemId
@@ -232,6 +257,6 @@ export function writeOutput(
     fs.mkdirSync(parentDir, { recursive: true });
   }
 
-  fs.writeFileSync(fullPath, content, 'utf-8');
+  atomicWriteFileSync(fullPath, content, 'utf-8');
   return relativePath;
 }

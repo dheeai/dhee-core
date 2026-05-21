@@ -459,7 +459,7 @@
       },
       "\u2795 Add Lora": "",
       "model": [
-        "1145",
+        "1146",
         0
       ]
     },
@@ -1143,6 +1143,20 @@
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "Load LoRA (LTX I2V)"
+    }
+  },
+  "1146": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA (OmniNFT-RL @ 0.8)"
+    },
+    "inputs": {
+      "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
+      "strength_model": 0.8,
+      "model": [
+        "1145",
+        0
+      ]
     }
   }
 }

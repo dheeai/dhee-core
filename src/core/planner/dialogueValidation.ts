@@ -63,7 +63,7 @@ function extractSpeakers(audio: string): string[] {
 /**
  * Find shots whose audio field has two or more distinct speakers.
  * Callers should split these into separate shots — see
- * `scene_breakdown_guide.md` Step 2a.
+ * `scene_breakdown_plan_guide.md` Step 2a (one speaker per shot).
  */
 export function scanMultiSpeakerShots(shots: ShotAudioLike[]): MultiSpeakerWarning[] {
   const warnings: MultiSpeakerWarning[] = [];

@@ -86,25 +86,3 @@ export async function validateGeneratedImage(
   }
 }
 
-/**
- * Review a generated image using a Vision Language Model (VLM).
- * Sends the image + original prompt to the LLM and asks if it matches.
- *
- * Returns pass/fail with a list of issues found.
- * Requires an LLMClient instance with vision capability.
- */
-export async function reviewImageWithVLM(
-  imagePath: string,
-  prompt: string,
-  llm: { reviewImage: (path: string, prompt: string) => Promise<{ pass: boolean; issues: string[] }> },
-): Promise<{ pass: boolean; issues: string[] }> {
-  if (!existsSync(imagePath)) {
-    return { pass: false, issues: [`Image not found: ${imagePath}`] };
-  }
-
-  try {
-    return await llm.reviewImage(imagePath, prompt);
-  } catch (err) {
-    return { pass: false, issues: [`VLM review failed: ${(err as Error).message}`] };
-  }
-}

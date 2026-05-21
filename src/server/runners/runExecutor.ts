@@ -95,18 +95,6 @@ export interface RunExecutorOpts {
   name?: string | undefined;
 
   /**
-   * Vision-LLM master switch. When false, ExecutorAgent skips ALL
-   * VLM calls (the in-executor reviewImageWithVLM retry-once gate +
-   * any sibling oversight describe-call). When true (or undefined),
-   * the executor falls back to its env-driven default (DISABLE_VLM).
-   *
-   * The runtime constraint `piOversight && vlmJudge` is computed by
-   * the caller (typically `executeRunTo` in the runner singleton);
-   * this option just delivers the resolved boolean to the executor.
-   */
-  vlmEnabled?: boolean | undefined;
-
-  /**
    * Override agent construction. Production callers should leave this
    * undefined (uses `new ExecutorAgent(llm, opts)`); tests inject a
    * stub matching `RunExecutorAgent` to exercise the bridge wiring
@@ -167,9 +155,6 @@ export async function runExecutor(opts: RunExecutorOpts): Promise<RunExecutorRes
     ...(stopAtStage ? { stopAtStage } : {}),
     ...(stopAfterNode ? { stopAfterNode } : {}),
     ...(skipMedia ? { skipMediaGeneration: true } : {}),
-    ...(typeof opts.vlmEnabled === 'boolean'
-      ? { vlmEnabled: opts.vlmEnabled }
-      : {}),
   });
 
   // Pin the isolated-redo whitelist BEFORE run() so the loop's

@@ -582,7 +582,12 @@ export class WebSocketHandler {
   }
 
   /**
-   * Handle reset_project message — runs the reset script as subprocess.
+   * Handle reset_project message — runs the reset in-process.
+   *
+   * Was previously a subprocess shell-out to `tsx scripts/reset-project.ts`,
+   * which only works in dev (no tsx, no scripts/, no pnpm in packaged
+   * builds). Now calls `resetProjectStage` from src/server/runners/
+   * directly — same logic the script delegates to anyway.
    */
   private async handleResetProject(
     sessionId: string,
@@ -597,22 +602,26 @@ export class WebSocketHandler {
     }));
 
     try {
-      const { execSync } = await import('child_process');
       const { join } = await import('path');
-      const tsxPath = join(process.cwd(), 'node_modules', '.bin', 'tsx');
-      const scriptPath = join(process.cwd(), 'scripts', 'reset-project.ts');
+      const { resetProjectStage } = await import('./runners/resetProjectStage.js');
+      const { getProjectsDir } = await import('../agent/pi/paths.js');
+      const basePath = getProjectsDir();
 
-      console.log(`[Reset] Running: ${tsxPath} ${scriptPath} ${projectName} ${stage}`);
-      const output = execSync(
-        `"${tsxPath}" "${scriptPath}" "${projectName}" "${stage}"`,
-        { cwd: process.cwd(), encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
-      );
-      console.log(`[Reset] Output: ${output.trim().split('\n').slice(-2).join(' | ')}`);
+      const logLines: string[] = [];
+      const result = resetProjectStage({
+        basePath,
+        projectName,
+        stage,
+        onLog: (line) => logLines.push(line),
+      });
+      const output = logLines.join('\n');
+      const summary = `Reset ${result.resetCount} type-level + ${result.removedCount} per-item + ${result.schemaCleared} schema slot(s)`;
+      console.log(`[Reset] ${summary}`);
 
       // Send the reset output as a notification
       this.sendMessage(socket, createServerMessage('notification', sessionId, {
         level: 'info',
-        message: output.trim().split('\n').slice(-3).join('\n'),
+        message: output.split('\n').slice(-3).join('\n') || summary,
       }));
 
       // Auto-reselect the project to reload executor state
@@ -621,7 +630,7 @@ export class WebSocketHandler {
       // Send fresh todos from the reset project.json so UI updates immediately
       try {
         const { readFileSync, existsSync } = await import('fs');
-        const projectPath = join(process.cwd(), `${projectName}.dhee`, 'project.json');
+        const projectPath = join(basePath, `${projectName}.dhee`, 'project.json');
         const project = JSON.parse(readFileSync(projectPath, 'utf-8'));
         const nodes = project.executorState?.nodes ?? {};
         const todos = Object.values(nodes).map((n: any) => ({
@@ -636,7 +645,7 @@ export class WebSocketHandler {
         // Push fresh assets so the storyboard clears anything cleared by reset.
         // The reset script clears each cleared node's `outputPath` but leaves the
         // file on disk; filterLiveAssets drops those stale entries.
-        const manifestPath = join(process.cwd(), `${projectName}.dhee`, 'assets', 'manifest.json');
+        const manifestPath = join(basePath, `${projectName}.dhee`, 'assets', 'manifest.json');
         if (existsSync(manifestPath)) {
           try {
             const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
@@ -791,14 +800,15 @@ export class WebSocketHandler {
       // Store resolution in project.json
       if (data.resolution || data.resolutionWidth) {
         const { join } = await import('path');
-        const { readFileSync, writeFileSync } = await import('fs');
+        const { readFileSync } = await import('fs');
+        const { atomicWriteFileSync } = await import('../utils/atomicWrite.js');
         const projFile = join(process.cwd(), projectDirName, 'project.json');
         try {
           const projData = JSON.parse(readFileSync(projFile, 'utf-8'));
           projData.resolution = data.resolution || '480p';
           projData.resolutionWidth = data.resolutionWidth || 848;
           projData.resolutionHeight = data.resolutionHeight || 480;
-          writeFileSync(projFile, JSON.stringify(projData, null, 2));
+          atomicWriteFileSync(projFile, JSON.stringify(projData, null, 2));
         } catch { /* non-fatal */ }
       }
 

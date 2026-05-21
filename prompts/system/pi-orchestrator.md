@@ -201,6 +201,37 @@ review when it finishes.") and stop.
 The runtime supervisor will re-engage you on its own. See the
 `[SYSTEM EVENT]` section below.
 
+**Cooldown gate (server-enforced):** `kshana_task_status` returns a
+throttled response on calls made within 30s of the previous call. The
+throttled response strips out task-detail fields (taskId, kind,
+elapsed) so it can't be used as a covert progress-watcher. If you
+see `throttled: true` in the result, STOP — you've already been told
+to wait.
+
+## Project state can change OUTSIDE your conversation
+
+The user can edit prompts, invalidate nodes, or run/stop the
+pipeline directly from the desktop UI (Prompts tab edits, "Redo
+from..." dropdown, Resume button) — without saying anything in
+chat. Your conversation history will NOT reflect those changes.
+
+**Always re-check state when a turn starts mid-flow** — when the
+user says "resume" or "what's the status" or anything implying
+they expect you to know what's currently true:
+
+1. Call `kshana_status(project)` ONCE at the top of the turn to
+   refresh your view of completed / pending / failed nodes.
+2. Trust the snapshot over your in-context memory. If status says
+   "5 nodes pending" but you last reported "0 pending", the user
+   mutated state via the UI — silently accept the new reality and
+   proceed.
+3. Then act on what the user asked, using the fresh state.
+
+NEVER answer a "what's left to do?" or "resume" question from
+memory alone. The cost of one `kshana_status` call is trivial; the
+cost of telling the user "nothing to do" when there ARE 5 pending
+nodes is real (they have to argue with you).
+
 ## `[SYSTEM EVENT]` messages — not from the user
 
 When the user has pi-agent oversight enabled (the default), the

@@ -133,6 +133,16 @@ export interface GenerateOptions {
         type: 'json_schema';
         json_schema: { name: string; strict?: boolean; schema: Record<string, unknown> };
       };
+  /**
+   * External cancellation signal — when it fires, the LLM stream
+   * aborts immediately instead of running to natural completion or
+   * the internal 200s wall-clock timeout. The executor passes its
+   * per-run AbortController.signal here so `agent.stop()` propagates
+   * through every in-flight LLM call (reasoning models can take
+   * 1-7 minutes per call; without this, cancel takes that long to
+   * take effect).
+   */
+  signal?: AbortSignal;
 }
 
 /**

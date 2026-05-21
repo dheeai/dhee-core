@@ -137,6 +137,102 @@ describe('addShotImageNodes (Pattern B graph split)', () => {
     expect(newFirst.dependencies).toContain('shot_image:scene_1_shot_1');
   });
 
+  // ── firstFrameAnchor (visual continuity) ───────────────────────────
+  // Anchor overrides the legacy prevShotImageId chain. Per the
+  // sceneVideoPromptAssembler's deterministic anchor decision:
+  //   - 'fresh'        → no prior-frame dep at all
+  //   - 'continuity'   → depend on prior shot's LAST FRAME (smoother
+  //                      than the legacy first-frame chain)
+  //   - 'view_reuse'   → depend on a specific earlier shot's last
+  //                      frame, not the immediate prior
+  describe('firstFrameAnchor overrides the legacy chain', () => {
+    it('reason=fresh → no prior-frame dep, even when prevShotImageId is supplied', () => {
+      const exec = buildExecutor([
+        makeNode({ id: 'shot_image_prompt:scene_1_shot_5', typeId: 'shot_image_prompt' }),
+        makeNode({ id: 'shot_image:scene_1_shot_4', typeId: 'shot_image', itemId: 'scene_1_shot_4', status: 'completed' }),
+      ]);
+
+      addShotImageNodes({
+        executor: exec,
+        shot: { itemId: 'scene_1_shot_5', name: 'Hard cut into new view' },
+        allCharImageIds: [],
+        allSettingImageIds: [],
+        prevShotImageId: 'shot_image:scene_1_shot_4', // would be the legacy chain
+        firstFrameAnchor: { reason: 'fresh' },
+        sceneId: 'scene_1',
+      });
+
+      const newFirst = exec.getNode('shot_image:scene_1_shot_5')!;
+      expect(newFirst.dependencies).not.toContain('shot_image:scene_1_shot_4');
+      expect(newFirst.dependencies).not.toContain('shot_image_last_frame:scene_1_shot_4');
+    });
+
+    it('reason=continuity → depends on the prior shot\'s LAST FRAME node (not the first-frame one)', () => {
+      const exec = buildExecutor([
+        makeNode({ id: 'shot_image_prompt:scene_1_shot_2', typeId: 'shot_image_prompt' }),
+        makeNode({ id: 'shot_image:scene_1_shot_1', typeId: 'shot_image', itemId: 'scene_1_shot_1', status: 'completed' }),
+        makeNode({ id: 'shot_image_last_frame:scene_1_shot_1', typeId: 'shot_image_last_frame', itemId: 'scene_1_shot_1', status: 'completed' }),
+      ]);
+
+      addShotImageNodes({
+        executor: exec,
+        shot: { itemId: 'scene_1_shot_2', name: 'Continuation' },
+        allCharImageIds: [],
+        allSettingImageIds: [],
+        prevShotImageId: 'shot_image:scene_1_shot_1',
+        firstFrameAnchor: { reason: 'continuity', sourceShotNumber: 1 },
+        sceneId: 'scene_1',
+      });
+
+      const newFirst = exec.getNode('shot_image:scene_1_shot_2')!;
+      // The new chain anchors on shot 1's LAST frame, not its first.
+      expect(newFirst.dependencies).toContain('shot_image_last_frame:scene_1_shot_1');
+      expect(newFirst.dependencies).not.toContain('shot_image:scene_1_shot_1');
+    });
+
+    it('reason=view_reuse → depends on the SPECIFIED source shot\'s last frame, not the immediate prior', () => {
+      const exec = buildExecutor([
+        makeNode({ id: 'shot_image_prompt:scene_1_shot_5', typeId: 'shot_image_prompt' }),
+        makeNode({ id: 'shot_image_last_frame:scene_1_shot_2', typeId: 'shot_image_last_frame', itemId: 'scene_1_shot_2', status: 'completed' }),
+        makeNode({ id: 'shot_image_last_frame:scene_1_shot_4', typeId: 'shot_image_last_frame', itemId: 'scene_1_shot_4', status: 'completed' }),
+      ]);
+
+      addShotImageNodes({
+        executor: exec,
+        shot: { itemId: 'scene_1_shot_5', name: 'Return to shot 2 view' },
+        allCharImageIds: [],
+        allSettingImageIds: [],
+        prevShotImageId: 'shot_image:scene_1_shot_4', // immediate prior — should be IGNORED
+        firstFrameAnchor: { reason: 'view_reuse', sourceShotNumber: 2 },
+        sceneId: 'scene_1',
+      });
+
+      const newFirst = exec.getNode('shot_image:scene_1_shot_5')!;
+      expect(newFirst.dependencies).toContain('shot_image_last_frame:scene_1_shot_2');
+      expect(newFirst.dependencies).not.toContain('shot_image_last_frame:scene_1_shot_4');
+      expect(newFirst.dependencies).not.toContain('shot_image:scene_1_shot_4');
+    });
+
+    it('no anchor + no sceneId → legacy prevShotImageId chain (back-compat for callers not yet updated)', () => {
+      const exec = buildExecutor([
+        makeNode({ id: 'shot_image_prompt:scene_1_shot_2', typeId: 'shot_image_prompt' }),
+        makeNode({ id: 'shot_image:scene_1_shot_1', typeId: 'shot_image', itemId: 'scene_1_shot_1', status: 'completed' }),
+      ]);
+
+      addShotImageNodes({
+        executor: exec,
+        shot: { itemId: 'scene_1_shot_2', name: 'Legacy' },
+        allCharImageIds: [],
+        allSettingImageIds: [],
+        prevShotImageId: 'shot_image:scene_1_shot_1',
+        // no anchor, no sceneId — falls back to old behavior
+      });
+
+      const newFirst = exec.getNode('shot_image:scene_1_shot_2')!;
+      expect(newFirst.dependencies).toContain('shot_image:scene_1_shot_1');
+    });
+  });
+
   it('is idempotent — calling twice for the same shot does not duplicate nodes', () => {
     const exec = buildExecutor([
       makeNode({ id: 'shot_image_prompt:scene_1_shot_1', typeId: 'shot_image_prompt' }),

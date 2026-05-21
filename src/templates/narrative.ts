@@ -342,11 +342,74 @@ const worldStyleArtifact: ArtifactTypeDefinition = {
   metadataSchema: {},
 };
 
+// Stage A of the hierarchical scene-breakdown flow. Emits a lightweight
+// shot plan JSON (one entry per shot — shotNumber + purpose + duration +
+// oneLineSummary) per scene. Stays under ~1k completion tokens regardless
+// of scene length, so it doesn't hit the truncation problems the legacy
+// single-call scene_video_prompt suffered from.
+const sceneShotPlanArtifact: ArtifactTypeDefinition = {
+  id: 'scene_shot_plan',
+  displayName: 'Scene Shot Plan',
+  category: 'structure',
+  description: 'Lightweight per-scene shot plan: shotNumber, purpose, duration, one-line summary. Drives Stage B per-shot expansion downstream.',
+  scope: 'chapter',
+  isCollection: true,
+  itemName: 'shot plan',
+  outputFormat: 'json',
+  filePattern: 'prompts/videos/scenes/scene-{{index}}.plan.json',
+  agentType: 'content',
+  promptFile: 'narrative/scene-shot-plan.md',
+  isExpensive: false,
+  requiresPerItemApproval: false,
+  dependencies: [
+    { artifactTypeId: 'scene', required: true, usage: 'context', scope: 'matching' },
+    { artifactTypeId: 'world_style', required: true, usage: 'context', scope: 'matching' },
+  ],
+};
+
+// Stage B of the hierarchical scene-breakdown flow. One node per shot
+// (expanded from scene_shot_plan's shotPlan array via the existing
+// shouldExpandSceneCollectionToShots mechanism). Each emits a single
+// fully-expanded shot object — cameraWork, perspective, focus, audio,
+// transition, etc. Per-shot calls are small (~700 tokens out) and run
+// in parallel, so a single shot's failure doesn't waste the rest.
+const shotBreakdownArtifact: ArtifactTypeDefinition = {
+  id: 'shot_breakdown',
+  displayName: 'Shot Breakdowns',
+  category: 'structure',
+  description: 'Per-shot expansion of the scene shot plan: full shot object with cameraWork, perspective, focus, audio, transition.',
+  scope: 'chapter',
+  isCollection: true,
+  itemName: 'shot breakdown',
+  outputFormat: 'json',
+  filePattern: 'prompts/videos/scenes/scene-{{index}}.shots/{{subindex}}.json',
+  agentType: 'content',
+  promptFile: 'narrative/shot-breakdown.md',
+  isExpensive: false,
+  requiresPerItemApproval: false,
+  dependencies: [
+    { artifactTypeId: 'scene_shot_plan', required: true, usage: 'context', scope: 'matching' },
+    { artifactTypeId: 'world_style', required: true, usage: 'context', scope: 'matching' },
+  ],
+};
+
+// Stage C of the hierarchical scene-breakdown flow.
+//
+// scene_video_prompt is now a DETERMINISTIC assembler — no LLM call.
+// It depends on scene_shot_plan + the per-shot shot_breakdown nodes
+// (which the matching expansion resolves to shot_breakdown:scene_N
+// initially, then the executor's repair pass rewires to the per-shot
+// children once the plan is expanded). Reads them all from disk and
+// stitches into the existing sceneVideoPromptSchema shape so downstream
+// consumers (shot_image_prompt builder, shot_motion_directive, etc.)
+// see byte-shape-identical input to today's single-call output.
+//
+// The output disk path stays exactly as before so consumers don't move.
 const sceneVideoPromptArtifact: ArtifactTypeDefinition = {
   id: 'scene_video_prompt',
   displayName: 'Scene Breakdown',
   category: 'structure',
-  description: 'Multi-shot breakdown of each scene into 2-4 cinematic shots with motion/camera direction',
+  description: 'Deterministic assembly of scene_shot_plan + per-shot shot_breakdown into the final scene shot list. No LLM call.',
   scope: 'chapter',
   isCollection: true,
   itemName: 'motion prompt',
@@ -357,12 +420,8 @@ const sceneVideoPromptArtifact: ArtifactTypeDefinition = {
   isExpensive: false,
   requiresPerItemApproval: true,
   dependencies: [
-    { artifactTypeId: 'scene', required: true, usage: 'context', scope: 'matching' },
-    { artifactTypeId: 'world_style', required: true, usage: 'context', scope: 'matching' },
-    // character_image and setting_image REMOVED — scene breakdown only needs
-    // scene text + world style. Having media deps here caused serial mode deadlock:
-    // content (scene_video_prompt) waited for media (character_image) which waited
-    // for all content to finish.
+    { artifactTypeId: 'scene_shot_plan', required: true, usage: 'context', scope: 'matching' },
+    { artifactTypeId: 'shot_breakdown', required: true, usage: 'context', scope: 'matching' },
   ],
 };
 
@@ -812,6 +871,8 @@ export const narrativeTemplate: VideoTemplate = {
     character_image: characterImageArtifact,
     setting_image: settingImageArtifact,
     object_image: objectImageArtifact,
+    scene_shot_plan: sceneShotPlanArtifact,
+    shot_breakdown: shotBreakdownArtifact,
     scene_video_prompt: sceneVideoPromptArtifact,
     shot_image_prompt: shotImagePromptArtifact,
     shot_motion_directive: shotMotionDirectiveArtifact,

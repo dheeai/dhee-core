@@ -150,7 +150,7 @@ describe('Full Narrative Pipeline', () => {
       }
     });
 
-    it('expanding scene cascades through scene_video_prompt to shot_image_prompt to shot_image to shot_video', () => {
+    it('expanding scene cascades through scene_shot_plan / scene_video_prompt to shot_image_prompt to shot_image to shot_video', () => {
       const executor = buildExecutor(template);
       executor.markStarted('plot');
       executor.markCompleted('plot');
@@ -164,9 +164,15 @@ describe('Full Narrative Pipeline', () => {
       // Scene expanded
       expect(executor.getNode('scene:scene_1')).toBeDefined();
 
-      // scene_video_prompt cascaded
+      // Hierarchical breakdown:
+      //  - scene_shot_plan (Stage A LLM) cascades from scene
+      //  - scene_video_prompt (Stage C deterministic assembler) cascades
+      //    too, but its deps point at scene_shot_plan + shot_breakdown
+      //    rather than directly at scene
+      expect(executor.getNode('scene_shot_plan:scene_1')).toBeDefined();
+      expect(executor.getNode('scene_shot_plan:scene_1')?.dependencies).toContain('scene:scene_1');
       expect(executor.getNode('scene_video_prompt:scene_1')).toBeDefined();
-      expect(executor.getNode('scene_video_prompt:scene_1')?.dependencies).toContain('scene:scene_1');
+      expect(executor.getNode('scene_video_prompt:scene_1')?.dependencies).toContain('scene_shot_plan:scene_1');
 
       // shot_image_prompt cascaded (isCollection preserved for further expansion)
       expect(executor.getNode('shot_image_prompt:scene_1')).toBeDefined();
@@ -436,6 +442,10 @@ describe('Full Narrative Pipeline', () => {
       const invalidatedIds = invalidated.map(n => n.id);
 
       expect(invalidatedIds).toContain('scene:scene_1');
+      // Hierarchical breakdown layers: invalidating scene_1 must cascade
+      // through Stage A (scene_shot_plan), Stage C (scene_video_prompt
+      // assembler), and the downstream image/video chain.
+      expect(invalidatedIds).toContain('scene_shot_plan:scene_1');
       expect(invalidatedIds).toContain('scene_video_prompt:scene_1');
       expect(invalidatedIds).toContain('shot_image_prompt:scene_1');
       expect(invalidatedIds).toContain('shot_video:scene_1');

@@ -87,7 +87,11 @@ interface InvalidateResult {
 }
 
 interface CMWithInvalidate {
-  invalidateNodes(sessionId: string, ids: string[]): Promise<InvalidateResult>;
+  invalidateNodes(
+    sessionId: string,
+    ids: string[],
+    source?: string,
+  ): Promise<InvalidateResult>;
   sessions: Map<
     string,
     {
@@ -97,6 +101,7 @@ interface CMWithInvalidate {
       state?: { status: string };
     }
   >;
+  scheduleSupervisorInvocation: (...args: unknown[]) => void;
 }
 
 function attachConfiguredSession(
@@ -282,5 +287,121 @@ describe('ConversationManager.invalidateNodes', () => {
     expect(
       persisted.executorState.nodes['shot_video:scene_1_shot_1'].status,
     ).toBe('pending');
+  });
+
+  /**
+   * The 2026-05-19 Soft Seinen bug. RedoFromMenu invalidates a stage's
+   * worth of nodes then calls runTask immediately. Pre-fix, both
+   * messages reached pi-agent in the same turn — the `user_invalidate`
+   * supervisor event ("DO NOT auto-dispatch") and the runTask
+   * ("Continue running…"). Pi-agent obeyed the system rule, acked
+   * "I'm paused and ready", and the runner never started. The fix:
+   * when the desktop passes `source='redo_from_menu'`, skip the
+   * supervisor event entirely so pi-agent only sees the unambiguous
+   * resume instruction.
+   */
+  describe('supervisor event gating by source', () => {
+    it('FIRES the supervisor user_invalidate event when source is unset (default UI invalidation)', async () => {
+      const { projectDir } = setupProject();
+      const cm = newCM();
+      const sessionId = attachConfiguredSession(cm, projectDir);
+      const calls: unknown[][] = [];
+      const cmi = cm as unknown as CMWithInvalidate;
+      cmi.scheduleSupervisorInvocation = (...args: unknown[]) => {
+        calls.push(args);
+      };
+
+      await cmi.invalidateNodes(sessionId, ['shot_image:scene_1_shot_2']);
+
+      const userInvalidates = calls.filter((c) => c[0] === 'user_invalidate');
+      expect(userInvalidates).toHaveLength(1);
+    });
+
+    it('FIRES the supervisor event for unrelated sources (prompts_tab_save) — only redo_from_menu is special-cased', async () => {
+      const { projectDir } = setupProject();
+      const cm = newCM();
+      const sessionId = attachConfiguredSession(cm, projectDir);
+      const calls: unknown[][] = [];
+      const cmi = cm as unknown as CMWithInvalidate;
+      cmi.scheduleSupervisorInvocation = (...args: unknown[]) => {
+        calls.push(args);
+      };
+
+      await cmi.invalidateNodes(
+        sessionId,
+        ['shot_image:scene_1_shot_2'],
+        'prompts_tab_save',
+      );
+
+      const userInvalidates = calls.filter((c) => c[0] === 'user_invalidate');
+      expect(userInvalidates).toHaveLength(1);
+    });
+
+    it('SKIPS the supervisor event when source is redo_from_menu', async () => {
+      const { projectDir } = setupProject();
+      const cm = newCM();
+      const sessionId = attachConfiguredSession(cm, projectDir);
+      const calls: unknown[][] = [];
+      const cmi = cm as unknown as CMWithInvalidate;
+      cmi.scheduleSupervisorInvocation = (...args: unknown[]) => {
+        calls.push(args);
+      };
+
+      const result = await cmi.invalidateNodes(
+        sessionId,
+        ['shot_image:scene_1_shot_2'],
+        'redo_from_menu',
+      );
+
+      // Invalidation itself still happens — the project.json is mutated.
+      expect(result.invalidated).toEqual(['shot_image:scene_1_shot_2']);
+      // But the supervisor event is suppressed so pi-agent doesn't
+      // receive a "DO NOT auto-dispatch" instruction conflicting with
+      // the runTask that's about to follow.
+      const userInvalidates = calls.filter((c) => c[0] === 'user_invalidate');
+      expect(userInvalidates).toHaveLength(0);
+    });
+
+    it('SKIPS the supervisor event for redo_from_menu even with multiple seeds', async () => {
+      const { projectDir } = setupProject();
+      const cm = newCM();
+      const sessionId = attachConfiguredSession(cm, projectDir);
+      const calls: unknown[][] = [];
+      const cmi = cm as unknown as CMWithInvalidate;
+      cmi.scheduleSupervisorInvocation = (...args: unknown[]) => {
+        calls.push(args);
+      };
+
+      await cmi.invalidateNodes(
+        sessionId,
+        ['shot_image:scene_1_shot_2', 'shot_video:scene_1_shot_2'],
+        'redo_from_menu',
+      );
+
+      expect(calls.filter((c) => c[0] === 'user_invalidate')).toHaveLength(0);
+    });
+
+    it('threads source through to the supervisor extra payload when fired (non-redo source)', async () => {
+      const { projectDir } = setupProject();
+      const cm = newCM();
+      const sessionId = attachConfiguredSession(cm, projectDir);
+      const calls: unknown[][] = [];
+      const cmi = cm as unknown as CMWithInvalidate;
+      cmi.scheduleSupervisorInvocation = (...args: unknown[]) => {
+        calls.push(args);
+      };
+
+      await cmi.invalidateNodes(
+        sessionId,
+        ['shot_image:scene_1_shot_2'],
+        'prompts_tab_save',
+      );
+
+      const extra = calls.find((c) => c[0] === 'user_invalidate')?.[2] as
+        | { source?: string; seeds: string[] }
+        | undefined;
+      expect(extra?.source).toBe('prompts_tab_save');
+      expect(extra?.seeds).toEqual(['shot_image:scene_1_shot_2']);
+    });
   });
 });

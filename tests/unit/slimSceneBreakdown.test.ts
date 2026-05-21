@@ -1,13 +1,16 @@
 /**
- * TDD Tests for Slim Scene Breakdown.
+ * Schema-level contract tests for the slim scene_video_prompt format
+ * (shot structure, no firstFrame/lastFrame) and the per-shot
+ * shot_image_prompt format that owns frame descriptions and refs.
  *
- * scene_video_prompt outputs only shot structure (no firstFrame/lastFrame).
- * shot_image_prompt handles frame descriptions, strategy, and refs.
+ * Earlier this file also greped ExecutorAgent.ts and the prompt-skill
+ * markdown for sentinel strings to "test" the system prompt and guide
+ * contents; deleted because those tests pinned text rather than
+ * behavior — and the hierarchical-breakdown refactor (Stage A → B → C)
+ * made some of the sentinels stale anyway.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
 describe('Slim scene breakdown: schema', () => {
   it('scene_video_prompt validates slim shot without firstFrame/lastFrame', async () => {
@@ -101,53 +104,3 @@ describe('Slim scene breakdown: 7-field format with purpose', () => {
   });
 });
 
-describe('Slim scene breakdown: system prompts', () => {
-  it('scene_video_prompt system prompt has NO firstFrame/lastFrame in JSON schema', () => {
-    const code = readFileSync(join(process.cwd(), 'src/core/planner/ExecutorAgent.ts'), 'utf-8');
-    // Find the scene_video_prompt system prompt block
-    const svpMatch = code.match(/if \(node\.typeId === 'scene_video_prompt'\)[\s\S]*?generationStrategy/);
-    // Should NOT have firstFrame/lastFrame in the JSON template
-    expect(code).not.toMatch(/scene_video_prompt[\s\S]{0,500}"firstFrame"/);
-  });
-
-  it('scene_breakdown_guide defines description as a required field', () => {
-    const guide = readFileSync(join(process.cwd(), 'prompts/skills/defaults/scene_breakdown_guide.md'), 'utf-8');
-    // The guide must list description as a required field
-    expect(guide).toMatch(/description.*string/i);
-  });
-
-  it('shot_image_prompt system prompt mentions generationStrategy', () => {
-    const code = readFileSync(join(process.cwd(), 'src/core/planner/ExecutorAgent.ts'), 'utf-8');
-    const sipBlock = code.match(/shot_image_prompt[\s\S]*?generationStrategy/);
-    expect(sipBlock).not.toBeNull();
-  });
-});
-
-describe('Slim scene breakdown: guides', () => {
-  it('scene_video_prompt_guide has NO firstFrame/lastFrame structure', () => {
-    const guide = readFileSync(
-      join(process.cwd(), 'prompts/skills/defaults/scene_breakdown_guide.md'),
-      'utf-8',
-    );
-    expect(guide).not.toContain('"firstFrame"');
-    expect(guide).not.toContain('"lastFrame"');
-  });
-
-  it('scene_video_prompt_guide has description field', () => {
-    const guide = readFileSync(
-      join(process.cwd(), 'prompts/skills/defaults/scene_breakdown_guide.md'),
-      'utf-8',
-    );
-    expect(guide).toMatch(/description.*what happens|description.*brief/i);
-  });
-
-  it('shot_image_guide has flfv/fmlfv strategy guidance', () => {
-    const guide = readFileSync(
-      join(process.cwd(), 'prompts/skills/defaults/shot_composition_guide.md'),
-      'utf-8',
-    );
-    expect(guide).toContain('flfv');
-    expect(guide).toContain('fmlfv');
-    expect(guide).toMatch(/generationStrategy/);
-  });
-});

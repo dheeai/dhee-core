@@ -191,25 +191,35 @@ describe('splitSegmentIntoShots', () => {
     expect(parseShotSegmentId('segment_2')).toBeNull();
   });
 
-  it('preserves an already split scene when any shot is filled', () => {
+  it('rebuilds the scene under a new plan when shot count changes, carrying forward already-filled shots', () => {
+    // Plan resize semantics (the 2026-05-19 "Village" bug fix in
+    // TimelineManager.upsertSceneShots, lines 961-1002): when the new
+    // plan's shot count differs from the existing count, the timeline IS
+    // rebuilt to match the new plan — but any already-filled shot's
+    // layers / fillStatus carry forward by shotNumber. preservedExistingShots
+    // is true iff at least one filled shot was preserved.
+    //
+    // Before the resize branch, this case bailed out entirely (returned
+    // initial unchanged), which left an 8-shot timeline behind when Stage A
+    // re-planned to 4 shots, and the FFmpeg assembler stitched a final
+    // video out of two different plans.
     const initial = splitSegmentIntoShots(createTimeline(), 'segment_1', [
       { label: 'Shot 1', duration: 2, metadata: { shotType: 'close_up' } },
       { label: 'Shot 2', duration: 3, metadata: { shotType: 'wide' } },
     ]);
 
+    const filledLayer = {
+      type: 'visual' as const,
+      label: 'Shot 1 video',
+      source: 'generated' as const,
+      filePath: 'assets/videos/scene-2-shot-1.mp4',
+      metadata: { prompt: 'Existing shot one' },
+    };
     initial.segments[1] = {
       ...initial.segments[1]!,
       fillStatus: 'filled',
       metadata: { shotType: 'close_up' },
-      layers: [
-        {
-          type: 'visual',
-          label: 'Shot 1 video',
-          source: 'generated',
-          filePath: 'assets/videos/scene-2-shot-1.mp4',
-          metadata: { prompt: 'Existing shot one' },
-        },
-      ],
+      layers: [filledLayer],
     };
 
     const result = upsertSceneShots(initial, 'segment_1', [
@@ -219,7 +229,25 @@ describe('splitSegmentIntoShots', () => {
     ]);
 
     expect(result.preservedExistingShots).toBe(true);
-    expect(result.timeline).toEqual(initial);
+    // New plan has 3 shots — timeline must now contain 3 shot segments
+    // under segment_1 (NOT the original 2).
+    const shotSegments = result.timeline.segments.filter(s =>
+      s.id.startsWith('segment_1_shot_'),
+    );
+    expect(shotSegments).toHaveLength(3);
+    // The previously-filled shot (shot 1) keeps its layers and fillStatus.
+    const newShot1 = shotSegments.find(s => s.id === 'segment_1_shot_1');
+    expect(newShot1).toBeDefined();
+    expect(newShot1!.fillStatus).toBe('filled');
+    expect(newShot1!.layers).toEqual([filledLayer]);
+    // Replacement metadata (shotType lives in old metadata, label is from
+    // the new plan) merges over the old.
+    expect(newShot1!.label).toBe('Replacement 1');
+    // The two new shots (2 and 3) come out planned/empty — they have no
+    // prior filled work to carry forward.
+    const newShot3 = shotSegments.find(s => s.id === 'segment_1_shot_3');
+    expect(newShot3).toBeDefined();
+    expect(newShot3!.layers).toEqual([]);
   });
 
   it('merges safe metadata updates onto existing filled shot segments without resetting progress', () => {

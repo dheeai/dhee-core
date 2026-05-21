@@ -16,9 +16,10 @@
  * "newest generation wins" rule manifest-driven backfill uses with
  * createdAt.
  */
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { setShotFrame, setShotVideo, setFinalVideo } from "./projectSchema.js";
+import { atomicWriteFileSync } from "../../utils/atomicWrite.js";
 
 const IMAGE_EXT_RE = /\.(png|jpg|jpeg|webp)$/i;
 const VIDEO_EXT_RE = /\.(mp4|webm|mov)$/i;
@@ -143,6 +144,6 @@ export function backfillFromDisk(basePath: string): BackfillFromDiskResult {
     }
   }
 
-  writeFileSync(projectPath, JSON.stringify(project, null, 2) + "\n", "utf8");
+  atomicWriteFileSync(projectPath, JSON.stringify(project, null, 2) + "\n", "utf8");
   return result;
 }

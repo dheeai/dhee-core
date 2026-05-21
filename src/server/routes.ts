@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
 import { ConversationManager } from './ConversationManager.js';
 import { WebSocketHandler } from './WebSocketHandler.js';
+import { atomicWriteFileSync } from '../utils/atomicWrite.js';
 import { registerWebUIRoutes } from './webui-routes.js';
 import type { LLMClientConfig } from '../core/llm/index.js';
 import { getProviderRegistry } from '../services/providers/index.js';
@@ -286,7 +287,7 @@ export async function registerRoutes(
         safeName = `${baseName}_${Date.now().toString(36)}`;
         filePath = path.join(userDir, `${safeName}.json`);
       }
-      fs.writeFileSync(filePath, body.content);
+      atomicWriteFileSync(filePath, body.content);
 
       // Run LLM analysis for intelligent suggestions
       let analysis = null;
@@ -384,7 +385,7 @@ export async function registerRoutes(
     if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
 
     const manifestPath = path.join(userDir, `${id}.manifest.json`);
-    fs.writeFileSync(manifestPath, JSON.stringify(body, null, 2));
+    atomicWriteFileSync(manifestPath, JSON.stringify(body, null, 2));
 
     // Refresh registry
     registry.refresh();

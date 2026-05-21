@@ -8,8 +8,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { DependencyGraphExecutor } from '../../src/core/planner/DependencyGraphExecutor.js';
 import type { ExecutionNode, ExecutorState } from '../../src/core/planner/types.js';
 
@@ -84,14 +82,3 @@ describe('User image rejection: cascade invalidation', () => {
   });
 });
 
-describe('User image rejection: server handler', () => {
-  it('WebSocketHandler has a redo_node handler', () => {
-    const code = readFileSync(join(process.cwd(), 'src/server/WebSocketHandler.ts'), 'utf-8');
-    expect(code).toMatch(/handleRedoNode|redo_node/i);
-  });
-
-  it('redo_node calls invalidateNode to cascade reset', () => {
-    const code = readFileSync(join(process.cwd(), 'src/server/WebSocketHandler.ts'), 'utf-8');
-    expect(code).toContain('redoNode');
-  });
-});

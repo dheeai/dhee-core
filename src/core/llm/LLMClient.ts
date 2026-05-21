@@ -246,7 +246,7 @@ export class LLMClient {
    * Generate a response from the LLM.
    */
   async generate(options: GenerateOptions): Promise<LLMResponse> {
-    const { messages, tools, temperature = 0.7, maxTokens, responseFormat } = options;
+    const { messages, tools, temperature = 0.7, maxTokens, responseFormat, signal } = options;
     const logger = getLLMLogger();
 
     // Log request
@@ -267,9 +267,18 @@ export class LLMClient {
       request.response_format = responseFormat;
     }
 
+    // Thread the abort signal into the OpenAI SDK call. Without this,
+    // mid-flight non-streaming requests survive cancel() — the executor
+    // and pi-agent see the abort flag but their in-flight LLM call has
+    // to either complete or hit the SDK's 200s timeout before the
+    // BackgroundTaskRunner's active task resolves. Symptom: header Stop
+    // button stuck at "Stopping…" for up to 200s after Stop is clicked.
     let response: OpenAI.ChatCompletion;
     try {
-      response = await this.client.chat.completions.create(request);
+      response = await this.client.chat.completions.create(
+        request,
+        signal ? { signal } : undefined,
+      );
     } catch (error) {
       throw this.formatOperationError('LLM generate', error);
     }
@@ -285,7 +294,11 @@ export class LLMClient {
    * Review an image using the VLM (vision) capability.
    * Sends the image + a text prompt and returns the LLM's assessment.
    */
-  async reviewImage(imagePath: string, reviewPrompt: string): Promise<{ pass: boolean; issues: string[] }> {
+  async reviewImage(
+    imagePath: string,
+    reviewPrompt: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ pass: boolean; issues: string[] }> {
     const fs = await import('fs');
     const imageBuffer = fs.readFileSync(imagePath);
     const base64 = imageBuffer.toString('base64');
@@ -343,7 +356,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       ],
       temperature: 0.1,
       max_tokens: 20000,
-    });
+    }, opts?.signal ? { signal: opts.signal } : undefined);
 
     const text = response.choices[0]?.message?.content ?? '';
     try {
@@ -378,7 +391,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
   async chatText(
     userText: string,
     systemText?: string,
-    opts?: { temperature?: number; maxTokens?: number },
+    opts?: { temperature?: number; maxTokens?: number; signal?: AbortSignal },
   ): Promise<string> {
     const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
     if (systemText) messages.push({ role: 'system', content: systemText });
@@ -390,7 +403,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       messages: messages as any,
       temperature: opts?.temperature ?? 0.1,
       max_tokens: opts?.maxTokens ?? 2000,
-    });
+    }, opts?.signal ? { signal: opts.signal } : undefined);
 
     return response.choices[0]?.message?.content ?? '';
   }
@@ -408,7 +421,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
     imagePath: string,
     userText: string,
     systemText?: string,
-    opts?: { temperature?: number; maxTokens?: number },
+    opts?: { temperature?: number; maxTokens?: number; signal?: AbortSignal },
   ): Promise<string> {
     const fs = await import('fs');
     const imageBuffer = fs.readFileSync(imagePath);
@@ -442,7 +455,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       reasoning: { exclude: true } as any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    } as any, opts?.signal ? { signal: opts.signal } : undefined);
 
     return response.choices[0]?.message?.content ?? '';
   }
@@ -453,7 +466,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
   async *generateStream(
     options: Omit<GenerateOptions, 'stream'>
   ): AsyncGenerator<StreamChunk, void, unknown> {
-    const { messages, tools, temperature = 0.7, responseFormat, maxTokens } = options;
+    const { messages, tools, temperature = 0.7, responseFormat, maxTokens, signal: externalSignal } = options;
     const logger = getLLMLogger();
 
     // Log request
@@ -490,13 +503,35 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       request.provider = providerPref;
     }
 
-    // Total wall-clock timeout for the entire streaming call (including thinking)
+    // Total wall-clock timeout for the entire streaming call (including thinking).
+    // When this fires we set `hardTimeoutFired` so the surrounding error
+    // handler can re-throw a labeled error ("[LLMClient] hard timeout
+    // …") instead of letting the SDK's generic AbortError bubble out as
+    // a cryptic 'Failed: <node> — AbortError' in the user's chat.
     const STREAM_TIMEOUT_MS = 200_000; // 200 seconds
     const abortController = new AbortController();
+    let hardTimeoutFired = false;
     const abortTimer = setTimeout(() => {
+      hardTimeoutFired = true;
       console.error(`[LLMClient] Hard timeout at ${STREAM_TIMEOUT_MS / 1000}s — aborting stream`);
       abortController.abort();
     }, STREAM_TIMEOUT_MS);
+
+    // External cancel: when the caller (executor) signals abort via
+    // its per-run AbortController, propagate to our internal controller
+    // so the underlying HTTP stream tears down immediately. Without
+    // this, reasoning-model calls run for minutes after `agent.stop()`
+    // before they wind down — making the user-facing Cancel feel
+    // broken. If the external signal is already aborted, abort now.
+    let externalListener: (() => void) | null = null;
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalListener = () => abortController.abort();
+        externalSignal.addEventListener('abort', externalListener, { once: true });
+      }
+    }
 
     const stream = await this.client.chat.completions.create(request, {
       signal: abortController.signal,
@@ -516,6 +551,7 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
     let pendingToolCalls: ToolCall[] | null = null;
     let loggedComplete = false;
 
+    try {
     for await (const chunk of stream) {
       // Check total elapsed time — abort if stuck in reasoning loop
       const elapsed = Date.now() - streamStartTime;
@@ -642,9 +678,29 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       });
       yield { done: true };
     }
+    } catch (err) {
+      // Re-label cryptic AbortError when our hard-timeout fired so the
+      // chat panel shows a clear message instead of "Failed: <node> —
+      // AbortError". External-cancel aborts (user clicked Cancel) pass
+      // through unchanged — those errors are expected and the agent
+      // loop already handles them as cancellation.
+      const errName = err instanceof Error ? err.name : '';
+      if (hardTimeoutFired && (errName === 'AbortError' || errName === 'APIUserAbortError')) {
+        throw new Error(
+          `LLM provider timed out after ${STREAM_TIMEOUT_MS / 1000}s (baseUrl=${this.baseUrl}, model=${this.model}). Try a smaller request or switch providers in Settings.`,
+        );
+      }
+      throw err;
+    }
 
     // Stream completed normally — cancel the hard timeout
     clearTimeout(abortTimer);
+    // Detach the external-cancel listener if any so the caller's
+    // AbortSignal doesn't keep a reference to this closure for the
+    // process's lifetime.
+    if (externalSignal && externalListener) {
+      externalSignal.removeEventListener('abort', externalListener);
+    }
   }
 
   /**

@@ -29,8 +29,6 @@ import { classifyRunTarget } from './classifyRunTarget.js';
 import { resolveNodeId, type ExecutorState } from '../../core/project/projectTypes.js';
 import type { GenericProjectFile } from '../../core/templates/types.js';
 import { clearStaleStopFile } from './preflightStopFile.js';
-import { effectiveVlmEnabled } from './effectiveVlmEnabled.js';
-import { getOversight } from '../oversightState.js';
 
 async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorCancelled> {
   const params = ctx.spec.params as {
@@ -114,21 +112,12 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
     });
   }
 
-  // Resolve the VLM master switch at run start. Source of truth is
-  // the process-wide `oversightState` (mutated by
-  // ConversationManager.setPiOversight / setVLMJudge, in turn driven
-  // by the desktop's AppSettings + chat-header toggles). Both
-  // toggles default to true. Runtime constraint is
-  // `piOversight && vlmJudge` — VLM standalone has no consumer.
-  //
-  // Snapshot semantics: the value is captured at task dispatch and
-  // doesn't propagate mid-run. Flipping the toggle while a run is
-  // active changes the NEXT run, not this one.
-  const oversight = getOversight();
-  const vlmEnabledForRun = effectiveVlmEnabled({
-    piOversight: oversight.piOversight,
-    vlmJudge: oversight.vlmJudge,
-  });
+  // The legacy in-executor VLM-review gate (consumer of vlmEnabledForRun)
+  // has been removed — semantic image judgment is now ConversationManager's
+  // supervisor path (asset event → describeImageWithVLM → pi-agent turn).
+  // The `piOversight`/`vlmJudge` runtime constraint is enforced there
+  // directly (gates 1+2 of `runSupervisorInvocation`). Nothing here
+  // needs to plumb a snapshot any more.
 
   const result = await runExecutor({
     project,
@@ -140,7 +129,6 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
     },
     signal: ctx.signal,
     name: 'task-runner-run-to',
-    vlmEnabled: vlmEnabledForRun,
     onTool: (info) => ctx.hooks.onTool(info),
     onResult: (info) => ctx.hooks.onResult(info),
     onNotification: (info) => ctx.hooks.onNotification(info),

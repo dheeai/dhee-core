@@ -71,4 +71,31 @@ describe('linkAbortSignalToAgent', () => {
     ac.abort(); // re-aborting is a no-op
     expect(stopFn).toHaveBeenCalledTimes(1);
   });
+
+  // Bug 17: deleteSession() calls abortController.abort('shutdown').
+  // linkAbortSignalToAgent should extract that and pass it as a reason so
+  // the executor can tag failed nodes with the shutdown origin.
+  it('passes "shutdown" to stopFn when controller aborts with that reason', () => {
+    const ac = new AbortController();
+    const stopFn = vi.fn();
+    linkAbortSignalToAgent(ac.signal, stopFn);
+    ac.abort('shutdown');
+    expect(stopFn).toHaveBeenCalledWith('shutdown');
+  });
+
+  it('passes "user" to stopFn when no reason is provided (backward compat)', () => {
+    const ac = new AbortController();
+    const stopFn = vi.fn();
+    linkAbortSignalToAgent(ac.signal, stopFn);
+    ac.abort();
+    expect(stopFn).toHaveBeenCalledWith('user');
+  });
+
+  it('passes "user" to stopFn for an unrecognized reason payload', () => {
+    const ac = new AbortController();
+    const stopFn = vi.fn();
+    linkAbortSignalToAgent(ac.signal, stopFn);
+    ac.abort('some other reason');
+    expect(stopFn).toHaveBeenCalledWith('user');
+  });
 });

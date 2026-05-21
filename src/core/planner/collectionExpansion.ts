@@ -13,6 +13,7 @@ import type { ArtifactTypeDefinition, VideoTemplate } from '../templates/types.j
 import type { ExecutionNode } from './types.js';
 
 export const SHOT_EXPANDABLE_TYPE_IDS = [
+  'shot_breakdown',
   'shot_image_prompt',
   'shot_motion_directive',
   'shot_image',

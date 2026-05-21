@@ -165,6 +165,21 @@ type RunnerEventName = keyof BackgroundTaskRunnerEvents;
 
 export class BackgroundTaskRunner {
   private active: { record: TaskRecord; controller: AbortController } | null = null;
+  /**
+   * Set to `true` the moment `cancel()` is called and `abort()` is
+   * dispatched on the AbortController. Cleared in `runActive()`'s
+   * finally block alongside `this.active = null`. Surfaced via
+   * `getActive()` and IPC status so the desktop's Stop/Resume button
+   * can show "Stopping…" even when the cancel originated from a
+   * non-UI path (e.g. pi-agent's `kshana_task_cancel` tool, an
+   * automation calling the cancel IPC directly, or programmatic
+   * replace()). Without this, only `handleCancel()` on the desktop
+   * could flip the local pendingCancel — agent-initiated cancels
+   * left the button stuck on "Stop" until runnerActive flipped,
+   * mid-stream, with no "Stopping…" intermediate state to explain
+   * the lag.
+   */
+  private cancelRequested = false;
   private readonly executor: TaskExecutor;
   private readonly emitter = new EventEmitter();
 
@@ -234,11 +249,24 @@ export class BackgroundTaskRunner {
   /**
    * Cancel the active task. Returns `false` when nothing is running
    * or when `taskId` is provided but doesn't match.
+   *
+   * In addition to aborting the local controller (which propagates to
+   * the executor + LLM streams), this also fires POST /interrupt on
+   * every in-flight ComfyUI prompt the executor submitted. Without
+   * that step the local pipeline stops but the GPU job keeps running
+   * to completion, burning paid Cloud credits the user thinks they
+   * just reclaimed. See src/services/comfyui/activeJobs.ts.
    */
   cancel(taskId?: string): boolean {
     if (!this.active) return false;
     if (taskId && this.active.record.id !== taskId) return false;
+    this.cancelRequested = true;
     this.active.controller.abort();
+    // Fire-and-forget: interrupt does not need to complete before
+    // cancel() returns. Errors are swallowed inside cancelAllActiveJobs.
+    void import('../../services/comfyui/activeJobs.js').then(
+      ({ cancelAllActiveJobs }) => cancelAllActiveJobs(),
+    );
     return true;
   }
 
@@ -320,7 +348,17 @@ export class BackgroundTaskRunner {
       // Clear AFTER the terminal event so subscribers can read
       // active state without races.
       this.active = null;
+      this.cancelRequested = false;
     }
+  }
+
+  /**
+   * True if `cancel()` has been called on the active task but the
+   * executor hasn't returned yet. Surfaced via IPC so the renderer
+   * can show "Stopping…" for agent-initiated cancels too.
+   */
+  isCancelling(): boolean {
+    return this.active !== null && this.cancelRequested;
   }
 }
 

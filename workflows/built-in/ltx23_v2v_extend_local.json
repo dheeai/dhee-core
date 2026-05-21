@@ -113,7 +113,7 @@
     "inputs": {
       "cfg": 1,
       "model": [
-        "628",
+        "629",
         0
       ],
       "positive": [
@@ -296,7 +296,7 @@
     "inputs": {
       "cfg": 1,
       "model": [
-        "628",
+        "629",
         0
       ],
       "positive": [
@@ -868,7 +868,7 @@
     "inputs": {
       "shift": 13,
       "model": [
-        "628",
+        "629",
         0
       ]
     },
@@ -1238,6 +1238,20 @@
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "Load LoRA (LTX I2V)"
+    }
+  },
+  "629": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA (OmniNFT-RL @ 0.8)"
+    },
+    "inputs": {
+      "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
+      "strength_model": 0.8,
+      "model": [
+        "628",
+        0
+      ]
     }
   }
 }

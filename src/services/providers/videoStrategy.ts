@@ -3,24 +3,33 @@
  *
  * Two strategies coexist:
  *
- *   - `prompt_relay` (default) — render a whole scene as one mp4 via
- *     LTX 2.3 + kijai/ComfyUI-PromptRelay. Each shot in the scene is a
- *     segment anchored by its first_frame; the model is patched with a
- *     temporal prompt schedule. Last frames are NOT generated in this
- *     mode (they're useless for relay rendering).
- *
- *   - `per_shot` — the existing FL2V flow: each shot is rendered
+ *   - `per_shot` (default) — the FL2V flow: each shot is rendered
  *     independently with first + last frame anchors and a motion
  *     directive, then the per-shot mp4s are concatenated by FFmpeg.
+ *     This is the path the cross-shot chaining code
+ *     (`edit_previous_shot`, `reuse_prior_frame`) was designed for —
+ *     last frames are real files and chains land on the right canvas.
  *
- * Selection: `dhee_VIDEO_STRATEGY=per_shot` opts out of the default.
- * Anything else (including the empty string and typos) resolves to
- * prompt_relay so a stray env value never crashes the pipeline.
+ *   - `prompt_relay` — render a whole scene as one mp4 via LTX 2.3 +
+ *     kijai/ComfyUI-PromptRelay. Each shot is a segment anchored by
+ *     its first_frame; the model is patched with a temporal prompt
+ *     schedule. Last frames are NOT generated in this mode (useless
+ *     for relay rendering). NOTE: cross-shot chaining handlers
+ *     silently fall back to first_frames in this mode — known
+ *     compatibility gap.
+ *
+ * Selection: `dhee_VIDEO_STRATEGY=prompt_relay` opts in. Anything
+ * else (including the empty string and typos) resolves to per_shot
+ * so a stray env value never crashes the pipeline. Default was
+ * flipped from prompt_relay → per_shot 2026-05-20 after the
+ * prompt_relay path was discovered to be silently breaking
+ * cross-shot chaining (shot 4 with two Rubys, etc.) — see Bug 11 in
+ * RUBY_V3_REGEN_NOTES.md.
  */
 
 export type VideoStrategy = 'prompt_relay' | 'per_shot';
 
-const DEFAULT_STRATEGY: VideoStrategy = 'prompt_relay';
+const DEFAULT_STRATEGY: VideoStrategy = 'per_shot';
 
 export function getVideoStrategy(env: Record<string, string | undefined> = process.env as Record<string, string | undefined>): VideoStrategy {
   const raw = env['dhee_VIDEO_STRATEGY'];

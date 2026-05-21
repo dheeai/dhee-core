@@ -142,8 +142,43 @@ describe('buildWatermarkOverlayFilter — bottom-right PNG overlay', () => {
 
   it('routes the watermark image through format=rgba so alpha is preserved', () => {
     expect(buildWatermarkOverlayFilter('concated', 1, 'outv')).toContain(
-      '[1:v]format=rgba[wm]',
+      '[1:v]format=rgba,',
     );
+  });
+
+  it('scales the watermark proportionally to the output height — 50px @ 720p (design spec)', () => {
+    // 50 / 720 ≈ 6.94%. Anything between 48 and 52 is acceptable —
+    // we round the ratio to integer pixels.
+    const f = buildWatermarkOverlayFilter('concated', 1, 'outv', 720);
+    const match = f.match(/scale=-1:(\d+)/);
+    expect(match).not.toBeNull();
+    const px = parseInt(match![1]!, 10);
+    expect(px).toBeGreaterThanOrEqual(48);
+    expect(px).toBeLessThanOrEqual(52);
+  });
+
+  it('scales proportionally for higher resolutions (1080p → ~75px, 4K → ~150px)', () => {
+    const f1080 = buildWatermarkOverlayFilter('concated', 1, 'outv', 1080);
+    expect(f1080).toMatch(/scale=-1:(7[3-7])/);
+    const f4k = buildWatermarkOverlayFilter('concated', 1, 'outv', 2160);
+    expect(f4k).toMatch(/scale=-1:(14[8-9]|15[0-2])/);
+  });
+
+  it('clamps to a sensible minimum size for tiny outputs (16px floor)', () => {
+    // Vertical-format / portrait videos can have a small dimension —
+    // we still want the watermark to render at >= 16px so it stays
+    // visible even on the smallest reasonable output.
+    const f = buildWatermarkOverlayFilter('concated', 1, 'outv', 100);
+    const match = f.match(/scale=-1:(\d+)/);
+    expect(match).not.toBeNull();
+    expect(parseInt(match![1]!, 10)).toBeGreaterThanOrEqual(16);
+  });
+
+  it('defaults to 720p sizing when no output height is supplied (back-compat)', () => {
+    // Existing callers that haven't been updated still get a
+    // sensible default — same 50ish px as the design spec.
+    const f = buildWatermarkOverlayFilter('concated', 1, 'outv');
+    expect(f).toMatch(/scale=-1:(4[89]|5[0-2])/);
   });
 
   it('emits the chained filters separated by a semicolon', () => {
