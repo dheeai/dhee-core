@@ -1644,3 +1644,151 @@ describe('shotImagePipeline: assembleShotImagePrompt — skip-LF path', () => {
     expect(result.generationStrategy).toBe('flfv');
   });
 });
+
+describe('shotImagePipeline: stripLastFrameForHoldingBeat — pure JSON mutation', () => {
+  // Case 1: happy path — holding-beat detected, LF stripped, strategy flipped
+  it('strips frames.last_frame and sets generationStrategy=i2v for a holding beat', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      shotNumber: 1,
+      generationStrategy: 'flfv',
+      frames: {
+        first_frame: { imagePrompt: 'FF prose', generationMode: 'image_text_to_image', references: [] },
+        last_frame: { imagePrompt: 'LF prose', generationMode: 'edit_first_frame', references: [] },
+      },
+      negativePrompt: 'blurry',
+      aspectRatio: '16:9',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'hold_emotion', 'medium close-up, static');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.frames.first_frame).toBeDefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+    expect(parsed.shotNumber).toBe(1);
+  });
+
+  // Case 2: holding purpose + cameraWork has motion verb → null
+  it('returns null when cameraWork contains a motion verb', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: {}, last_frame: {} },
+      generationStrategy: 'flfv',
+    });
+    expect(stripLastFrameForHoldingBeat(input, 'hold_emotion', 'slow push-in')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'show_reaction', 'tracking shot')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'set_the_mood', 'crane up')).toBeNull();
+  });
+
+  // Case 3: non-holding purpose + static cameraWork → null
+  it('returns null for action-y purposes regardless of cameraWork', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: {}, last_frame: {} },
+      generationStrategy: 'flfv',
+    });
+    expect(stripLastFrameForHoldingBeat(input, 'show_action', 'static medium')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'meet_character', 'static medium')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'show_change', 'static medium')).toBeNull();
+  });
+
+  // Case 4: empty purpose → null
+  it('returns null when purpose is empty/unknown', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({ frames: { first_frame: {}, last_frame: {} } });
+    expect(stripLastFrameForHoldingBeat(input, '', 'medium')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'not_a_purpose', 'medium')).toBeNull();
+  });
+
+  // Case 5: empty cameraWork + holding purpose → still strips (trust purpose)
+  it('strips when cameraWork is empty and purpose is in holding set', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: { imagePrompt: 'FF' }, last_frame: { imagePrompt: 'LF' } },
+      generationStrategy: 'flfv',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'hold_emotion', '');
+    expect(out).not.toBeNull();
+    expect(JSON.parse(out!).frames.last_frame).toBeUndefined();
+  });
+
+  // Case 6: malformed JSON → null (don't crash the executor)
+  it('returns null on malformed JSON without throwing', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(stripLastFrameForHoldingBeat('{not json', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('   ', 'hold_emotion', 'static')).toBeNull();
+  });
+
+  // Case 7: code-fenced content — strip fences then mutate
+  it('strips ```json code fences before parsing', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const inner = JSON.stringify({
+      frames: { first_frame: { imagePrompt: 'FF' }, last_frame: { imagePrompt: 'LF' } },
+      generationStrategy: 'flfv',
+    });
+    const fenced = '```json\n' + inner + '\n```';
+    const out = stripLastFrameForHoldingBeat(fenced, 'show_dialogue', 'static medium');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+  });
+
+  // Case 8: JSON has frames but no last_frame already — still flip strategy
+  it('still flips generationStrategy=i2v when last_frame is already absent', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: { imagePrompt: 'FF' } },
+      generationStrategy: 'flfv',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'hold_emotion', 'static');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+  });
+
+  // Case 9: no frames key at all → null
+  it('returns null when frames key is missing entirely', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(stripLastFrameForHoldingBeat('{"shotNumber": 1}', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('"a string"', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('[]', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('null', 'hold_emotion', 'static')).toBeNull();
+  });
+
+  // Case 10: overwrites a pre-existing generationStrategy of any value
+  it('overwrites generationStrategy regardless of prior value', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    for (const prior of ['flfv', 'fmlfv', 'v2v_extend', undefined]) {
+      const input = JSON.stringify({
+        frames: { first_frame: { imagePrompt: 'FF' }, last_frame: { imagePrompt: 'LF' } },
+        ...(prior ? { generationStrategy: prior } : {}),
+      });
+      const out = stripLastFrameForHoldingBeat(input, 'set_the_world', 'wide locked-off');
+      expect(out, `prior=${prior}`).not.toBeNull();
+      expect(JSON.parse(out!).generationStrategy, `prior=${prior}`).toBe('i2v');
+    }
+  });
+
+  // Case 11: mid_frame is preserved (not stripped) when present
+  it('preserves mid_frame; only last_frame is removed', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: {
+        first_frame: { imagePrompt: 'FF' },
+        mid_frame: { imagePrompt: 'MID' },
+        last_frame: { imagePrompt: 'LF' },
+      },
+      generationStrategy: 'fmlfv',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'show_clue', 'insert macro');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.frames.mid_frame).toBeDefined();
+    expect(parsed.frames.first_frame).toBeDefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+  });
+});

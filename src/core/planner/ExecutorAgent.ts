@@ -69,7 +69,7 @@ import {
   buildReferenceMenu,
   buildTurn2UserMessage,
   parseTurn2RefsJson,
-  isHoldingBeat,
+  stripLastFrameForHoldingBeat,
   type Reference,
   type ReferenceMenuItem,
 } from './shotImagePipeline.js';
@@ -1398,32 +1398,13 @@ export class ExecutorAgent extends TypedEventEmitter {
 
     const purpose = shot.purpose ?? '';
     const cameraWork = shot.cameraWork ?? '';
-    if (!isHoldingBeat(purpose, cameraWork)) return null;
-
-    let parsed: {
-      frames?: { first_frame?: unknown; last_frame?: unknown; mid_frame?: unknown };
-      generationStrategy?: string;
-      [k: string]: unknown;
-    };
-    try {
-      let raw = content.trim();
-      if (raw.startsWith('```')) {
-        raw = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-      }
-      parsed = JSON.parse(raw);
-    } catch {
-      return null;
+    const mutated = stripLastFrameForHoldingBeat(content, purpose, cameraWork);
+    if (mutated) {
+      this.log(
+        `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v`,
+      );
     }
-    if (!parsed.frames) return null;
-    if (parsed.frames.last_frame !== undefined) {
-      delete parsed.frames.last_frame;
-    }
-    parsed.generationStrategy = 'i2v';
-
-    this.log(
-      `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v`,
-    );
-    return JSON.stringify(parsed, null, 2);
+    return mutated;
   }
 
   private parseSceneBreakdown(

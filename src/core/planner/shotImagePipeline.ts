@@ -83,6 +83,61 @@ export function isHoldingBeat(purpose: string, cameraWork: string): boolean {
   return true;
 }
 
+/**
+ * Strip `frames.last_frame` from a freshly-LLM-generated shot_image_prompt
+ * JSON string when the shot is a holding beat, and flip the JSON's
+ * `generationStrategy` to `'i2v'` so the downstream provider routes to
+ * the i2v workflow.
+ *
+ * Pure: takes the JSON content + the shot's purpose + cameraWork. No
+ * disk, no executor state. Returns the mutated JSON string when the
+ * skip fires, or null when nothing should change (caller keeps the
+ * original content).
+ *
+ * Returns null on every failure mode:
+ *   - Not a holding beat (purpose/cameraWork combination fails
+ *     `isHoldingBeat`).
+ *   - Content is malformed JSON.
+ *   - Parsed JSON has no `frames` key (partial / malformed LLM output).
+ *
+ * Code fences (```json ... ```) are stripped before parsing.
+ *
+ * When the JSON already lacks `last_frame` but the shot IS a holding
+ * beat, the strategy is still flipped to `'i2v'` so downstream routing
+ * stays consistent.
+ *
+ * `mid_frame`, if present, is preserved — i2v means a single anchor
+ * (first_frame); the workflow ignores mid/last slots when
+ * `num_images: 1`. Preserving mid_frame avoids losing data the LLM
+ * generated in case strategy changes later.
+ */
+export function stripLastFrameForHoldingBeat(
+  jsonContent: string,
+  purpose: string,
+  cameraWork: string,
+): string | null {
+  if (!isHoldingBeat(purpose, cameraWork)) return null;
+  let raw = (jsonContent ?? '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('```')) {
+    raw = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as { frames?: Record<string, unknown>; generationStrategy?: string };
+  if (!obj.frames || typeof obj.frames !== 'object') return null;
+  if (obj.frames['last_frame'] !== undefined) {
+    delete obj.frames['last_frame'];
+  }
+  obj.generationStrategy = 'i2v';
+  return JSON.stringify(obj, null, 2);
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface Reference {
