@@ -169,6 +169,33 @@ The `description` field is a brief 1–2 sentence summary of what happens in thi
 
 This is NOT a detailed image prompt — keep it concise. The downstream `shot_image_prompt` step expands this into full frame descriptions with cinematographer prose.
 
+### Approach / entry / depart beats — write back-to-camera-friendly descriptions
+
+When this shot's `purpose` is one of `meet_character`, `set_arrival`, `enter_location`, `depart_location`, `establish_destination`, `pursue`, or `flee` — OR when the `oneLineSummary` / your description-in-progress involves characters MOVING TOWARD, AWAY FROM, INTO, or OUT OF a place — write the `description` so the downstream image-prompt step naturally renders the characters **from behind, walking toward the destination**.
+
+**The downstream image-prompt LLM trusts your `description` prose over its own framing rules.** If you write "they exchange a final look of shared determination," the downstream prompt will render face-to-face profiles, even though the shot is an approach beat and should be back-to-camera. Your wording IS load-bearing.
+
+**Use these phrasing patterns:**
+- ✓ "Ruby and Angel walk up to the weathered pawn shop entrance from the sidewalk, both seen from behind, approaching the door under the harsh midday sun."
+- ✓ "Marcus enters the cathedral from the western nave, walking toward the altar visible at the far end of the deep-focus background."
+- ✓ "Elena departs the diner, her back to camera, the empty booth receding behind her as she pushes through the glass door."
+
+**AVOID for approach / OTS-of-foreground beats:**
+- ✗ "Ruby and Angel exchange a final look of shared determination" (face cue — wrong for an approach beat)
+- ✗ "Their gazes meet as they stand before the entrance" (gaze direction implies facing camera/each other)
+- ✗ "Her face set with determination, his jaw tight with resolve" (face features — wrong for back-to-camera)
+- ✗ "Eyes locked on the door ahead" (eyes are a face feature — describes the action correctly but biases the downstream prompt)
+
+If the emotional beat is "shared determination before they break in," describe it via **posture and approach** ("walking together in lockstep, shoulders squared, weight forward — a pact held in the silence of the approach"), NOT via faces and gazes. Posture cues survive the back-to-camera framing; face cues don't.
+
+### OTS-of-foreground beats — same rule
+
+When this shot's `cameraWork` places two characters BLURRED in the foreground with a third character SHARP behind them (the classic over-the-shoulder-of-the-robbers setup), the foreground characters' description must be back-to-camera. Write `description` accordingly:
+- ✓ "Over Ruby and Angel's shoulders (both seen from behind in the blurred foreground), the owner stands frozen behind the counter, hands raised in surrender, face pale with terror."
+- ✗ "Ruby and Angel survey the shop with predatory calm as the owner stands frozen behind the counter." (the survey/calm framing biases Ruby+Angel to face-on)
+
+The focal subject (the owner here) IS allowed face cues — they are the sharp subject the viewer sees clearly. The back-to-camera constraint applies only to the foreground characters.
+
 ---
 
 ## Audio Field
@@ -241,6 +268,7 @@ Before returning JSON:
 11. **OTS framing** never paired with a single-character shot — use `insert` / `extreme_close_up` / `close_up` instead
 12. **Bharata tags preserved from Stage A** — if the plan entry for this shot includes `sattvika`, `drishti`, or `vyabhichariBhava`, copy them through into the expanded shot JSON. You MAY add or refine these tags when the expanded prose makes them obviously appropriate, but you MUST NOT silently drop tags Stage A set.
 13. **Pronouns match the character profile** — for every character refId mentioned in `description` / `cameraWork` / `audio`, the pronouns within ~10 words of their name must match the gender declared in their character profile. Never write `she` / `her` for a male character (or vice versa) because the scene's mainSubject is the opposite gender. Re-roll the sentence using the proper noun if you find a mismatch.
+14. **Approach / entry / depart beats — back-to-camera-friendly description.** If `purpose` ∈ `{meet_character, set_arrival, enter_location, depart_location, establish_destination, pursue, flee}` OR the description involves characters moving TOWARD / AWAY FROM / INTO / OUT OF a place, the `description` MUST be written so the downstream image-prompt step naturally renders the characters from behind. Re-read your `description` and reject face-cue phrases like "exchange a look", "gazes meet", "face set with", "eyes locked on" — rewrite using posture and approach phrasing (see the "Approach / entry / depart beats" section above). The downstream LLM trusts your `description` prose over its own framing rules, so this wording is load-bearing.
 
 ---
 
