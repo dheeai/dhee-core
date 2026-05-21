@@ -57,6 +57,7 @@
     "test:frontend": "pnpm -C frontend test",
     "test": "vitest run tests/unit/",
     "test:ci": "vitest run tests/unit/",
+    "lint:prompts": "bash scripts/lint-prompts-no-slot-tokens.sh",
     "test:e2e": "vitest run tests/e2e/",
     "test:coverage": "vitest run --coverage",
     "eval": "tsx scripts/run-evals.ts --live",
