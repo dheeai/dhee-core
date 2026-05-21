@@ -64,18 +64,30 @@ export function getPreviousShotIdAcrossScenes(
 
 /**
  * Get the last frame image path from a completed shot_image node.
- * Prefers outputPaths.last_frame, falls back to outputPath (single frame).
- * Returns null if the node isn't completed or has no output.
+ *
+ * Strict rules (Bug 8a / Bug 11 fix):
+ * - If `outputPaths` exists at all, only `outputPaths['last_frame']` counts.
+ *   When `outputPaths['last_frame']` is missing, returns null — callers must
+ *   handle the absent-last-frame case explicitly (e.g. demote
+ *   reuse_prior_frame to edit_previous_shot, or fall through to fresh).
+ * - Only when `outputPaths` is entirely undefined (true single-frame mode,
+ *   the node never tracked multi-frame outputs) do we fall back to
+ *   `outputPath`.
+ *
+ * Returns null if the node isn't completed or has no usable last-frame output.
  */
 export function getLastFramePath(node: ExecutionNode): string | null {
   if (node.status !== 'completed') return null;
 
-  // Multi-frame: prefer last_frame
-  if (node.outputPaths?.['last_frame']) {
-    return node.outputPaths['last_frame'];
+  // Multi-frame mode: outputPaths is the source of truth. Never silently
+  // fall back to outputPath, which would copy the first frame as if it were
+  // the last frame (the silent-wrong-frame bug from Ruby V3 / prompt_relay).
+  if (node.outputPaths !== undefined) {
+    return node.outputPaths['last_frame'] ?? null;
   }
 
-  // Single-frame fallback
+  // Single-frame mode: no outputPaths tracking → outputPath is the only
+  // frame this node produced, and treating it as the last frame is correct.
   if (node.outputPath) {
     return node.outputPath;
   }
