@@ -59,6 +59,7 @@
     "test:ci": "vitest run tests/unit/",
     "lint:prompts": "bash scripts/lint-prompts-no-slot-tokens.sh",
     "test:e2e": "vitest run tests/e2e/",
+    "test:integration": "vitest run tests/integration/",
     "test:coverage": "vitest run --coverage",
     "eval": "tsx scripts/run-evals.ts --live",
     "eval:mock": "tsx scripts/run-evals.ts",
