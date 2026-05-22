@@ -119,6 +119,19 @@ export interface ConversationEvents {
   onProjectFocused?: (sessionId: string, data: { projectName: string; templateId: string; style: string; duration: number; tools: string[] }) => void;
   /** A long-running tool produced an asset (image / video) — surface it as a standalone chat event. */
   onMediaGenerated?: (sessionId: string, data: { kind: 'image' | 'video'; project: string; path: string; source: string }) => void;
+  /**
+   * Session lifecycle transitions — emitted on every change of
+   * `session.state.status` (idle / running / awaiting_input / completed
+   * / error). `turnKind` distinguishes user-driven turns from
+   * server-initiated supervisor turns so the renderer can show
+   * appropriate UI ("Supervisor reviewing…" vs "Pi is thinking…").
+   * Skipped when the status hasn't actually changed (no spurious
+   * duplicate emits).
+   */
+  onSessionStatus?: (
+    sessionId: string,
+    data: { status: string; turnKind?: 'user' | 'supervisor' },
+  ) => void;
 }
 
 /**
@@ -164,6 +177,34 @@ interface ActiveSession {
   timerCheckpointInterval?: ReturnType<typeof setInterval>;
   /** Events callbacks for the currently-running task (cleared after runTask). */
   activeEvents?: ConversationEvents;
+  /**
+   * Long-lived event bridge for THIS session. Set once by the IPC
+   * bridge (or WS layer) over a stable callback (e.g.
+   * `webContents.send`), and reused across every runTask invocation —
+   * including server-initiated turns the user never directly triggered
+   * (most notably the post-completion supervisor pi-agent that
+   * auto-engages on runner `completed` events).
+   *
+   * Solves the "supervisor invisibility" bug from 2026-05-22: the IPC
+   * bridge passed a fresh `eventCb` per runTask, so when `runTask` was
+   * called WITHOUT an eventCb (the supervisor's `runTask(sid, msg)`
+   * with no third arg), nothing reached the renderer. With this pinned
+   * bridge as fallback, supervisor tool calls and streaming text now
+   * stream to the chat the same way user-initiated turns do.
+   *
+   * Distinct from `activeEvents` (per-task, cleared in runTask's
+   * finally) and `backgroundEvents` (per-runner-task, cleared on
+   * runner completed/failed). Lifetime is session lifetime.
+   */
+  persistentEvents?: ConversationEvents;
+  /**
+   * Tag on the in-flight turn so event consumers (and the renderer)
+   * can distinguish a supervisor turn from a user-initiated one.
+   * Cleared when the turn ends. Read by `onSessionStatus` emission
+   * so the UI can render a "Supervisor reviewing…" pill instead of
+   * the generic "running" state.
+   */
+  currentTurnKind?: 'user' | 'supervisor';
   /**
    * Events callbacks pinned for the lifetime of an in-flight background
    * task on this session. Captured from `activeEvents` when the runner
@@ -621,6 +662,33 @@ export class ConversationManager {
     // counter.
     session.supervisorState = recordSupervisorInvocation(supState, event, task.id);
 
+    // Tag the upcoming turn as supervisor so onSessionStatus emission
+    // carries turnKind='supervisor' (the renderer can render a
+    // "Supervisor reviewing…" pill instead of the generic running
+    // indicator). Pre-fire a notification so the chat shows a visible
+    // marker even on UIs that haven't subscribed to onSessionStatus
+    // yet — this is the main accessibility fix for the "supervisor is
+    // running invisibly" bug from 2026-05-22.
+    session.currentTurnKind = 'supervisor';
+    const supervisorBanner = (() => {
+      switch (event) {
+        case 'completed': return '🔍 Reviewing the run…';
+        case 'failed': return '🔍 Investigating the failure…';
+        case 'asset': return '🔍 Reviewing generated asset…';
+        case 'user_invalidate': return '🔍 Reviewing user invalidation…';
+        default: return '🔍 Supervisor turn started';
+      }
+    })();
+    const sink = this.resolveTaskEvents(sessionId, session.activeEvents);
+    try {
+      sink?.onNotification?.(sessionId, {
+        level: 'info',
+        message: supervisorBanner,
+      });
+    } catch {
+      // notification sink failures are non-fatal
+    }
+
     try {
       await this.runTask(sessionId, taskMessage);
     } catch {
@@ -628,6 +696,11 @@ export class ConversationManager {
       // The user will see whatever pi-agent's reply ended up as
       // (or, on a thrown runTask, no reply); the runner keeps
       // emitting events for the rest of the run.
+    } finally {
+      // Clear the turn kind so a subsequent user-initiated runTask
+      // gets the right (undefined / 'user') tag.
+      const s = this.sessions.get(sessionId);
+      if (s) delete s.currentTurnKind;
     }
   }
 
@@ -906,6 +979,102 @@ export class ConversationManager {
   }
 
   /**
+   * Bind a long-lived event bridge to a session. Survives across every
+   * runTask invocation on this session — including server-initiated
+   * turns (supervisor) that don't pass an eventCb directly.
+   *
+   * The IPC bridge (and any future WS layer) should call this once
+   * per renderer connection, passing a stable callback over the
+   * transport (e.g. `webContents.send`). Calling again with new
+   * events replaces the binding (renderer-reload scenario).
+   *
+   * Silent no-op when the session doesn't exist yet — the bridge
+   * may call this during a resume race window before the session
+   * has been fully materialized.
+   */
+  bindSessionEventBridge(sessionId: string, events: ConversationEvents): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.persistentEvents = events;
+  }
+
+  /**
+   * Clear the persistent event bridge for a session (renderer
+   * disconnect). The session itself is left intact — only the bridge
+   * is dropped.
+   */
+  unbindSessionEventBridge(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    delete session.persistentEvents;
+  }
+
+  /**
+   * Pick the events sink to use for a given task. Passed-in events
+   * win (caller-supplied bridge for one specific task); otherwise
+   * fall back to the session's pinned `persistentEvents`. Returns
+   * undefined when neither is set (legacy CLI / smoke paths).
+   */
+  private resolveTaskEvents(
+    sessionId: string,
+    passedEvents?: ConversationEvents,
+  ): ConversationEvents | undefined {
+    if (passedEvents) return passedEvents;
+    const session = this.sessions.get(sessionId);
+    return session?.persistentEvents;
+  }
+
+  /**
+   * Single source of truth for status transitions. Writes the new
+   * status to the session and emits `onSessionStatus` through the
+   * effective event bridge so the renderer can react. Skips the emit
+   * when the status is unchanged (avoids spurious duplicate events
+   * during multi-step internal writes).
+   */
+  private setSessionStatus(
+    sessionId: string,
+    status: SessionState['status'],
+    turnKind?: 'user' | 'supervisor',
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (session.state.status === status) return;
+    session.state.status = status;
+    const events = this.resolveTaskEvents(sessionId, session.activeEvents);
+    try {
+      events?.onSessionStatus?.(sessionId, {
+        status,
+        ...(turnKind ? { turnKind } : {}),
+      });
+    } catch {
+      // Event sink failures shouldn't poison status writes.
+    }
+  }
+
+  /**
+   * Wait until the session's status changes away from `fromStatus`,
+   * with a hard timeout. Used by runTask's auto-cancel path: after
+   * cancelling the in-flight turn, we want to give it a beat to flip
+   * to 'error' / 'completed' before we mark the session 'running'
+   * again for the new task. If the previous turn refuses to die
+   * within the timeout, we proceed anyway — the new turn will
+   * overwrite status. Better than blocking the chat forever.
+   */
+  private async waitForStatusChange(
+    sessionId: string,
+    fromStatus: SessionState['status'],
+    timeoutMs: number,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const session = this.sessions.get(sessionId);
+      if (!session) return;
+      if (session.state.status !== fromStatus) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+
+  /**
    * Refresh a session's activity timestamp to keep it eligible for resume.
    */
   touchSession(sessionId: string): boolean {
@@ -1097,8 +1266,19 @@ export class ConversationManager {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
+    // Back-to-back UX. Old behavior: throw "Session already has a
+    // running task" — which surfaced to the renderer as "Couldn't
+    // reach the agent" any time the user typed during pi-agent's
+    // turn OR during the auto-engaged supervisor turn. New behavior:
+    // user intent wins. Cancel the in-flight turn, wait briefly for
+    // cleanup, then proceed with the new task. The chat is now
+    // interruptible from anywhere — same effect as the client-side
+    // optimistic cancel at ChatPanelEmbedded.tsx:1001, but moved to
+    // the server so it's not racey with the renderer's stale
+    // session.status view.
     if (session.state.status === 'running') {
-      throw new Error('Session already has a running task');
+      this.cancelTask(sessionId);
+      await this.waitForStatusChange(sessionId, 'running', 3000);
     }
 
     // Cross-project concurrency guard. kshana-core's pipeline reads a
@@ -1138,20 +1318,31 @@ export class ConversationManager {
         session.initialized = true;
       }
 
-      // Update session state
-      session.state.status = 'running';
+      // Update session state. setSessionStatus emits onSessionStatus
+      // through the persistent event bridge so the renderer can show
+      // a "thinking…" pill — and so the supervisor turn (turnKind set
+      // ahead of the call) is distinguishable from a user turn.
+      this.setSessionStatus(sessionId, 'running', session.currentTurnKind);
       session.state.lastActivity = Date.now();
       session.state.taskHistory.push(task);
 
       // Create abort controller for cancellation
       session.abortController = new AbortController();
 
+      // Resolve effective events: passed-in events win (caller-supplied
+      // bridge for one specific task), otherwise fall back to the
+      // session's pinned persistentEvents (IPC bridge). This is what
+      // makes supervisor turns visible — runSupervisorInvocation calls
+      // runTask without events, but persistentEvents (bound by the IPC
+      // bridge on connect) catches the fallback.
+      const effectiveEvents = this.resolveTaskEvents(sessionId, events);
+
       // Set up event listeners
-      this.setupEventListeners(sessionId, session.agent!, events);
+      this.setupEventListeners(sessionId, session.agent!, effectiveEvents);
       // Stash events on the session so non-agent-emitter callbacks
       // (e.g. PiSessionAgent's onMedia closure firing onMediaGenerated)
       // can reach the WS bridge while the run is in flight.
-      session.activeEvents = events;
+      session.activeEvents = effectiveEvents;
 
       // Start active timer + periodic checkpoint
       try { startTimer(); } catch { /* ignore if no project yet */ }
@@ -1190,11 +1381,11 @@ export class ConversationManager {
         // Update session state based on result
         session.state.lastActivity = Date.now();
         if (result.status === 'waiting_for_user') {
-          session.state.status = 'awaiting_input';
+          this.setSessionStatus(sessionId, 'awaiting_input', session.currentTurnKind);
         } else if (result.status === 'completed') {
-          session.state.status = 'completed';
+          this.setSessionStatus(sessionId, 'completed', session.currentTurnKind);
         } else if (result.status === 'error' || result.status === 'interrupted') {
-          session.state.status = 'error';
+          this.setSessionStatus(sessionId, 'error', session.currentTurnKind);
         }
 
         captureWorkflowCompleted({
@@ -1208,7 +1399,7 @@ export class ConversationManager {
         // Stop active timer + checkpoint interval on error
         if (session.timerCheckpointInterval) { clearInterval(session.timerCheckpointInterval); session.timerCheckpointInterval = undefined; }
         try { stopTimer(); } catch { /* ignore */ }
-        session.state.status = 'error';
+        this.setSessionStatus(sessionId, 'error', session.currentTurnKind);
         session.state.lastActivity = Date.now();
         captureWorkflowFailed({
           sessionId,
@@ -1412,16 +1603,19 @@ export class ConversationManager {
     }
 
     return runInSession(session.sessionContext, async () => {
-      // Update session state
-      session.state.status = 'running';
+      // Update session state via the helper so onSessionStatus emits.
+      this.setSessionStatus(sessionId, 'running', session.currentTurnKind);
       session.state.lastActivity = Date.now();
 
       // Create abort controller for cancellation
       session.abortController = new AbortController();
 
+      // Resolve effective events with persistentEvents fallback.
+      const effectiveEvents = this.resolveTaskEvents(sessionId, events);
+
       // Set up event listeners
-      this.setupEventListeners(sessionId, session.agent!, events);
-      session.activeEvents = events;
+      this.setupEventListeners(sessionId, session.agent!, effectiveEvents);
+      session.activeEvents = effectiveEvents;
 
       // Start active timer + periodic checkpoint
       try { startTimer(); } catch { /* ignore */ }
@@ -1439,11 +1633,11 @@ export class ConversationManager {
         // Update session state based on result
         session.state.lastActivity = Date.now();
         if (result.status === 'waiting_for_user') {
-          session.state.status = 'awaiting_input';
+          this.setSessionStatus(sessionId, 'awaiting_input', session.currentTurnKind);
         } else if (result.status === 'completed') {
-          session.state.status = 'completed';
+          this.setSessionStatus(sessionId, 'completed', session.currentTurnKind);
         } else if (result.status === 'error' || result.status === 'interrupted') {
-          session.state.status = 'error';
+          this.setSessionStatus(sessionId, 'error', session.currentTurnKind);
         }
 
         return result;
@@ -1451,7 +1645,7 @@ export class ConversationManager {
         // Stop active timer + checkpoint interval on error
         if (session.timerCheckpointInterval) { clearInterval(session.timerCheckpointInterval); session.timerCheckpointInterval = undefined; }
         try { stopTimer(); } catch { /* ignore */ }
-        session.state.status = 'error';
+        this.setSessionStatus(sessionId, 'error', session.currentTurnKind);
         session.state.lastActivity = Date.now();
         throw error;
       } finally {
@@ -1760,7 +1954,7 @@ export class ConversationManager {
       }
     }
 
-    session.state.status = 'idle';
+    this.setSessionStatus(sessionId, 'idle');
     session.state.lastActivity = Date.now();
 
     const anythingHappenedHere =
@@ -2088,11 +2282,12 @@ export class ConversationManager {
     // ── Stream-events bridge. Mirror the previous subprocess wiring so
     // the chat panel's tool-card / media-generated handlers light up.
     const toolCallId = `regen_${Date.now()}`;
-    session.state.status = 'running';
+    this.setSessionStatus(sessionId, 'running');
     session.state.lastActivity = Date.now();
-    session.activeEvents = events;
+    const effectiveEvents = this.resolveTaskEvents(sessionId, events);
+    session.activeEvents = effectiveEvents;
 
-    events?.onToolCall?.(
+    effectiveEvents?.onToolCall?.(
       sessionId,
       toolCallId,
       'kshana_regen',
@@ -2113,7 +2308,7 @@ export class ConversationManager {
         name: 'dhee-regen-in-process',
         onTool: (info) => {
           const hint = info.nodeId ? ` ${info.nodeId}` : '';
-          events?.onToolStreaming?.(
+          effectiveEvents?.onToolStreaming?.(
             sessionId,
             toolCallId,
             `[${info.toolName}]${hint}\n`,
@@ -2125,7 +2320,7 @@ export class ConversationManager {
         },
         onResult: (info) => {
           if (info.filePath) {
-            events?.onToolStreaming?.(
+            effectiveEvents?.onToolStreaming?.(
               sessionId,
               toolCallId,
               `  → ${info.filePath}\n`,
@@ -2135,7 +2330,7 @@ export class ConversationManager {
               false,
             );
           } else if (info.status) {
-            events?.onToolStreaming?.(
+            effectiveEvents?.onToolStreaming?.(
               sessionId,
               toolCallId,
               `  → ${info.status}\n`,
@@ -2146,7 +2341,7 @@ export class ConversationManager {
             );
           }
           if (info.error) {
-            events?.onToolStreaming?.(
+            effectiveEvents?.onToolStreaming?.(
               sessionId,
               toolCallId,
               `  ! ${info.error}\n`,
@@ -2158,7 +2353,7 @@ export class ConversationManager {
           }
         },
         onNotification: (info) => {
-          events?.onToolStreaming?.(
+          effectiveEvents?.onToolStreaming?.(
             sessionId,
             toolCallId,
             `[${info.level}] ${info.message}\n`,
@@ -2169,7 +2364,7 @@ export class ConversationManager {
           );
         },
         onAsset: (event) => {
-          events?.onMediaGenerated?.(sessionId, {
+          effectiveEvents?.onMediaGenerated?.(sessionId, {
             kind: event.kind,
             project: session.focusedProject ?? '',
             path: event.filePath,
@@ -2179,7 +2374,7 @@ export class ConversationManager {
       });
 
       const ok = result.status === 'completed';
-      events?.onToolResult?.(
+      effectiveEvents?.onToolResult?.(
         sessionId,
         toolCallId,
         'dhee_regen',
@@ -2192,7 +2387,7 @@ export class ConversationManager {
         'dhee',
       );
 
-      session.state.status = ok ? 'completed' : 'error';
+      this.setSessionStatus(sessionId, ok ? 'completed' : 'error');
       session.activeEvents = undefined;
 
       return {
@@ -2205,7 +2400,7 @@ export class ConversationManager {
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      events?.onToolResult?.(
+      effectiveEvents?.onToolResult?.(
         sessionId,
         toolCallId,
         'dhee_regen',
@@ -2213,7 +2408,7 @@ export class ConversationManager {
         true,
         'dhee',
       );
-      session.state.status = 'error';
+      this.setSessionStatus(sessionId, 'error');
       session.activeEvents = undefined;
       throw err;
     }
