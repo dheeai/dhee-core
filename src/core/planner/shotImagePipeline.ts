@@ -84,6 +84,33 @@ export function isHoldingBeat(purpose: string, cameraWork: string): boolean {
 }
 
 /**
+ * Per-project opt-in for the holding-beat skip-LF behavior.
+ *
+ * Reads `project.features.skipHoldingBeatLF`. Default is OFF — the
+ * skip-LF path was added on the 2026-05-22 skip-lf branch and is
+ * still experimental, so legacy projects (no `features` field) and
+ * new projects (created with `skipHoldingBeatLF: false`) keep the
+ * traditional FL2V generation with a separate last-frame prompt.
+ *
+ * Opt-in: set `"features": { "skipHoldingBeatLF": true }` in
+ * project.json. Strict boolean equality, not truthiness — a
+ * hand-edited `"skipHoldingBeatLF": "true"` (string) would be a
+ * silent surprise as "on" if we used `Boolean(v)`. Force the literal
+ * `true` to opt in.
+ *
+ * Read by: `ExecutorAgent.applyHoldingBeatSkip` (the live path) and
+ * the dead-code `generateShotImagePromptPipeline` (defense in depth).
+ *
+ * Documented in `docs/feature-flags.md`.
+ */
+export function isSkipHoldingBeatLFEnabled(
+  project: { features?: { skipHoldingBeatLF?: boolean } } | undefined | null,
+): boolean {
+  if (!project || !project.features) return false;
+  return project.features.skipHoldingBeatLF === true;
+}
+
+/**
  * Strip `frames.last_frame` from a freshly-LLM-generated shot_image_prompt
  * JSON string when the shot is a holding beat, and flip the JSON's
  * `generationStrategy` to `'i2v'` so the downstream provider routes to
@@ -1196,6 +1223,16 @@ export interface PipelineContext {
   lastFrameChanges: string;
   generationStrategy: string;
   worldStyle?: string;
+  /**
+   * Per-project opt-in for skip-LF on holding beats. When false /
+   * undefined, the pipeline generates a full last-frame prompt
+   * regardless of `isHoldingBeat`. Mirrors the
+   * `project.features.skipHoldingBeatLF` flag the executor's live
+   * path reads via `isSkipHoldingBeatLFEnabled`. Default OFF so this
+   * dead-code path matches production behavior if it's ever
+   * resurrected.
+   */
+  skipHoldingBeatLFEnabled?: boolean;
 }
 
 interface LLMClient {
@@ -1297,7 +1334,12 @@ export async function generateShotImagePromptPipeline(
   // skip the LLM call and emit an empty LF prompt. The assembler omits
   // last_frame from the JSON; the executor's bridge node no-ops; the
   // shot_video resolver flips strategy to i2v. See skip-lf branch.
-  const skipLastFrame = isHoldingBeat(ctx.shotPurpose, ctx.shotCameraWork);
+  // Gate on the per-project opt-in flag. Default OFF — full LF prompt
+  // generation continues unless the project explicitly enables the
+  // feature in project.json. See docs/feature-flags.md.
+  const skipLastFrame =
+    ctx.skipHoldingBeatLFEnabled === true &&
+    isHoldingBeat(ctx.shotPurpose, ctx.shotCameraWork);
   let lastFramePrompt = '';
   if (skipLastFrame) {
     const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;

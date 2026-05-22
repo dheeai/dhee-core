@@ -68,6 +68,7 @@ import {
   resolveDerivedFromBase,
   buildReferenceMenu,
   buildTurn2UserMessage,
+  isSkipHoldingBeatLFEnabled,
   parseTurn2RefsJson,
   stripLastFrameForHoldingBeat,
   type Reference,
@@ -1373,6 +1374,13 @@ export class ExecutorAgent extends TypedEventEmitter {
    */
   private applyHoldingBeatSkip(content: string, node: ExecutionNode): string | null {
     if (!node.itemId || node.typeId !== 'shot_image_prompt') return null;
+    // Per-project opt-in. Default OFF — legacy behavior (full FL2V with
+    // a separate LF prompt) until the project explicitly sets
+    // `features.skipHoldingBeatLF: true` in project.json. See
+    // docs/feature-flags.md for the flag registry.
+    if (!isSkipHoldingBeatLFEnabled(this.config.project as { features?: { skipHoldingBeatLF?: boolean } } | undefined)) {
+      return null;
+    }
     const m = node.itemId.match(/^(scene_(\d+))_shot_(\d+)$/);
     if (!m || !m[1] || !m[3]) return null;
     const sceneId = m[1];

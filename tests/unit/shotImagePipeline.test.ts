@@ -1792,3 +1792,55 @@ describe('shotImagePipeline: stripLastFrameForHoldingBeat — pure JSON mutation
     expect(parsed.generationStrategy).toBe('i2v');
   });
 });
+
+/**
+ * Feature flag: project.features.skipHoldingBeatLF
+ *
+ * Skip-LF for holding beats is new behavior — default OFF. A project
+ * opts in by setting `features.skipHoldingBeatLF: true` in
+ * project.json. Everything calling the holding-beat skip path must
+ * first check this flag and bail when it's not true; absent /
+ * undefined / false / wrong-type all mean OFF.
+ *
+ * Strict boolean equality (not truthiness) so a hand-edited
+ * "skipHoldingBeatLF": "true" (string) doesn't silently turn it on.
+ */
+describe('shotImagePipeline: isSkipHoldingBeatLFEnabled — opt-in feature flag', () => {
+  it('returns false when project is undefined / null', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled(undefined)).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled(null as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it('returns false when features is absent (legacy projects unaffected)', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({})).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ title: 'old project' } as Parameters<typeof isSkipHoldingBeatLFEnabled>[0])).toBe(false);
+  });
+
+  it('returns false when features object exists but skipHoldingBeatLF is not set', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: {} })).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ features: { otherFlag: true } as Record<string, unknown> })).toBe(false);
+  });
+
+  it('returns false when explicitly false', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: false } })).toBe(false);
+  });
+
+  it('returns true ONLY when explicitly true (strict boolean)', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: true } })).toBe(true);
+  });
+
+  it('returns false for truthy non-boolean values — defends against hand-edit typos', async () => {
+    // A hand-edited project.json with "skipHoldingBeatLF": "true" or 1
+    // would be silently surprising as "on" if we used truthiness. Force
+    // people to write the literal boolean to opt in.
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: 'true' as unknown as boolean } })).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: 1 as unknown as boolean } })).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: {} as unknown as boolean } })).toBe(false);
+  });
+});
