@@ -76,6 +76,35 @@ import type { DesktopSessionCapabilities } from '../core/remote/DesktopAssemblyB
 
 const TIMER_CHECKPOINT_INTERVAL_MS = 60_000; // Flush elapsed time to disk every 60s
 
+/**
+ * Detect "silent" agent.run() resolutions — runs that completed
+ * without surfacing anything visible to the user. Two cases qualify:
+ *   - status === 'interrupted' (cancelled mid-stream, partial or no
+ *     output; the user has no way to tell whether anything happened)
+ *   - status === 'completed' but the output is empty / whitespace
+ *     (the LLM returned no text and no further tool calls).
+ *
+ * runTask uses this to push a system notification into the chat when
+ * pi-agent ends without saying anything. Without it, the user just
+ * sees the chat go quiet after the last tool card and assumes the
+ * agent is broken — the bug from 2026-05-22 where two reads were
+ * followed by silence with no diagnostic.
+ *
+ * Does NOT flag:
+ *   - waiting_for_user (the agent is alive and asking a question —
+ *     the question itself is the visible signal)
+ *   - error (runTask throws → IPC bridge already renders a visible
+ *     "Couldn't reach the agent" row; double-surfacing would clutter)
+ */
+export function isSilentAgentResult(r: { status: string; output?: string }): boolean {
+  if (r.status === 'interrupted') return true;
+  if (r.status === 'completed') {
+    const o = r.output;
+    if (!o || o.trim().length === 0) return true;
+  }
+  return false;
+}
+
 export interface ConversationManagerConfig {
   llmConfig: LLMClientConfig;
   sessionTimeoutMs?: number;  // Default: 30 minutes
@@ -1277,6 +1306,9 @@ export class ConversationManager {
     // the server so it's not racey with the renderer's stale
     // session.status view.
     if (session.state.status === 'running') {
+      console.log(
+        `[runTask] auto-cancel sessionId=${sessionId} prevTurnKind=${session.currentTurnKind ?? 'none'} — incoming task supersedes in-flight turn`,
+      );
       this.cancelTask(sessionId);
       await this.waitForStatusChange(sessionId, 'running', 3000);
     }
@@ -1371,6 +1403,16 @@ export class ConversationManager {
       session.announcedProject = announced.announcedProject;
       const effectiveTask = announced.task;
 
+      // Instrumentation: pi-agent's internal loop is silent today, so
+      // when a turn ends without visible output (the 2026-05-22 "agent
+      // did two reads then stopped" repro) we have no log to grep for
+      // why. Log entry/exit with task preview, turnKind, output length
+      // — every chat turn — so the NEXT silent failure leaves a usable
+      // breadcrumb trail.
+      const turnTag = session.currentTurnKind ?? 'user';
+      const taskPreview = effectiveTask.replace(/\s+/g, ' ').slice(0, 80);
+      console.log(`[runTask] start sessionId=${sessionId} turnKind=${turnTag} task='${taskPreview}'`);
+      const runStartedAt = Date.now();
       try {
         const result = await session.agent!.run(effectiveTask);
 
@@ -1388,6 +1430,32 @@ export class ConversationManager {
           this.setSessionStatus(sessionId, 'error', session.currentTurnKind);
         }
 
+        const outputLen = (result.output ?? '').length;
+        const elapsedMs = Date.now() - runStartedAt;
+        console.log(
+          `[runTask] end   sessionId=${sessionId} turnKind=${turnTag} status=${result.status} outputLen=${outputLen} elapsedMs=${elapsedMs}`,
+        );
+
+        // Silent-agent escape hatch: when the agent resolves without
+        // anything visible (interrupted OR completed-but-empty), push
+        // a notification so the chat shows a system row instead of
+        // going quiet. The user knows the turn ended, can decide to
+        // retry, and we have a log breadcrumb for the next debug.
+        if (isSilentAgentResult(result)) {
+          const reason = result.status === 'interrupted'
+            ? "the run was interrupted before it finished"
+            : "the agent completed without producing a response";
+          console.log(`[runTask] SILENT sessionId=${sessionId} reason="${reason}"`);
+          try {
+            effectiveEvents?.onNotification?.(sessionId, {
+              level: 'warning',
+              message: `⚠️ Agent didn't respond — ${reason}. Try sending the message again.`,
+            });
+          } catch {
+            // notification sink failure is non-fatal
+          }
+        }
+
         captureWorkflowCompleted({
           sessionId,
           workflowName,
@@ -1401,10 +1469,15 @@ export class ConversationManager {
         try { stopTimer(); } catch { /* ignore */ }
         this.setSessionStatus(sessionId, 'error', session.currentTurnKind);
         session.state.lastActivity = Date.now();
+        const errName = error instanceof Error ? error.name : 'unknown_error';
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.log(
+          `[runTask] THROW sessionId=${sessionId} turnKind=${turnTag} err=${errName} msg='${errMsg.slice(0, 200)}'`,
+        );
         captureWorkflowFailed({
           sessionId,
           workflowName,
-          errorType: error instanceof Error ? error.name : 'unknown_error',
+          errorType: errName,
           durationMs: Math.max(0, Date.now() - workflowStartedAt),
         });
         throw error;
@@ -1814,6 +1887,18 @@ export class ConversationManager {
     onProgress?: (step: { lane: 'agent' | 'abort' | 'comfy' | 'runner' | 'summary'; message: string }) => void,
   ): boolean {
     const session = this.sessions.get(sessionId);
+
+    // Log the caller — pinning down WHO triggers a cancel is critical
+    // for diagnosing "agent stopped silently" reports. The 2026-05-22
+    // repro had a cancelTask in the logs with no obvious source.
+    // Capture 4 frames of the stack so we can tell user-Stop from
+    // server-side auto-cancel from runner cancel paths.
+    const callerStack = new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()).join(' << ') ?? '(no stack)';
+    const currentStatus = session?.state.status ?? '(no session)';
+    const turnKind = session?.currentTurnKind ?? 'none';
+    console.log(
+      `[cancelTask] CALLED sessionId=${sessionId} status=${currentStatus} turnKind=${turnKind} caller: ${callerStack}`,
+    );
 
     // FM9 + user request 2026-05-19: `onProgress` lets the WebSocket /
     // IPC layer pipe per-lane progress into the chat panel so the user

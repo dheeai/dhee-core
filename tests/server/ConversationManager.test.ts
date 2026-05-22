@@ -10,7 +10,7 @@ vi.mock('../../src/server/posthog.js', () => ({
   captureWorkflowStarted: vi.fn(),
 }));
 
-import { ConversationManager } from '../../src/server/ConversationManager.js';
+import { ConversationManager, isSilentAgentResult } from '../../src/server/ConversationManager.js';
 import { ProjectStateCache, RemoteClientFileSystem, createRemoteSession, runInSession } from '../../src/core/fs/index.js';
 import { writeProjectText } from '../../src/tasks/video/workflow/projectFileIO.js';
 
@@ -423,5 +423,56 @@ describe('persistent event bridge + status emission', () => {
 
     expect(resolved).toBeUndefined();
     disposeManager(manager);
+  });
+});
+
+/**
+ * Silent-agent detection — the loud-failure escape hatch.
+ *
+ * Today's bug repro: pi-agent did two reads, then went silent. The
+ * LLM was aborted mid-stream (cancelTask logs confirmed) and
+ * agent.run() resolved with no text. runTask returned 'completed'
+ * with empty/undefined output. The chat had nothing new to render,
+ * so it looked like the agent just stopped for no reason.
+ *
+ * Fix: classify the result, and when it's a "silent" termination
+ * (interrupted OR completed-but-empty), surface a system
+ * notification to the chat so the user sees that the turn ended
+ * without a response. Test enumerates the failure modes the helper
+ * has to recognize.
+ */
+describe('isSilentAgentResult — detects "no visible response" runTask outcomes', () => {
+  it('treats interrupted runs as silent regardless of output', () => {
+    expect(isSilentAgentResult({ status: 'interrupted' })).toBe(true);
+    expect(isSilentAgentResult({ status: 'interrupted', output: '' })).toBe(true);
+    // Even partial output on interrupt is suspicious — the user
+    // didn't see closure. Surface a notice. (We still keep the
+    // partial output in the transcript; the notice is an addition,
+    // not a replacement.)
+    expect(isSilentAgentResult({ status: 'interrupted', output: 'partial...' })).toBe(true);
+  });
+
+  it('treats completed runs with empty/missing output as silent', () => {
+    expect(isSilentAgentResult({ status: 'completed' })).toBe(true);
+    expect(isSilentAgentResult({ status: 'completed', output: '' })).toBe(true);
+    expect(isSilentAgentResult({ status: 'completed', output: '   \n\t  ' })).toBe(true);
+  });
+
+  it('does NOT flag completed runs with real text', () => {
+    expect(isSilentAgentResult({ status: 'completed', output: 'Done — shot 5 dialogue updated.' })).toBe(false);
+    expect(isSilentAgentResult({ status: 'completed', output: 'x' })).toBe(false);
+  });
+
+  it('does NOT flag waiting_for_user — user already knows the agent is alive (question in chat)', () => {
+    expect(isSilentAgentResult({ status: 'waiting_for_user' })).toBe(false);
+    expect(isSilentAgentResult({ status: 'waiting_for_user', output: '' })).toBe(false);
+  });
+
+  it('does NOT flag error — runTask already throws back to the IPC bridge which surfaces "Couldn\'t reach the agent"', () => {
+    // Double-surfacing would render two error rows in chat. Error
+    // path has its own visible message; silent-agent is for the
+    // resolved-but-empty case the error path doesn't cover.
+    expect(isSilentAgentResult({ status: 'error' })).toBe(false);
+    expect(isSilentAgentResult({ status: 'error', output: '' })).toBe(false);
   });
 });
