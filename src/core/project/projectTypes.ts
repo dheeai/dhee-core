@@ -28,6 +28,21 @@ export interface ExecutionNode {
   error?: string;
   startedAt?: number;
   completedAt?: number;
+  /**
+   * Per-node metadata bag. Persisted in project.json. Narrow shape
+   * here; the planner's richer `ExecutionNodeMetadata` (see
+   * src/core/planner/types.ts) is structurally compatible.
+   *
+   * `forceUseExistingPrompt` — set by `applyInvalidation` when the
+   * caller passes `keepPrompt: true`. Tells the executor's media-node
+   * skip-LLM path to read the on-disk prompt file even if upstream
+   * deps were re-completed after it (i.e., override `isPromptStale`).
+   * Used after the user hand-edits a setting_image / character_image
+   * / object_image prompt and only wants the image to regenerate.
+   */
+  metadata?: Record<string, unknown> & {
+    forceUseExistingPrompt?: boolean;
+  };
 }
 
 export interface ProjectFile {

@@ -3074,20 +3074,42 @@ export class ExecutorAgent extends TypedEventEmitter {
               const isMediaNode = nodeCategory === 'visual_ref' || nodeCategory === 'clip';
               if (isMediaNode) {
                 const existingPromptPath = this.findExistingPromptFile(node);
-                const promptIsStale = existingPromptPath ? this.isPromptStale(node, existingPromptPath) : false;
-                if (existingPromptPath && !promptIsStale) {
-                  this.log(`  Prompt file already exists: ${existingPromptPath} — skipping LLM`);
+                // forceUseExistingPrompt — set by applyInvalidation when the
+                // user invalidates with `keepPrompt: true` after hand-editing
+                // the prompt JSON. Overrides the staleness check so the LLM
+                // doesn't re-run and overwrite the edits. Cleared on success
+                // below so subsequent natural invalidations behave normally.
+                const forceKeepPrompt = !!(node.metadata as Record<string, unknown> | undefined)?.['forceUseExistingPrompt'];
+                const promptIsStale = existingPromptPath && !forceKeepPrompt
+                  ? this.isPromptStale(node, existingPromptPath)
+                  : false;
+                if (existingPromptPath && (forceKeepPrompt || !promptIsStale)) {
+                  if (forceKeepPrompt) {
+                    this.log(`  Prompt file exists and forceUseExistingPrompt is set — skipping LLM (user-edited prompt)`);
+                  } else {
+                    this.log(`  Prompt file already exists: ${existingPromptPath} — skipping LLM`);
+                  }
 
                   if (isMediaNode) {
                     // Media node: skip LLM, go straight to image/video generation
                     this.emit({
                       type: 'notification',
                       level: 'info',
-                      message: `Skipping LLM for ${node.displayName} — prompt exists, going to image gen`,
+                      message: forceKeepPrompt
+                        ? `Skipping LLM for ${node.displayName} — using hand-edited prompt`
+                        : `Skipping LLM for ${node.displayName} — prompt exists, going to image gen`,
                     });
                     const mediaPath = await this.executeMediaGenerationWithRetry(node, existingPromptPath, toolCallId);
                     if (mediaPath) {
                       finalOutputPath = mediaPath;
+                      // Clear the sentinel on success so a future natural
+                      // invalidate of this node re-runs the LLM as usual.
+                      // We leave it alone on failure so the user can retry
+                      // (e.g. Comfy queue blip) without losing their edit.
+                      const meta = node.metadata as Record<string, unknown> | undefined;
+                      if (meta && 'forceUseExistingPrompt' in meta) {
+                        delete meta['forceUseExistingPrompt'];
+                      }
                     } else {
                       this.executor.markFailed(node.id, this.consumeLastNodeError('Media generation failed (prompt saved, will retry)'));
                       this.emitTodoUpdate();
