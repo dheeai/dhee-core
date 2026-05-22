@@ -337,9 +337,7 @@
     "inputs": {
       "num_images": "1",
       "num_images.strength_1": 1,
-      "num_images.strength_2": 1,
       "num_images.index_1": 0,
-      "num_images.index_2": -1,
       "vae": [
         "181",
         0
@@ -349,10 +347,6 @@
         0
       ],
       "num_images.image_1": [
-        "31",
-        0
-      ],
-      "num_images.image_2": [
         "31",
         0
       ]
@@ -804,9 +798,7 @@
     "inputs": {
       "num_images": "1",
       "num_images.strength_1": 1,
-      "num_images.strength_2": 1,
       "num_images.index_1": 0,
-      "num_images.index_2": -1,
       "vae": [
         "181",
         0
@@ -816,10 +808,6 @@
         0
       ],
       "num_images.image_1": [
-        "31",
-        0
-      ],
-      "num_images.image_2": [
         "31",
         0
       ]
