@@ -1467,14 +1467,29 @@ export class ConversationManager {
               `[runTask] SILENT sessionId=${sessionId} suppressed (user-initiated stop)`,
             );
           } else {
-            const reason = result.status === 'interrupted'
+            // Be specific about WHAT happened so the user can act on
+            // it instead of guessing. The two real-world causes for a
+            // status='completed' + outputLen=0 turn are:
+            //   1. The LLM API returned an empty completion (no text,
+            //      no tool calls). Common with some OpenRouter
+            //      providers under load, or with models that
+            //      occasionally short-circuit on short prompts.
+            //   2. The run was cancelled mid-stream by something
+            //      other than the user (the runTask auto-cancel for
+            //      back-to-back messages, or pi-agent's internal
+            //      stop). User-initiated stops are filtered above.
+            const isInterrupt = result.status === 'interrupted';
+            const reasonLog = isInterrupt
               ? "the run was interrupted before it finished"
-              : "the agent completed without producing a response";
-            console.log(`[runTask] SILENT sessionId=${sessionId} reason="${reason}"`);
+              : "the LLM returned an empty response (no text, no tool calls)";
+            console.log(`[runTask] SILENT sessionId=${sessionId} reason="${reasonLog}" elapsedMs=${elapsedMs}`);
+            const userMessage = isInterrupt
+              ? "⚠️ The run was interrupted before the agent finished. Try sending the message again."
+              : `⚠️ The model returned no response — no text and no tool calls (after ${Math.round(elapsedMs / 1000)}s). This is usually a model/provider issue. Try resending; if it keeps happening, switch to a different LLM model in Settings.`;
             try {
               effectiveEvents?.onNotification?.(sessionId, {
                 level: 'warning',
-                message: `⚠️ Agent didn't respond — ${reason}. Try sending the message again.`,
+                message: userMessage,
               });
             } catch {
               // notification sink failure is non-fatal
