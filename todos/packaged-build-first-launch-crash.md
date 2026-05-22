@@ -22,6 +22,77 @@ The dialog is Electron's BUILT-IN default — fires when an uncaught
 exception happens BEFORE our `process.on('uncaughtException')` handler
 at `main.ts:3517` registers. So the bug is in early module load.
 
+## Update 2026-05-22 — log evidence narrows the throw point
+
+User shared `~/Library/Logs/dhee-desktop/main.log`. Same 4 lines appear
+on every launch attempt (4 attempts: 19:12, 19:13, 09:28, 09:46) and
+then NOTHING — log just stops:
+
+  [RemotionBootstrap] Startup cwd=/
+  [RemotionBootstrap] Normalized NODE_PATH for packaged runtime: ...
+  [RemotionBootstrap] Final NODE_PATH=...
+  [EsbuildBinaryPath] Using packaged esbuild binary at .../@esbuild/darwin-arm64/bin/esbuild
+
+This is the LAST log emitted by `bootstrapRemotionRuntime.ts`
+(line 72, the `bootstrapPackagedEsbuildBinaryPath` call). After it
+returns, control flows back to main.ts:1 and the next imports run.
+**The throw is in one of those next imports.** Specifically — it
+runs before any other user-code log, which means it's in:
+
+  import path from 'path';                       // std lib, won't throw
+  import fs from 'fs/promises';                  // std lib
+  import { randomUUID } from 'crypto';           // std lib
+  import { app, BrowserWindow, ... } from 'electron';
+  import log from 'electron-log';                // already loaded
+  import { autoUpdater } from 'electron-updater';     ← SUSPECT
+  import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
+  import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';     ← SUSPECT
+  import ffprobeInstaller from '@ffprobe-installer/ffprobe';  ← SUSPECT
+  ... (other local imports)
+
+### Refined hypothesis ranking
+
+1. **`@ffmpeg-installer/ffmpeg` / `@ffprobe-installer/ffprobe`.** These
+   resolve a platform-specific native binary path at IMPORT time
+   (`darwin-arm64/ffmpeg`). If the binary isn't in `asar.unpacked`
+   (asar can't execute native binaries — they MUST be unpacked), the
+   resolver throws. The throw target is often an object literal
+   without a `.message` field → Electron formats as "undefined:
+   undefined".
+2. **`electron-updater` autoUpdater on unsigned macOS.** User ran
+   xattr to clear quarantine, meaning the app isn't notarized.
+   electron-updater's autoUpdater static initializer can throw on
+   unsigned builds.
+3. **A local import (`accountManager`, `settingsManager`,
+   `analytics`, etc.)** doing keychain or safeStorage I/O at module
+   load. Less likely — those have try/catches per inspection.
+
+### Next diagnostic to ship to user
+
+Run the app directly from terminal so stderr is visible:
+
+```
+/Applications/Dhee.app/Contents/MacOS/Dhee 2>&1 | tee /tmp/dhee-stderr.log
+```
+
+stderr will show the actual stack + thrown value even when the
+Electron dialog hides it. Paste back `/tmp/dhee-stderr.log` to
+pinpoint the throw site.
+
+### Validation steps once root cause is known
+
+If it's #1 (ffmpeg / ffprobe):
+  - Check `electron-builder` config (`package.json` `build.asarUnpack`)
+    for entries covering `@ffmpeg-installer/**/*` and
+    `@ffprobe-installer/**/*`.
+  - Verify the v1.2.0 installer actually has these in `app.asar.unpacked/`.
+  - If missing, add to `asarUnpack`, rebuild, re-release.
+
+If it's #2 (electron-updater):
+  - Guard the import or move it inside `app.whenReady().then(...)`.
+  - Long-term: get the macOS build properly notarized so quarantine
+    isn't an issue.
+
 ## Reproduction
 
 - Fresh macOS install (no prior Dhee in `~/Library/Application Support/`)
