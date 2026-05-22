@@ -235,6 +235,17 @@ interface ActiveSession {
    */
   currentTurnKind?: 'user' | 'supervisor';
   /**
+   * Set by `cancelTask` when called with `opts.userInitiated=true`
+   * (the IPC bridge path — the user clicked Stop in the chat header).
+   * Consumed (read + cleared) once by runTask's silent-agent
+   * notification so we don't surface a redundant "Agent didn't
+   * respond — interrupted" warning when the user is the one who
+   * triggered the interruption. Server-initiated auto-cancels (the
+   * runTask back-to-back path) leave this flag unset so the warning
+   * still fires for them.
+   */
+  userInitiatedCancel?: boolean;
+  /**
    * Events callbacks pinned for the lifetime of an in-flight background
    * task on this session. Captured from `activeEvents` when the runner
    * emits 'started' and cleared on 'completed' / 'failed' / 'cancelled'.
@@ -1441,18 +1452,33 @@ export class ConversationManager {
         // a notification so the chat shows a system row instead of
         // going quiet. The user knows the turn ended, can decide to
         // retry, and we have a log breadcrumb for the next debug.
+        //
+        // Suppress when the user themselves clicked Stop — they
+        // already know the turn was interrupted, the extra warning
+        // is noise. The userInitiatedCancel flag is consumed here
+        // so subsequent silent ends still surface normally.
         if (isSilentAgentResult(result)) {
-          const reason = result.status === 'interrupted'
-            ? "the run was interrupted before it finished"
-            : "the agent completed without producing a response";
-          console.log(`[runTask] SILENT sessionId=${sessionId} reason="${reason}"`);
-          try {
-            effectiveEvents?.onNotification?.(sessionId, {
-              level: 'warning',
-              message: `⚠️ Agent didn't respond — ${reason}. Try sending the message again.`,
-            });
-          } catch {
-            // notification sink failure is non-fatal
+          const userCancelled = !!session.userInitiatedCancel;
+          if (session.userInitiatedCancel) {
+            session.userInitiatedCancel = false; // consume the flag
+          }
+          if (userCancelled) {
+            console.log(
+              `[runTask] SILENT sessionId=${sessionId} suppressed (user-initiated stop)`,
+            );
+          } else {
+            const reason = result.status === 'interrupted'
+              ? "the run was interrupted before it finished"
+              : "the agent completed without producing a response";
+            console.log(`[runTask] SILENT sessionId=${sessionId} reason="${reason}"`);
+            try {
+              effectiveEvents?.onNotification?.(sessionId, {
+                level: 'warning',
+                message: `⚠️ Agent didn't respond — ${reason}. Try sending the message again.`,
+              });
+            } catch {
+              // notification sink failure is non-fatal
+            }
           }
         }
 
@@ -1885,8 +1911,19 @@ export class ConversationManager {
   cancelTask(
     sessionId: string,
     onProgress?: (step: { lane: 'agent' | 'abort' | 'comfy' | 'runner' | 'summary'; message: string }) => void,
+    opts?: { userInitiated?: boolean },
   ): boolean {
     const session = this.sessions.get(sessionId);
+
+    // Mark the cancel source so the silent-agent escape hatch in
+    // runTask can suppress its "Agent didn't respond" notification
+    // when the user themselves clicked Stop — they obviously know the
+    // turn was interrupted, the extra warning row is just noise. The
+    // flag is consumed (read + cleared) once by isSilentAgentResult's
+    // handler so subsequent silent ends still surface normally.
+    if (session && opts?.userInitiated) {
+      session.userInitiatedCancel = true;
+    }
 
     // Log the caller — pinning down WHO triggers a cancel is critical
     // for diagnosing "agent stopped silently" reports. The 2026-05-22
@@ -1896,8 +1933,9 @@ export class ConversationManager {
     const callerStack = new Error().stack?.split('\n').slice(2, 6).map(s => s.trim()).join(' << ') ?? '(no stack)';
     const currentStatus = session?.state.status ?? '(no session)';
     const turnKind = session?.currentTurnKind ?? 'none';
+    const initBy = opts?.userInitiated ? 'user' : 'server';
     console.log(
-      `[cancelTask] CALLED sessionId=${sessionId} status=${currentStatus} turnKind=${turnKind} caller: ${callerStack}`,
+      `[cancelTask] CALLED sessionId=${sessionId} status=${currentStatus} turnKind=${turnKind} initiatedBy=${initBy} caller: ${callerStack}`,
     );
 
     // FM9 + user request 2026-05-19: `onProgress` lets the WebSocket /

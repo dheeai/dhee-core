@@ -476,3 +476,47 @@ describe('isSilentAgentResult — detects "no visible response" runTask outcomes
     expect(isSilentAgentResult({ status: 'error', output: '' })).toBe(false);
   });
 });
+
+/**
+ * cancelTask source attribution — the IPC bridge calls cancelTask
+ * with `userInitiated: true` when the user clicks Stop. The
+ * server-side auto-cancel path in runTask calls cancelTask without
+ * the flag. runTask's silent-agent escape hatch uses this to
+ * suppress the redundant "Agent didn't respond — interrupted"
+ * warning on user-clicked Stop.
+ */
+describe('cancelTask userInitiated flag', () => {
+  it('sets session.userInitiatedCancel = true when opts.userInitiated is true', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    // Without an agent on the session, cancelTask still records the
+    // intent (the flag is set BEFORE plan-decision, so even a no-op
+    // cancel still flags the source). The flag is what runTask later
+    // reads to suppress its silent-agent notification.
+    manager.cancelTask(session.id, undefined, { userInitiated: true });
+    const stored = (manager as unknown as {
+      sessions: Map<string, { userInitiatedCancel?: boolean }>;
+    }).sessions.get(session.id)?.userInitiatedCancel;
+    expect(stored).toBe(true);
+    disposeManager(manager);
+  });
+
+  it('leaves userInitiatedCancel unset when called without opts (auto-cancel path)', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    manager.cancelTask(session.id);
+    const stored = (manager as unknown as {
+      sessions: Map<string, { userInitiatedCancel?: boolean }>;
+    }).sessions.get(session.id)?.userInitiatedCancel;
+    expect(stored).toBeUndefined();
+    disposeManager(manager);
+  });
+
+  it('does not throw when called for a session that does not exist', () => {
+    const manager = createManager();
+    expect(() =>
+      manager.cancelTask('nonexistent-session-id', undefined, { userInitiated: true }),
+    ).not.toThrow();
+    disposeManager(manager);
+  });
+});
