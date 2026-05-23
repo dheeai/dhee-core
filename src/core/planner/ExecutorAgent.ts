@@ -70,7 +70,8 @@ import {
   buildTurn2UserMessage,
   isSkipHoldingBeatLFEnabled,
   parseTurn2RefsJson,
-  stripLastFrameForHoldingBeat,
+  stripLastFrameFromShotImagePromptJson,
+  shouldSkipLastFrame,
   type Reference,
   type ReferenceMenuItem,
 } from './shotImagePipeline.js';
@@ -1382,8 +1383,9 @@ export class ExecutorAgent extends TypedEventEmitter {
       return null;
     }
     const m = node.itemId.match(/^(scene_(\d+))_shot_(\d+)$/);
-    if (!m || !m[1] || !m[3]) return null;
+    if (!m || !m[1] || !m[2] || !m[3]) return null;
     const sceneId = m[1];
+    const sceneNumber = parseInt(m[2], 10);
     const shotNumber = parseInt(m[3], 10);
 
     const svpOutputPath = this.resolveSceneVideoPromptOutputPath(sceneId);
@@ -1406,10 +1408,50 @@ export class ExecutorAgent extends TypedEventEmitter {
 
     const purpose = shot.purpose ?? '';
     const cameraWork = shot.cameraWork ?? '';
-    const mutated = stripLastFrameForHoldingBeat(content, purpose, cameraWork);
+
+    // Boundary-planner integration: when `transitionBoundaryPlanner` is
+    // ON and the scene has been planned, an LF with a downstream
+    // consumer must be generated regardless of holding-beat status.
+    // We look up the CURRENT shot's needsLfAnchor and the NEXT shot's
+    // incomingTransition from project.scenes (the boundary planner's
+    // output sink). Both reads are best-effort — if `scenes` is absent
+    // or shaped unexpectedly, the lookups return undefined and
+    // shouldSkipLastFrame collapses to the pure holding-beat decision.
+    const projectAny = this.config.project as {
+      scenes?: Array<{
+        sceneNumber?: number;
+        shots?: Array<{
+          shotNumber?: number;
+          needsLfAnchor?: boolean;
+          incomingTransition?: { operation?: string };
+        }>;
+      }>;
+      features?: { skipHoldingBeatLF?: boolean; transitionBoundaryPlanner?: boolean };
+    } | undefined;
+    const sceneShots = projectAny?.scenes?.find((s) => s.sceneNumber === sceneNumber)?.shots;
+    const thisShotPlanned = sceneShots?.find((s) => s.shotNumber === shotNumber);
+    const nextShotPlanned = sceneShots?.find((s) => s.shotNumber === shotNumber + 1);
+    const nextIncoming = nextShotPlanned?.incomingTransition?.operation
+      ? { operation: nextShotPlanned.incomingTransition.operation }
+      : undefined;
+
+    const skip = shouldSkipLastFrame(
+      {
+        purpose,
+        cameraWork,
+        needsLfAnchor: thisShotPlanned?.needsLfAnchor,
+        nextShotIncomingTransition: nextIncoming,
+      },
+      projectAny,
+    );
+    if (!skip) return null;
+    const mutated = stripLastFrameFromShotImagePromptJson(content);
     if (mutated) {
+      const consumerNote = nextIncoming
+        ? ` (next shot incoming=${nextIncoming.operation} — should NOT have fired; verify shouldSkipLastFrame)`
+        : '';
       this.log(
-        `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v`,
+        `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v${consumerNote}`,
       );
     }
     return mutated;

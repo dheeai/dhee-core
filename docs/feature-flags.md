@@ -7,7 +7,8 @@ Central registry of per-project opt-in flags. Each flag lives under
 {
   "title": "My Project",
   "features": {
-    "skipHoldingBeatLF": false
+    "skipHoldingBeatLF": false,
+    "transitionBoundaryPlanner": false
   }
 }
 ```
@@ -94,3 +95,76 @@ beat. Experimental; landed on the `skip-lf` branch 2026-05-22.
   designed to fix.
 - Projects with mostly action-y shots where the heuristic rarely
   fires anyway.
+
+**Interaction with `transitionBoundaryPlanner`.** When both flags are
+on, the skip-LF rule is additionally gated by the boundary planner's
+per-shot signals. An LF that has a downstream consumer — the next
+shot's `incomingTransition.operation` is `shared_frame` or
+`reuse_intent` — or that's marked `needsLfAnchor: true` is
+generated regardless of holding-beat status. The single source of
+truth for the combined rule is `shouldSkipLastFrame` in
+`shotImagePipeline.ts`. When `transitionBoundaryPlanner` is OFF, no
+shot has `incomingTransition` or `needsLfAnchor`, so the combined
+rule collapses to the historical skip-LF behavior.
+
+### `transitionBoundaryPlanner`
+
+**Default: `false`**
+
+When true, after `scene_breakdown` produces the per-scene shot list
+(description / purpose / cameraWork / dialogue / continuityRole),
+a per-scene boundary-planner LLM pass classifies each shot-to-shot
+boundary into one of four operations and writes the decision onto
+each shot in `project.json`:
+
+```jsonc
+{
+  "shotNumber": 4,
+  "incomingTransition": {
+    "operation": "shared_frame",
+    "reason": "Shot 3 ends on Sera's datapad-lit face — exactly where shot 4 begins her reply."
+  },
+  "needsLfAnchor": false
+}
+```
+
+Operations:
+
+- `shared_frame` — shot N+1's `firstFrame` ImageRef is the same image
+  as shot N's `lastFrame`. Generated once by N's LF call, referenced
+  by both shots' frame slots. Mirrors the manual file-reuse edit the
+  user did on 2026-05-22 to chain Malachor's close-up across shots
+  7→8.
+- `reuse_intent` — N+1's FF derives from N's LF via Klein edit; the
+  FF prompt is written to closely match N's LF state with small
+  intentional changes.
+- `reframe` — blocking or pose broke between shots (e.g., character
+  stood up); N+1's FF is generated fresh AND its prompt explicitly
+  references the divergence from N's LF.
+- `cut` — hard break (new location / POV / time / dialogue intent
+  not continuous). Current pipeline behavior.
+
+`needsLfAnchor: true` is a separate, per-shot signal that forces LF
+generation for that shot regardless of holding-beat status — used
+when a named character's expression / pose in i2v would otherwise
+drift (the manual fix on 2026-05-22 shot 8).
+
+**Read by:**
+- `isTransitionBoundaryPlannerEnabled` in
+  `src/core/planner/boundaryPlanner.ts` — the canonical helper that
+  enforces the strict-boolean check.
+- The image generation pipeline reads `incomingTransition` and
+  `needsLfAnchor` off each shot when deciding whether to skip FF
+  generation, share an ImageRef, or force LF generation.
+
+**When to turn ON:**
+- You've been hand-editing shot transitions to chain LFs into FFs
+  and want the planner to do it up front.
+- You want the LF anchor heuristic to constrain i2v drift on
+  character-heavy shots without per-shot manual flagging.
+
+**When to keep OFF:**
+- New projects where you haven't yet seen poor cross-shot continuity
+  in the default pipeline.
+- Projects where you prefer fully independent shot generation for
+  artistic reasons (e.g., montage-heavy material).

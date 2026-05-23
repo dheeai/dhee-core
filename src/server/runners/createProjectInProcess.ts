@@ -186,6 +186,7 @@ export function createProjectInProcess(
       const existingFeatures = (parsed['features'] as Record<string, unknown> | undefined) ?? {};
       parsed['features'] = {
         skipHoldingBeatLF: false,
+        transitionBoundaryPlanner: false,
         ...existingFeatures,
       };
       writeFileSync(projectJsonPath, JSON.stringify(parsed, null, 2));

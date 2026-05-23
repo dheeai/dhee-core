@@ -66,8 +66,39 @@ export interface ProjectFeatures {
    * Toggle by editing project.json directly or via pi-agent's `edit`
    * tool. Read by `isSkipHoldingBeatLFEnabled` in
    * `src/core/planner/shotImagePipeline.ts`.
+   *
+   * **Interaction with `transitionBoundaryPlanner`.** When that flag
+   * is also on, the LF skip is additionally gated by the boundary
+   * planner: an LF that has a downstream consumer (the next shot's
+   * `incomingTransition.operation` is `shared_frame` or
+   * `reuse_intent`) or that's marked `needsLfAnchor: true` will be
+   * generated regardless of holding-beat status. See
+   * `shouldSkipLastFrame` in `shotImagePipeline.ts` for the combined
+   * rule.
    */
   skipHoldingBeatLF?: boolean;
+  /**
+   * Transition boundary planner. When true, after scene_breakdown
+   * runs, a per-scene LLM pass classifies each shot-to-shot boundary
+   * into one of {shared_frame, reuse_intent, reframe, cut} and
+   * writes `incomingTransition` + `needsLfAnchor` onto each shot in
+   * project.json. Downstream image generation reads those fields:
+   *
+   *   - `shared_frame`: shot N+1's first_frame is the same ImageRef as
+   *     shot N's last_frame (one generation, two consumers).
+   *   - `reuse_intent`: N+1's FF derives from N's LF via Klein edit.
+   *   - `reframe`: N+1's FF prompt explicitly diverges from N's LF.
+   *   - `cut`: current pipeline (independent generation).
+   *
+   * Designed to replace the manual chat-driven editing the user did
+   * on 2026-05-22 to chain LFs into FFs across shots. Experimental;
+   * landed on the transition-boundary-planner branch 2026-05-23.
+   * Default OFF.
+   *
+   * Read by `isTransitionBoundaryPlannerEnabled` in
+   * `src/core/planner/boundaryPlanner.ts`.
+   */
+  transitionBoundaryPlanner?: boolean;
 }
 
 export interface ProjectFile {

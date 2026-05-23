@@ -111,6 +111,58 @@ export function isSkipHoldingBeatLFEnabled(
 }
 
 /**
+ * Combined skip-LF decision — the single source of truth that bridges
+ * the `skipHoldingBeatLF` and `transitionBoundaryPlanner` feature flags.
+ *
+ * Today's question — "should this shot's last_frame be skipped?" — has
+ * two inputs now:
+ *
+ *   1. The holding-beat heuristic (purpose + cameraWork) → the
+ *      historical signal. When `skipHoldingBeatLF` is OFF, the answer
+ *      is always false. When it's ON, the heuristic is the first
+ *      gate.
+ *
+ *   2. The boundary planner's per-shot signals — only consulted when
+ *      `transitionBoundaryPlanner` is ON AND the shot carries planner
+ *      output. Two ways a holding-beat shot's LF still gets
+ *      generated:
+ *        a. The NEXT shot's `incomingTransition.operation` is
+ *           `shared_frame` or `reuse_intent` — this LF has a
+ *           downstream consumer, so skipping it would break the
+ *           chain.
+ *        b. This shot's own `needsLfAnchor` is true — the planner
+ *           flagged the LF as a video-drift anchor (the manual fix
+ *           the user applied on 2026-05-22 shot 8).
+ *
+ * When `transitionBoundaryPlanner` is OFF, neither field is populated
+ * on any shot, and this function collapses to
+ * `skipHoldingBeatLF && isHoldingBeat` — identical to the original
+ * behavior. So enabling only the holding-beat flag preserves the
+ * historical pipeline exactly.
+ *
+ * Pure: takes the shot's holding-beat inputs, its own anchor flag,
+ * and the NEXT shot's incoming transition. No I/O.
+ *
+ * Returns true when the LF should be skipped.
+ */
+export function shouldSkipLastFrame(
+  inputs: {
+    purpose: string;
+    cameraWork: string;
+    needsLfAnchor?: boolean;
+    nextShotIncomingTransition?: { operation: string };
+  },
+  project: { features?: { skipHoldingBeatLF?: boolean; transitionBoundaryPlanner?: boolean } } | undefined | null,
+): boolean {
+  if (!isSkipHoldingBeatLFEnabled(project)) return false;
+  if (!isHoldingBeat(inputs.purpose, inputs.cameraWork)) return false;
+  if (inputs.needsLfAnchor === true) return false;
+  const nextOp = inputs.nextShotIncomingTransition?.operation;
+  if (nextOp === 'shared_frame' || nextOp === 'reuse_intent') return false;
+  return true;
+}
+
+/**
  * Strip `frames.last_frame` from a freshly-LLM-generated shot_image_prompt
  * JSON string when the shot is a holding beat, and flip the JSON's
  * `generationStrategy` to `'i2v'` so the downstream provider routes to
@@ -144,6 +196,26 @@ export function stripLastFrameForHoldingBeat(
   cameraWork: string,
 ): string | null {
   if (!isHoldingBeat(purpose, cameraWork)) return null;
+  return stripLastFrameFromShotImagePromptJson(jsonContent);
+}
+
+/**
+ * Pure JSON mutator extracted from `stripLastFrameForHoldingBeat`.
+ *
+ * Strips `frames.last_frame` and flips `generationStrategy` to
+ * `'i2v'`. The caller is responsible for deciding whether to call
+ * this — used by both the holding-beat path (which gates on
+ * `isHoldingBeat`) and the combined-flag path (which gates on
+ * `shouldSkipLastFrame`).
+ *
+ * Returns null on parse failure or when the JSON has no `frames`
+ * key. Code fences are stripped before parsing. Returns the
+ * normalized JSON string with strategy flipped to `'i2v'` and
+ * `last_frame` removed when present.
+ */
+export function stripLastFrameFromShotImagePromptJson(
+  jsonContent: string,
+): string | null {
   let raw = (jsonContent ?? '').trim();
   if (!raw) return null;
   if (raw.startsWith('```')) {
@@ -1233,6 +1305,28 @@ export interface PipelineContext {
    * resurrected.
    */
   skipHoldingBeatLFEnabled?: boolean;
+  /**
+   * Boundary-planner output for THIS shot. Used by the combined
+   * skip-LF decision (`shouldSkipLastFrame`) to keep the LF when
+   * the planner explicitly marked it as a video-drift anchor.
+   * Undefined when `transitionBoundaryPlanner` is OFF or this
+   * shot has no anchor flag.
+   */
+  needsLfAnchor?: boolean;
+  /**
+   * NEXT shot's `incomingTransition.operation` (one of shared_frame,
+   * reuse_intent, reframe, cut). Used by `shouldSkipLastFrame` to
+   * keep the LF when the next shot will consume it. Undefined when
+   * `transitionBoundaryPlanner` is OFF, the next shot has no
+   * planned transition, or this is the last shot in the scene.
+   */
+  nextShotIncomingTransitionOp?: string;
+  /**
+   * Mirrors `project.features.transitionBoundaryPlanner`. Surfaced
+   * here so `shouldSkipLastFrame` sees the same shape both code
+   * paths use. Default OFF.
+   */
+  transitionBoundaryPlannerEnabled?: boolean;
 }
 
 interface LLMClient {
@@ -1337,9 +1431,26 @@ export async function generateShotImagePromptPipeline(
   // Gate on the per-project opt-in flag. Default OFF — full LF prompt
   // generation continues unless the project explicitly enables the
   // feature in project.json. See docs/feature-flags.md.
-  const skipLastFrame =
-    ctx.skipHoldingBeatLFEnabled === true &&
-    isHoldingBeat(ctx.shotPurpose, ctx.shotCameraWork);
+  // Combined skip-LF gate — same shape as the executor's live path.
+  // When `transitionBoundaryPlannerEnabled` is true and the boundary
+  // planner marked this shot's LF as a downstream consumer's input
+  // (or as a drift anchor), the holding-beat skip is suppressed.
+  const skipLastFrame = shouldSkipLastFrame(
+    {
+      purpose: ctx.shotPurpose,
+      cameraWork: ctx.shotCameraWork,
+      needsLfAnchor: ctx.needsLfAnchor,
+      nextShotIncomingTransition: ctx.nextShotIncomingTransitionOp
+        ? { operation: ctx.nextShotIncomingTransitionOp }
+        : undefined,
+    },
+    {
+      features: {
+        skipHoldingBeatLF: ctx.skipHoldingBeatLFEnabled === true,
+        transitionBoundaryPlanner: ctx.transitionBoundaryPlannerEnabled === true,
+      },
+    },
+  );
   let lastFramePrompt = '';
   if (skipLastFrame) {
     const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;

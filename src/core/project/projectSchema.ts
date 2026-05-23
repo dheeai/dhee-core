@@ -46,6 +46,27 @@ export interface VideoRef extends AssetRef {
 }
 
 /**
+ * Boundary-planner operation for the transition INTO a shot from its
+ * predecessor. One enum value per real edit observed in manual chat
+ * sessions (see docs/feature-flags.md → transitionBoundaryPlanner).
+ *
+ *   shared_frame    Shot N+1's first_frame is the same image as shot N's
+ *                   last_frame. Generated once, referenced by both.
+ *   reuse_intent    Shot N+1's first_frame derives from shot N's last_frame
+ *                   via Klein edit — visually adjacent, not identical.
+ *   reframe         Blocking/pose broke between shots; first_frame is
+ *                   generated fresh and diverges explicitly from N's LF.
+ *   cut             Hard break (new location / POV / time). No coupling.
+ */
+export type TransitionOperation = 'shared_frame' | 'reuse_intent' | 'reframe' | 'cut';
+
+export interface TransitionDecision {
+  operation: TransitionOperation;
+  /** One-line LLM rationale. Surfaced in UI; useful for debugging. */
+  reason?: string;
+}
+
+/**
  * A single shot. Holds the *current* artifact for each slot —
  * earlier generations are pushed onto `history` in retirement order.
  */
@@ -63,6 +84,23 @@ export interface Shot {
   video?: VideoRef;
   /** Earlier generations of any of the above, oldest → newest. */
   history?: ShotHistoryEntry[];
+  /**
+   * Transition planner output. Describes the boundary BETWEEN the
+   * previous shot and this one. None on shot 1 of each scene (no
+   * predecessor inside the scene). Written by the boundary planner
+   * (see src/core/planner/boundaryPlanner.ts) when the
+   * `transitionBoundaryPlanner` feature flag is on.
+   */
+  incomingTransition?: TransitionDecision;
+  /**
+   * Per-shot anchor flag from the boundary planner. When true, this
+   * shot's last_frame MUST be generated (overrides skipHoldingBeatLF)
+   * to constrain video drift — e.g., shots with named characters
+   * whose subtle expressions the i2v provider tends to hallucinate.
+   * Decided at planning time from the shot's prose, not from any
+   * generated image.
+   */
+  needsLfAnchor?: boolean;
 }
 
 export interface ShotHistoryEntry {
