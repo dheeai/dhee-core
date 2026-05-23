@@ -75,6 +75,15 @@ import {
   type Reference,
   type ReferenceMenuItem,
 } from './shotImagePipeline.js';
+import {
+  isTransitionBoundaryPlannerEnabled,
+  planSceneBoundaries,
+  applyBoundaryPlanToScene,
+  type BoundaryPlannerInput,
+  type BoundaryPlannerShotInput,
+} from './boundaryPlanner.js';
+import { applyTransitionPlanToShotImagePrompt } from './applyTransitionPlanToShotImagePrompt.js';
+import { ensureScene, ensureShot } from '../project/projectSchema.js';
 import { extractCollectionItems } from './collectionExtractor.js';
 import { listCollectionItemsFromDisk } from './collectionResumeFromDisk.js';
 import { extractStoryEssence, StoryEssenceParseError, type StoryEssence } from './storyEssenceExtractor.js';
@@ -1373,6 +1382,159 @@ export class ExecutorAgent extends TypedEventEmitter {
    * Failure modes are non-fatal: any parsing / lookup error returns
    * null and the original JSON ships unchanged.
    */
+  /**
+   * Phase 2 orchestration hook for the transition boundary planner.
+   *
+   * Runs lazily — called from the shot_image_prompt post-processing
+   * path. Idempotent: skips if any shot in `project.scenes[sceneNumber]`
+   * already has `incomingTransition` or `needsLfAnchor` (the plan was
+   * applied on a prior shot_image_prompt of the same scene).
+   *
+   * Sequence:
+   *   1. Bail when `transitionBoundaryPlanner` flag is OFF.
+   *   2. Resolve sceneNumber from the calling node's itemId.
+   *   3. Check the cache (project.scenes[]).
+   *   4. Load scene_video_prompt JSON → extract shots.
+   *   5. Call `planSceneBoundaries` via `structured.boundary_planner` LLM.
+   *   6. Ensure project.scenes[sceneNumber] + each shot exists, then
+   *      apply the plan via `applyBoundaryPlanToScene`.
+   *   7. Persist project.json.
+   *
+   * Failure modes (all non-fatal — execution continues, the flag
+   * effectively no-ops for this scene):
+   *   - sceneId can't be parsed
+   *   - scene_video_prompt JSON missing or malformed
+   *   - LLM call throws
+   *   - parseBoundaryPlannerOutput returns empty plan
+   *
+   * The plan is per-scene, so multiple shot_image_prompts in the same
+   * scene share one LLM call (the first one pays; the rest hit the
+   * project.scenes cache).
+   */
+  private async ensureBoundaryPlanForScene(sceneId: string, sceneNumber: number): Promise<void> {
+    try {
+      if (!isTransitionBoundaryPlannerEnabled(
+        this.config.project as { features?: { transitionBoundaryPlanner?: boolean } } | undefined,
+      )) {
+        return;
+      }
+
+      // Cache check — has the plan already been applied to this scene?
+      const projectAny = this.config.project as {
+        scenes?: Array<{
+          sceneNumber?: number;
+          shots?: Array<{
+            shotNumber?: number;
+            incomingTransition?: { operation?: string };
+            needsLfAnchor?: boolean;
+          }>;
+        }>;
+      };
+      const existingScene = projectAny.scenes?.find((s) => s.sceneNumber === sceneNumber);
+      const alreadyPlanned = existingScene?.shots?.some(
+        (sh) => sh.incomingTransition !== undefined || sh.needsLfAnchor === true,
+      );
+      if (alreadyPlanned) return;
+
+      // Load scene_video_prompt
+      const svpOutputPath = this.resolveSceneVideoPromptOutputPath(sceneId);
+      if (!svpOutputPath) return;
+      const svpAbs = join(this.config.projectDir, svpOutputPath);
+      if (!existsSync(svpAbs)) return;
+      let svpRaw = readFileSync(svpAbs, 'utf-8').trim();
+      if (svpRaw.startsWith('```')) {
+        svpRaw = svpRaw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      let svp: {
+        rasa?: string;
+        characters?: unknown;
+        shots?: Array<{
+          shotNumber?: number;
+          description?: string;
+          purpose?: string;
+          cameraWork?: string;
+          dialogue?: string;
+          continuityRole?: string;
+        }>;
+      };
+      try {
+        svp = JSON.parse(svpRaw);
+      } catch {
+        return;
+      }
+      const rawShots = svp.shots ?? [];
+      if (rawShots.length === 0) return;
+
+      const plannerShots: BoundaryPlannerShotInput[] = [];
+      for (const s of rawShots) {
+        if (typeof s.shotNumber !== 'number') continue;
+        plannerShots.push({
+          shotNumber: s.shotNumber,
+          description: s.description ?? '',
+          purpose: s.purpose ?? '',
+          cameraWork: s.cameraWork ?? '',
+          ...(s.dialogue ? { dialogue: s.dialogue } : {}),
+          ...(s.continuityRole ? { continuityRole: s.continuityRole } : {}),
+        });
+      }
+      if (plannerShots.length < 2) {
+        // Single-shot scene — no boundaries to plan. Mark with empty
+        // plan via applyBoundaryPlanToScene so the cache check above
+        // returns true on retries.
+        // (No-op for now — applyBoundaryPlanToScene clears stale fields
+        // but with an empty plan the scene's shots stay clean; cache
+        // check fails on next call and we re-enter. That's fine — the
+        // bail-out at rawShots.length < 2 is cheap.)
+        this.log(`  [boundary-planner] scene_${sceneNumber}: single-shot scene — no boundaries`);
+        return;
+      }
+
+      const characters: string[] = Array.isArray(svp.characters)
+        ? (svp.characters.filter((c) => typeof c === 'string') as string[])
+        : [];
+      const plannerInput: BoundaryPlannerInput = {
+        sceneNumber,
+        ...(svp.rasa ? { rasa: svp.rasa } : {}),
+        ...(characters.length > 0 ? { characters } : {}),
+        shots: plannerShots,
+      };
+
+      this.log(`  [boundary-planner] scene_${sceneNumber}: planning ${plannerShots.length} shots`);
+      const llm = this.llmFor('structured.boundary_planner');
+      const plan = await planSceneBoundaries(
+        llm as unknown as { generateStream: (opts: Record<string, unknown>) => AsyncGenerator<{ content?: string }, unknown, unknown> },
+        plannerInput,
+      );
+
+      // Ensure project.scenes[sceneNumber] + shots exist, then apply.
+      // Populate shot.description so the Stage 3 mutator can look up
+      // the next shot's planned description for LF-lookahead injection
+      // — without this, the mutator's `nextShot.description` is
+      // undefined and the injection silently no-ops.
+      const sceneRef = ensureScene(this.config.project as unknown as Parameters<typeof ensureScene>[0], sceneNumber);
+      for (const s of plannerShots) {
+        const shotRef = ensureShot(
+          this.config.project as unknown as Parameters<typeof ensureScene>[0],
+          sceneNumber,
+          s.shotNumber,
+        );
+        if (s.description && !shotRef.description) {
+          shotRef.description = s.description;
+        }
+      }
+      applyBoundaryPlanToScene(sceneRef, plan);
+
+      this.log(
+        `  [boundary-planner] scene_${sceneNumber}: applied ${plan.transitions.length} transitions, ${plan.anchors.length} anchors`,
+      );
+      this.persistState();
+    } catch (err) {
+      this.log(
+        `  [boundary-planner] scene_${sceneId}: planning failed (non-fatal): ${(err as Error).message}`,
+      );
+    }
+  }
+
   private applyHoldingBeatSkip(content: string, node: ExecutionNode): string | null {
     if (!node.itemId || node.typeId !== 'shot_image_prompt') return null;
     // Per-project opt-in. Default OFF — legacy behavior (full FL2V with
@@ -1447,11 +1609,19 @@ export class ExecutorAgent extends TypedEventEmitter {
     if (!skip) return null;
     const mutated = stripLastFrameFromShotImagePromptJson(content);
     if (mutated) {
-      const consumerNote = nextIncoming
-        ? ` (next shot incoming=${nextIncoming.operation} — should NOT have fired; verify shouldSkipLastFrame)`
-        : '';
+      // If skip fired while the next shot's incoming operation IS a
+      // consumer (shared_frame / reuse_intent), shouldSkipLastFrame
+      // has a bug — surface it. For non-consumer ops or no next shot,
+      // skip is the right call; log them as informational.
+      const consumerOp = nextIncoming?.operation;
+      const isConsumer = consumerOp === 'shared_frame' || consumerOp === 'reuse_intent';
+      const note = isConsumer
+        ? ` (BUG: next shot incoming=${consumerOp} is a consumer — shouldSkipLastFrame should have returned false)`
+        : nextIncoming
+          ? ` (next shot incoming=${consumerOp} — no consumer, skip is correct)`
+          : '';
       this.log(
-        `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v${consumerNote}`,
+        `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v${note}`,
       );
     }
     return mutated;
@@ -3539,6 +3709,29 @@ export class ExecutorAgent extends TypedEventEmitter {
                   );
                 }
 
+                // Phase 2 boundary-planner orchestration. Runs lazily —
+                // the first shot_image_prompt of each scene triggers the
+                // per-scene planner LLM call; subsequent shots in the
+                // same scene hit the cached plan in project.scenes. The
+                // planner writes `incomingTransition` + `needsLfAnchor`
+                // onto each shot, which `applyHoldingBeatSkip` (below)
+                // and `applyTransitionPlanToShotImagePrompt` (further
+                // below) both read. No-op when the
+                // `transitionBoundaryPlanner` flag is OFF.
+                try {
+                  const sceneIdMatch = node.itemId?.match(/^(scene_(\d+))_shot_(\d+)$/);
+                  if (sceneIdMatch?.[1] && sceneIdMatch[2]) {
+                    await this.ensureBoundaryPlanForScene(
+                      sceneIdMatch[1],
+                      parseInt(sceneIdMatch[2], 10),
+                    );
+                  }
+                } catch (err) {
+                  this.log(
+                    `  [boundary-planner] orchestration failed (non-fatal): ${(err as Error).message}`,
+                  );
+                }
+
                 // Skip-LF for holding beats: load this shot's purpose +
                 // cameraWork from scene_video_prompt, run isHoldingBeat,
                 // and if it fires, strip frames.last_frame from the JSON
@@ -3546,12 +3739,45 @@ export class ExecutorAgent extends TypedEventEmitter {
                 // executor reads strategy=i2v and routes shot_video to
                 // ltx23_i2v_* workflows; executeShotImageLastFrame
                 // already no-ops on missing frames.last_frame.imagePrompt.
+                // Combined with the boundary planner (above): an LF with
+                // a downstream consumer or `needsLfAnchor: true` is kept
+                // even on holding beats — see `shouldSkipLastFrame`.
                 try {
                   const filtered = this.applyHoldingBeatSkip(content, node);
                   if (filtered) content = filtered;
                 } catch (err) {
                   this.log(
                     `  [shot_image_prompt holding-beat] skip check failed: ${(err as Error).message}`,
+                  );
+                }
+
+                // Phase 2 Stage 3 — mutate the shot_image_prompt JSON
+                // based on this shot's `incomingTransition` (set by the
+                // boundary planner above): shared_frame / reuse_intent
+                // → force edit_previous_shot mode with a strong "match
+                // prior LF" preamble; reframe → "blocking diverges"
+                // preamble; cut → no-op.
+                try {
+                  const sceneIdMatch = node.itemId?.match(/^scene_(\d+)_shot_(\d+)$/);
+                  if (sceneIdMatch?.[1] && sceneIdMatch[2]) {
+                    const sceneNumber = parseInt(sceneIdMatch[1], 10);
+                    const shotNumber = parseInt(sceneIdMatch[2], 10);
+                    const mutated = applyTransitionPlanToShotImagePrompt(
+                      content,
+                      this.config.project as Parameters<typeof applyTransitionPlanToShotImagePrompt>[1],
+                      sceneNumber,
+                      shotNumber,
+                    );
+                    if (mutated) {
+                      content = mutated;
+                      this.log(
+                        `  [boundary-planner] applied transition mutation to ${node.itemId}`,
+                      );
+                    }
+                  }
+                } catch (err) {
+                  this.log(
+                    `  [boundary-planner] transition mutation failed (non-fatal): ${(err as Error).message}`,
                   );
                 }
               }

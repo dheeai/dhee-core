@@ -46,6 +46,7 @@ export const MEDIUM_PURPOSES = [
   'structured.input_classification',
   'structured.prompt_refinement',
   'structured.infographic_expansion',
+  'structured.boundary_planner',
 ] as const;
 
 /**

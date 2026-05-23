@@ -102,14 +102,11 @@ async function main() {
     process.exit(1);
   }
 
-  // Point the shared SessionContext at this project so every helper that reads
-  // `getProjectDir()` / `getAssetsDir()` (submitImageGeneration in
-  // src/tasks/video/tools.ts, asset registry, etc.) writes into this project's
-  // folder. Without this, media downloads leak into `default.dhee` while the
-  // graph registers paths under the correct project — causing "Base image not
-  // found" failures on the next step. The UI does this in App.tsx; the CLI
-  // must do it explicitly.
-  setActiveProjectDir(`${projectName}.dhee`);
+  // SessionContext is pinned to this project by `runExecutor` (see
+  // src/server/runners/runExecutor.ts) — it calls `setActiveProjectDir`
+  // internally so we don't need to do it here. (An older version of
+  // this script imported the helper directly; the import got removed
+  // in a refactor but the call survived, leaving a ReferenceError.)
 
   const project: GenericProjectFile = JSON.parse(
     readFileSync(join(projectDir, 'project.json'), 'utf-8'),
