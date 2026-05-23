@@ -129,7 +129,7 @@ describe('applyTransitionPlanToShotImagePrompt', () => {
 
   // ── shared_frame ───────────────────────────────────────────────────────────
 
-  it('shared_frame: flips first_frame mode to edit_previous_shot', async () => {
+  it('shared_frame: flips first_frame mode to reuse_prior_frame (literal file copy, no Klein call)', async () => {
     const { applyTransitionPlanToShotImagePrompt } = await import(
       '../../src/core/planner/applyTransitionPlanToShotImagePrompt.js'
     );
@@ -139,7 +139,25 @@ describe('applyTransitionPlanToShotImagePrompt', () => {
     const out = applyTransitionPlanToShotImagePrompt(baseJson(), project, 1, 2);
     expect(out).not.toBeNull();
     const parsed = JSON.parse(out!);
-    expect(parsed.frames.first_frame.generationMode).toBe('edit_previous_shot');
+    // Critical: must be reuse_prior_frame, not edit_previous_shot.
+    // The point of shared_frame is to AVOID re-rendering so the model
+    // can't drift the character. edit_previous_shot would still call
+    // Klein and re-introduce the hallucination opportunity.
+    expect(parsed.frames.first_frame.generationMode).toBe('reuse_prior_frame');
+  });
+
+  it('combined shared_frame + outgoing shared_frame uses reuse_prior_frame, not edit_previous_shot', async () => {
+    const { applyTransitionPlanToShotImagePrompt } = await import(
+      '../../src/core/planner/applyTransitionPlanToShotImagePrompt.js'
+    );
+    const project = projectWithShot({
+      incomingTransition: { operation: 'shared_frame' },
+      nextIncomingTransition: { operation: 'shared_frame' },
+      nextDescription: 'Ruby looks left',
+    });
+    const out = applyTransitionPlanToShotImagePrompt(baseJson(), project, 1, 2);
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.first_frame.generationMode).toBe('reuse_prior_frame');
   });
 
   it('shared_frame: prepends "exactly match the prior" preamble to first_frame imagePrompt', async () => {
@@ -322,7 +340,8 @@ describe('applyTransitionPlanToShotImagePrompt', () => {
     });
     const out = applyTransitionPlanToShotImagePrompt(baseJson(), project, 1, 2);
     const parsed = JSON.parse(out!);
-    expect(parsed.frames.first_frame.generationMode).toBe('edit_previous_shot');
+    // shared_frame uses reuse_prior_frame for literal file copy.
+    expect(parsed.frames.first_frame.generationMode).toBe('reuse_prior_frame');
     expect(parsed.frames.first_frame.imagePrompt.toLowerCase()).toContain('exactly');
     expect(parsed.frames.last_frame.imagePrompt).toContain('Ruby steps off the bus');
   });
@@ -357,7 +376,7 @@ describe('applyTransitionPlanToShotImagePrompt', () => {
     });
     const out = applyTransitionPlanToShotImagePrompt(json, project, 1, 2);
     const parsed = JSON.parse(out!);
-    expect(parsed.frames.first_frame.generationMode).toBe('edit_previous_shot');
+    expect(parsed.frames.first_frame.generationMode).toBe('reuse_prior_frame');
     expect(parsed.frames.last_frame).toBeUndefined();
   });
 });

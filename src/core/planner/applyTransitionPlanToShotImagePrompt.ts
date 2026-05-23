@@ -160,8 +160,22 @@ export function applyTransitionPlanToShotImagePrompt(
     const preambleBuilder = PREAMBLES[incomingOp];
     const preamble = preambleBuilder ? preambleBuilder(priorShotN) : '';
 
-    if (incomingOp === 'shared_frame' || incomingOp === 'reuse_intent') {
-      // Chain — Klein uses shot N's last_frame as base canvas.
+    if (incomingOp === 'shared_frame') {
+      // Literal file reuse — no Klein call. The executor's
+      // `reuse_prior_frame` path byte-copies the prior shot's
+      // last_frame into this shot's first_frame slot. This is the
+      // only way to guarantee character identity is preserved across
+      // the cut (no re-render means no opportunity for the model to
+      // hallucinate). See ExecutorAgent.executeMediaGeneration for
+      // the copy implementation.
+      if (frames.first_frame.generationMode !== 'reuse_prior_frame') {
+        frames.first_frame.generationMode = 'reuse_prior_frame';
+        mutated = true;
+      }
+    } else if (incomingOp === 'reuse_intent') {
+      // Chain via Klein edit — N+1's FF derives from N's LF with
+      // small intentional changes. Klein conditioning uses the prior
+      // LF as base canvas.
       if (frames.first_frame.generationMode !== 'edit_previous_shot') {
         frames.first_frame.generationMode = 'edit_previous_shot';
         mutated = true;

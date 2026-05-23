@@ -931,19 +931,21 @@ export function applyShotImageManifestPostPass<
     if (!f || typeof f !== 'object') continue;
     if (typeof f.imagePrompt !== 'string' || !Array.isArray(f.references)) continue;
     const manifestLine = buildSlotManifestLine(f.references);
-    // Single structural replace: drop the leading manifest paragraph
-    // (a contiguous run of "Name from image N." sentences terminated by
-    // a blank line) and prepend a fresh one built from `references[]`.
-    //
-    // We deliberately DO NOT grep the body for inline "from image N"
-    // tokens. The guide no longer instructs the LLM to write them, and
-    // if the LLM emits some anyway, Klein still binds via the manifest
-    // at the top — the body's "from image N" becomes harmless prose,
-    // not a competing slot directive. Trying to launder it after the
-    // fact is busywork that risks damaging legitimate narrative
-    // ("she stares at the image of her mother").
+    // Two-step rewrite:
+    //   1. Drop the leading manifest paragraph (contiguous run of
+    //      "Name from image N." sentences terminated by a blank line).
+    //   2. Strip BODY inline `from image N` tokens — these were
+    //      previously left alone with the assumption that Klein binds
+    //      via the deterministic manifest at the top, but the
+    //      boundary-test run on 2026-05-23 showed otherwise: body
+    //      tokens like "Malachor from image 1" overrode the manifest's
+    //      slot 2 binding, and Klein rendered the wrong character.
+    //      The regex specifically matches " from image <digit>" (with
+    //      digits — not "image of her mother") so legitimate prose is
+    //      untouched.
     const withoutLeadingManifest = stripLeadingManifestParagraph(f.imagePrompt);
-    f.imagePrompt = manifestLine ? `${manifestLine}\n\n${withoutLeadingManifest}` : withoutLeadingManifest;
+    const bodyStripped = stripInlineFromImageTokens(withoutLeadingManifest);
+    f.imagePrompt = manifestLine ? `${manifestLine}\n\n${bodyStripped}` : bodyStripped;
   }
   return parsed;
 }

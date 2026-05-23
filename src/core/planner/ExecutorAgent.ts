@@ -1434,7 +1434,14 @@ export class ExecutorAgent extends TypedEventEmitter {
       const alreadyPlanned = existingScene?.shots?.some(
         (sh) => sh.incomingTransition !== undefined || sh.needsLfAnchor === true,
       );
-      if (alreadyPlanned) return;
+      if (alreadyPlanned) {
+        // Plan exists — skip the LLM call, but still ensure the
+        // shared_frame dependency wiring is in place. This is
+        // idempotent (only adds deps that don't already exist), so
+        // re-runs are safe.
+        this.ensureSharedFrameDepsForScene(sceneNumber, existingScene!);
+        return;
+      }
 
       // Load scene_video_prompt
       const svpOutputPath = this.resolveSceneVideoPromptOutputPath(sceneId);
@@ -1524,6 +1531,12 @@ export class ExecutorAgent extends TypedEventEmitter {
       }
       applyBoundaryPlanToScene(sceneRef, plan);
 
+      // For every shared_frame boundary in the plan, amend the
+      // dependency graph so shot N+1's `shot_image` node WAITS for
+      // shot N's `shot_image_last_frame` bridge.
+      const sceneRefForDeps = projectAny.scenes?.find((s) => s.sceneNumber === sceneNumber);
+      if (sceneRefForDeps) this.ensureSharedFrameDepsForScene(sceneNumber, sceneRefForDeps);
+
       this.log(
         `  [boundary-planner] scene_${sceneNumber}: applied ${plan.transitions.length} transitions, ${plan.anchors.length} anchors`,
       );
@@ -1532,6 +1545,52 @@ export class ExecutorAgent extends TypedEventEmitter {
       this.log(
         `  [boundary-planner] scene_${sceneId}: planning failed (non-fatal): ${(err as Error).message}`,
       );
+    }
+  }
+
+  /**
+   * Idempotent dep wiring for shared_frame boundaries.
+   *
+   * For each `shared_frame` transition in the scene's plan, ensure
+   * shot N+1's `shot_image` node has a dependency on shot N's
+   * `shot_image_last_frame` bridge. Without this dep, shot N+1's
+   * reuse_prior_frame copy can execute before shot N's LF bridge has
+   * produced the LF — and it silently copies shot N's FIRST frame
+   * instead (the bdry2 race condition on 2026-05-23).
+   *
+   * Safe to call repeatedly: skips deps that already exist.
+   */
+  private ensureSharedFrameDepsForScene(
+    sceneNumber: number,
+    scene: { shots?: Array<{ shotNumber?: number; incomingTransition?: { operation?: string } }> },
+  ): void {
+    const shots = scene.shots ?? [];
+    for (const shot of shots) {
+      if (shot.incomingTransition?.operation !== 'shared_frame') continue;
+      if (typeof shot.shotNumber !== 'number') continue;
+      const consumerShotNum = shot.shotNumber;
+      const sourceShotNum = consumerShotNum - 1;
+      if (sourceShotNum < 1) continue;
+      const consumerNodeId = `shot_image:scene_${sceneNumber}_shot_${consumerShotNum}`;
+      const sourceLFBridgeId = `shot_image_last_frame:scene_${sceneNumber}_shot_${sourceShotNum}`;
+      const consumerNode = this.executor.getNode(consumerNodeId);
+      const sourceLFBridgeNode = this.executor.getNode(sourceLFBridgeId);
+      if (!consumerNode || !sourceLFBridgeNode) {
+        this.log(
+          `  [boundary-planner] shared_frame dep amend skipped: missing ${!consumerNode ? consumerNodeId : sourceLFBridgeId}`,
+        );
+        continue;
+      }
+      if (!consumerNode.dependencies.includes(sourceLFBridgeId)) {
+        consumerNode.dependencies.push(sourceLFBridgeId);
+        sourceLFBridgeNode.dependents = sourceLFBridgeNode.dependents ?? [];
+        if (!sourceLFBridgeNode.dependents.includes(consumerNodeId)) {
+          sourceLFBridgeNode.dependents.push(consumerNodeId);
+        }
+        this.log(
+          `  [boundary-planner] shared_frame: added dep ${consumerNodeId} ← ${sourceLFBridgeId}`,
+        );
+      }
     }
   }
 
@@ -1940,6 +1999,55 @@ export class ExecutorAgent extends TypedEventEmitter {
       prevShotVideoId = shotVideoId;
     }
 
+    // Reap orphan scene-level `shot_image_last_frame:scene_N` placeholder.
+    //
+    // Background: somewhere upstream (likely during the first
+    // per-stage default-graph build, BEFORE scene_video_prompt
+    // parsing knows the shot list), a SCENE-level
+    // `shot_image_last_frame:${sceneId}` node gets created with
+    // dependents pointing at the (then collection-level) shot_video.
+    // After per-shot expansion runs and creates the canonical
+    // `shot_image_last_frame:${sceneId}_shot_N` nodes, the scene-
+    // level node is now stale: it references `shot_image:${sceneId}`
+    // (which no longer exists — the collection placeholder got
+    // replaced by per-shot children), and at execution time
+    // `executeShotImageLastFrame` fails with
+    // "shot_image:${sceneId} not found upstream", which then
+    // cascades to block every shot_video.
+    //
+    // The cleanup: when the per-shot LF nodes exist, delete the
+    // orphan scene-level one and migrate any of its dependents to
+    // the per-shot LF nodes (they probably already have per-shot
+    // refs as well — we just drop the scene-level dep).
+    const scenePerShotLF = `shot_image_last_frame:${sceneId}`;
+    const orphan = this.executor.getNode(scenePerShotLF);
+    if (orphan && shotItems.length > 0) {
+      const anyPerShotLFExists = shotItems.some((shot) =>
+        Boolean(this.executor.getNode(`shot_image_last_frame:${shot.itemId}`)),
+      );
+      if (anyPerShotLFExists) {
+        for (const depId of orphan.dependents ?? []) {
+          const dependent = this.executor.getNode(depId);
+          if (!dependent) continue;
+          dependent.dependencies = dependent.dependencies.filter(
+            (d) => d !== scenePerShotLF,
+          );
+        }
+        for (const depId of orphan.dependencies ?? []) {
+          const upstream = this.executor.getNode(depId);
+          if (!upstream) continue;
+          upstream.dependents = (upstream.dependents ?? []).filter(
+            (d) => d !== scenePerShotLF,
+          );
+        }
+        this.executor.removeNode?.(scenePerShotLF) ??
+          this.removeNodeFallback(scenePerShotLF);
+        this.log(
+          `  [graph hygiene] Reaped orphan scene-level node ${scenePerShotLF} (per-shot LFs exist; dependents migrated)`,
+        );
+      }
+    }
+
     const graphSatisfied = shotItems.every(shot =>
       ['shot_image_prompt', 'shot_motion_directive', 'shot_image', 'shot_video']
         .filter(typeId => this.executor.getNode(typeId) || this.executor.getNode(`${typeId}:${sceneId}`) || this.config.template.artifactTypes[typeId])
@@ -1950,6 +2058,18 @@ export class ExecutorAgent extends TypedEventEmitter {
       graphSatisfied,
       expandedShotIds: shotItems.map(shot => shot.itemId),
     };
+  }
+
+  /**
+   * Fallback removeNode when DependencyGraphExecutor doesn't expose
+   * one directly — reaches into the internal nodes Map. Keeps the
+   * orphan-cleanup code working regardless of executor version.
+   */
+  private removeNodeFallback(nodeId: string): void {
+    const nodes = (this.executor as unknown as { nodes?: Map<string, ExecutionNode> }).nodes;
+    if (nodes && nodes.has(nodeId)) {
+      nodes.delete(nodeId);
+    }
   }
 
   private materializeSceneBreakdown(
@@ -4387,6 +4507,39 @@ Examples of common failure modes to avoid:
       });
       referenceImageContext = formatReferencesForPrompt(shotRefs);
       this.log(`  Refs (shot-aware) for ${node.itemId}: ${allRefs.length} global → ${shotRefs.length} in-shot (purpose=${shotPurpose || 'unknown'})`);
+
+      // Inject canonical character physical descriptions into the
+      // shot_image_prompt LLM context. Without this, the LLM only sees
+      // refIds like `character_image:malachor` and invents physical
+      // attributes that contradict the character ref (boundary-test on
+      // 2026-05-23 rendered Malachor as a Black man when his ref doc
+      // says white with a scar — Klein followed the prose, breaking
+      // character continuity across the scene). The block lists the
+      // canonical Physical Description paragraph from each character's
+      // profile so the LLM can't drift on race / hair / clothing /
+      // distinguishing features.
+      try {
+        const { buildCharacterDescriptionsForImagePrompt } = await import('./characterVisualTags.js');
+        const charsForBlock: Array<{ refId: string; mdPath: string }> = [];
+        for (const ref of shotRefs) {
+          if (ref.type !== 'character') continue;
+          const itemId = ref.refId.replace(/^character_image:/, '');
+          const charNode = this.executor.getNode(`character:${itemId}`);
+          const outPath = charNode?.outputPath;
+          if (outPath) {
+            charsForBlock.push({ refId: ref.refId, mdPath: join(this.config.projectDir, outPath) });
+          }
+        }
+        const descBlock = buildCharacterDescriptionsForImagePrompt(charsForBlock);
+        if (descBlock) {
+          // Append to referenceImageContext so it travels with the refs
+          // — no schema change needed downstream.
+          referenceImageContext += descBlock;
+          this.log(`  Injected character_descriptions for ${charsForBlock.length} char(s) into ${node.itemId}`);
+        }
+      } catch (err) {
+        this.log(`  Failed to inject character descriptions: ${(err as Error).message}`);
+      }
 
       // Shot context hint. Layer C2: cross-scene chain — when this is shot 1
       // of scene N>1, look at scene N-1's last completed shot so the LLM
@@ -7560,22 +7713,75 @@ Examples of common failure modes to avoid:
         // legacy projects) and `copyFileSync` to this shot's first_frame
         // path. Byte-identical cut points are the goal.
         const sceneIdFromItem = node.itemId?.match(/(scene_\d+)/)?.[1];
+        const sceneNumFromItem = parseInt(node.itemId?.match(/scene_(\d+)/)?.[1] ?? '0', 10);
         const shotNumFromItem = parseInt(node.itemId?.match(/shot_(\d+)/)?.[1] ?? '0', 10);
         const anchor = sceneIdFromItem && shotNumFromItem > 0
           ? readShotAnchorFromSvp(this.config.projectDir, sceneIdFromItem, shotNumFromItem)
           : null;
+        // Fallback for the boundary-planner-driven reuse_prior_frame
+        // path: when the SVP doesn't carry an anchor (the boundary
+        // planner doesn't mutate the SVP — it writes to
+        // project.scenes), look up the shot's incomingTransition and,
+        // when it's `shared_frame`, use shotNumber-1 in the same scene
+        // as the source. Without this fallback, mode flips to
+        // reuse_prior_frame would dead-end here (sourceShotNum=0).
+        let fallbackSourceShotNum: number | undefined;
+        if (!anchor && sceneNumFromItem > 0 && shotNumFromItem > 1) {
+          const projectAny = this.config.project as {
+            scenes?: Array<{
+              sceneNumber?: number;
+              shots?: Array<{
+                shotNumber?: number;
+                incomingTransition?: { operation?: string };
+              }>;
+            }>;
+          } | undefined;
+          const sceneShots = projectAny?.scenes?.find((s) => s.sceneNumber === sceneNumFromItem)?.shots;
+          const thisShot = sceneShots?.find((s) => s.shotNumber === shotNumFromItem);
+          if (thisShot?.incomingTransition?.operation === 'shared_frame') {
+            fallbackSourceShotNum = shotNumFromItem - 1;
+            this.log(
+              `  reuse_prior_frame: SVP anchor missing, falling back to boundary-planner shared_frame source: scene_${sceneNumFromItem}_shot_${fallbackSourceShotNum}`,
+            );
+          }
+        }
         const sourceSceneId = anchor?.sourceSceneId ?? sceneIdFromItem;
-        const sourceShotNum = anchor?.sourceShotNumber ?? 0;
+        const sourceShotNum = anchor?.sourceShotNumber ?? fallbackSourceShotNum ?? 0;
         if (sourceSceneId && sourceShotNum > 0) {
           const sourceItemId = `${sourceSceneId}_shot_${sourceShotNum}`;
           const { getLastFramePath } = await import('./crossShotChaining.js');
           const sourceBridge = this.executor.getNode(`shot_image_last_frame:${sourceItemId}`);
           const sourceShotNode = this.executor.getNode(`shot_image:${sourceItemId}`);
-          const sourceLastFrame =
-            (sourceBridge?.status === 'completed' && sourceBridge.outputPath
-              ? sourceBridge.outputPath
-              : null)
-            ?? (sourceShotNode ? getLastFramePath(sourceShotNode) : null);
+          // Resolution order:
+          //   1. Bridge node, when completed → its outputPath IS the LF.
+          //   2. shot_image.outputPaths.last_frame (multi-frame mode).
+          //   3. shot_image.outputPath ONLY when no bridge exists
+          //      (i2v / single-frame mode where outputPath semantically IS
+          //      the LF). When a bridge exists but isn't completed yet
+          //      (boundary-planner race condition: shot N+1 fires
+          //      immediately after shot N's FF before shot N's LF bridge
+          //      runs), we must NOT fall back to shot_image.outputPath —
+          //      that's the FF, copying it would silently corrupt the
+          //      shared_frame guarantee. Return null and let the caller
+          //      fall through (will retry via edit_previous_shot, which
+          //      handles the missing-LF case more gracefully).
+          let sourceLastFrame: string | null = null;
+          if (sourceBridge) {
+            // Bridge exists. It is the authoritative LF source. ONLY use
+            // outputPath when bridge is completed.
+            if (sourceBridge.status === 'completed' && sourceBridge.outputPath) {
+              sourceLastFrame = sourceBridge.outputPath;
+            } else {
+              this.log(
+                `  reuse_prior_frame: source LF bridge ${sourceBridge.id} not completed (status=${sourceBridge.status ?? 'unknown'}) — refusing to fall back to FF; failing the reuse`,
+              );
+              // Leave sourceLastFrame null so the outer block falls
+              // through to edit_previous_shot.
+            }
+          } else if (sourceShotNode) {
+            // No bridge node — legacy / i2v. shot_image.outputPath IS the LF.
+            sourceLastFrame = getLastFramePath(sourceShotNode);
+          }
           if (sourceLastFrame) {
             const assetsDir = join(this.config.projectDir, 'assets', 'images');
             if (!existsSync(assetsDir)) mkdirSync(assetsDir, { recursive: true });

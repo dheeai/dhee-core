@@ -1171,13 +1171,13 @@ describe('shotImagePipeline: applyShotImageManifestPostPass (turn-2 ref refineme
     );
   });
 
-  it('does NOT scrub inline `from image N` from the prose body — Klein binds via the top manifest, body is trusted as-is', async () => {
-    // Policy: stop grepping the body for slot tokens. The manifest at
-    // the top is the single source of slot binding; whatever the LLM
-    // emitted in the body is its prose to keep. Trying to launder it
-    // is busywork that risks damaging legitimate narrative (and we
-    // don't instruct the LLM to write it in the first place — so if it
-    // does, it's the LLM's choice, not our problem to clean up).
+  it('DOES scrub inline `from image N` from the prose body — body tokens override the manifest and cause wrong-slot binding (boundary-test 2026-05-23)', async () => {
+    // Policy reversal: the earlier "don't scrub body" decision was
+    // proven wrong by the boundary-test on 2026-05-23 — body tokens
+    // like "Malachor from image 1" overrode the deterministic manifest
+    // ("Malachor from image 2") and Klein rendered the wrong character.
+    // The body must now be stripped of `from image N` slot tokens so
+    // there's only ONE source of slot binding: the manifest at the top.
     const { applyShotImageManifestPostPass } = await import('../../src/core/planner/shotImagePipeline.js');
     const parsed = {
       frames: {
@@ -1190,10 +1190,11 @@ describe('shotImagePipeline: applyShotImageManifestPostPass (turn-2 ref refineme
       },
     };
     applyShotImageManifestPostPass(parsed);
-    // The manifest is rebuilt from references[] (Ruby@2), but the
-    // body's "from image 3" is preserved verbatim.
+    // The manifest is rebuilt from references[] (Ruby@2), AND the
+    // body's "from image 3" is stripped to prevent slot conflict.
     expect(parsed.frames.first_frame.imagePrompt.startsWith('Ruby from image 2.')).toBe(true);
-    expect(parsed.frames.first_frame.imagePrompt).toContain('Ruby from image 3 walks past.');
+    expect(parsed.frames.first_frame.imagePrompt).toContain('Ruby walks past.');
+    expect(parsed.frames.first_frame.imagePrompt).not.toContain('Ruby from image 3');
   });
 
   it('updates BOTH first_frame and last_frame when each has its own references[]', async () => {
@@ -1459,17 +1460,17 @@ describe('shotImagePipeline: applyShotImageManifestPostPass — Must 7.3 (narrat
       },
     };
     applyShotImageManifestPostPass(parsed);
-    // The narrative survives entirely — we don't grep the body for slot
-    // tokens anymore. The leading-manifest detector only matches a
-    // contiguous run of "Name from image N." sentences ENDING with a
-    // blank line, which doesn't happen here (the prose continues into
-    // "leaped over the wall, then..."). A fresh manifest leads the prose.
+    // After the 2026-05-23 fix the body's `from image N` tokens ARE
+    // stripped (to prevent slot conflict with the manifest), so the
+    // sentence reads "Ruby leaped over the wall, then Angel ran
+    // ahead..." — grammatically clean and slot-unambiguous.
     expect(parsed.frames.first_frame.imagePrompt).toContain('leaped over the wall');
     expect(parsed.frames.first_frame.imagePrompt).toContain('ran ahead through');
-    // The whole original sentence — including its "from image N" tokens —
-    // is preserved verbatim in the body.
-    expect(parsed.frames.first_frame.imagePrompt).toContain('Ruby from image 1 leaped over the wall');
-    expect(parsed.frames.first_frame.imagePrompt).toContain('Angel from image 2 ran ahead through');
+    expect(parsed.frames.first_frame.imagePrompt).toContain('Ruby leaped over the wall');
+    expect(parsed.frames.first_frame.imagePrompt).toContain('Angel ran ahead through');
+    expect(parsed.frames.first_frame.imagePrompt).not.toContain('Ruby from image 1');
+    expect(parsed.frames.first_frame.imagePrompt).not.toContain('Angel from image 2 ran');
+    // Manifest at the top is the only `from image N` carrier.
     expect(parsed.frames.first_frame.imagePrompt.startsWith('Street (setting) from image 1. Ruby from image 2.')).toBe(true);
   });
 

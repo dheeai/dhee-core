@@ -126,3 +126,91 @@ export function buildCharacterTagsBlock(chars: CharacterRef[]): string {
   const lines = tags.map(t => `- ${t.refId}: ${t.tag}`).join('\n');
   return `\n\n<character_tags>\nThis shot has ${chars.length} characters. The video model does NOT know these characters by name. When you name any of them in the motion directive, use a SHORT visual tag drawn from these descriptions (e.g. "the older woman in the faded blue salwar"), not the proper name. Keep each tag under ~8 words.\n\n${lines}\n</character_tags>`;
 }
+
+/**
+ * Build a character-descriptions block for shot_image_prompt.
+ *
+ * The shot_image_prompt LLM gets a list of reference refIds (via the
+ * `<available_references>` block), but NOT the physical descriptions
+ * those refIds correspond to. Without the descriptions, the LLM
+ * invents physical attributes that contradict the canonical character
+ * reference, then Klein renders the (wrong) prose instead of the
+ * (correct) reference image. The boundary-test run on 2026-05-23
+ * showed Malachor rendered as "Black man with coiled hair" when his
+ * ref doc says "dark hair graying at temples, charcoal jacket, pale
+ * amber eyes, scar through left eyebrow."
+ *
+ * Unlike `buildCharacterTagsBlock` (which fires at >=2 characters for
+ * motion-directive disambiguation), this block fires for ANY shot
+ * with at least one character, because even a single character's
+ * physical attributes can drift on the prose-writing step.
+ *
+ * Uses a longer maxChars (400) than the motion tags (220) — the
+ * image-prompt LLM writes a richer paragraph and benefits from more
+ * physical detail than a short disambiguation tag.
+ */
+export function buildCharacterDescriptionsForImagePrompt(chars: CharacterRef[]): string {
+  if (chars.length < 1) return '';
+
+  const entries: Array<{ refId: string; description: string }> = [];
+  for (const c of chars) {
+    const description = readCharacterVisualTag(c.mdPath, 400);
+    if (description) entries.push({ refId: c.refId, description });
+  }
+  if (entries.length === 0) return '';
+
+  const lines = entries
+    .map(e => `- ${e.refId}: ${e.description}`)
+    .join('\n\n');
+
+  return `\n\n<character_descriptions>
+THIS SHOT'S CHARACTERS — CANONICAL PHYSICAL DESCRIPTIONS.
+
+The reference image(s) listed in <available_references> ARE the visual
+truth for each character. Klein will use those images to render the
+character. Your prose only needs to NAME the character and describe
+their ACTION / POSE / EXPRESSION / POSITION — not their appearance.
+
+**HARD RULES — VIOLATING THESE BREAKS CHARACTER CONTINUITY:**
+
+1. DO NOT write physical attribute parentheticals next to character
+   names. Forbidden patterns include:
+     ✗ "Malachor (Black man, coiled hair, dark hoodie)"
+     ✗ "Sera (white woman with red hair)"
+     ✗ "Malachor (lean, dark-skinned, angular face)"
+   These INVENT attributes that contradict the reference image. Klein
+   then follows the prose, not the image — the wrong person is
+   rendered.
+
+2. DO NOT mention any of these attributes in your prose unless the
+   canonical description below explicitly lists them:
+     - race / ethnicity / skin tone
+     - hair color, length, or style
+     - age in years or decade
+     - eye color
+     - facial hair / scars / glasses / marks
+     - height / build / body type
+     - specific clothing (color, garment type, accessories)
+
+3. When you write a character into a scene, use ONLY their NAME plus
+   action/pose/expression. Example:
+     ✓ "Malachor leans forward, hand on the rim of his coffee mug."
+     ✓ "Sera's gaze drops to the datapad, jaw tightening."
+     ✗ "Malachor (tall, lean man with a scar) leans forward..."
+
+4. If you absolutely must describe a character's appearance (e.g. to
+   contrast two characters at a glance), use the canonical phrasing
+   from the descriptions below — VERBATIM — and only the attributes
+   present there. Never add new ones.
+
+CANONICAL DESCRIPTIONS (read-only — for your awareness so you don't
+invent contradicting attributes; do NOT copy these into your prose
+unless rule 4 applies):
+
+${lines}
+
+Bottom line: the reference image carries the look. Your prose carries
+the action. Mixing the two is what produces hallucinated wrong
+characters.
+</character_descriptions>`;
+}
