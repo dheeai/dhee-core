@@ -159,58 +159,72 @@ export function buildCharacterDescriptionsForImagePrompt(chars: CharacterRef[]):
   }
   if (entries.length === 0) return '';
 
-  const lines = entries
-    .map(e => `- ${e.refId}: ${e.description}`)
+  // Compact 4-8 word visual hooks for each character, distilled from
+  // the canonical description. These go directly into the prose's
+  // INLINE VISUAL HOOK position (see shot_composition_guide.md). The
+  // full description is also provided below for any longer prose
+  // attribute the LLM might need; the compact hook is what guards
+  // Klein's cross-slot identity binding.
+  const hookLines = entries
+    .map((e) => `- ${e.refId}: ${e.description}`)
     .join('\n\n');
 
   return `\n\n<character_descriptions>
-THIS SHOT'S CHARACTERS — CANONICAL PHYSICAL DESCRIPTIONS.
+CANONICAL PHYSICAL DESCRIPTIONS for the characters in this shot.
 
-The reference image(s) listed in <available_references> ARE the visual
-truth for each character. Klein will use those images to render the
-character. Your prose only needs to NAME the character and describe
-their ACTION / POSE / EXPRESSION / POSITION — not their appearance.
+**Read this in conjunction with the shot_composition_guide's INLINE
+VISUAL HOOK rule** — that rule REQUIRES a 4-8 word parenthetical
+visual descriptor on each character's first mention in your prose
+(e.g. \`Ruby (red-haired, leather jacket)\`). The hook is what keeps
+Klein's cross-attention bound to the correct reference slot;
+omitting it causes identity bleed across slots and on close-ups.
 
-**HARD RULES — VIOLATING THESE BREAKS CHARACTER CONTINUITY:**
+**HARD CONTRACT — what you must do:**
 
-1. DO NOT write physical attribute parentheticals next to character
-   names. Forbidden patterns include:
-     ✗ "Malachor (Black man, coiled hair, dark hoodie)"
-     ✗ "Sera (white woman with red hair)"
-     ✗ "Malachor (lean, dark-skinned, angular face)"
-   These INVENT attributes that contradict the reference image. Klein
-   then follows the prose, not the image — the wrong person is
-   rendered.
+1. **You MUST write the inline visual hook** on each character's first
+   mention. Do not skip it.
 
-2. DO NOT mention any of these attributes in your prose unless the
-   canonical description below explicitly lists them:
-     - race / ethnicity / skin tone
-     - hair color, length, or style
-     - age in years or decade
-     - eye color
-     - facial hair / scars / glasses / marks
-     - height / build / body type
-     - specific clothing (color, garment type, accessories)
+2. **The hook's CONTENT must come from the canonical description
+   below** — NEVER invent attributes (race, hair, age, eye color,
+   clothing, scars) that the canonical description doesn't list.
+   Inventing produces a prose-vs-reference contradiction; Klein
+   follows the prose, not the reference image, and renders the wrong
+   person. Example failure from bdry2 (2026-05-23):
+     ✗ \`Malachor (Black man, coiled hair, dark hoodie)\`
+       when the ref says white man with a scar, dark short hair,
+       charcoal jacket — Klein rendered a completely different
+       character every time.
 
-3. When you write a character into a scene, use ONLY their NAME plus
-   action/pose/expression. Example:
-     ✓ "Malachor leans forward, hand on the rim of his coffee mug."
-     ✓ "Sera's gaze drops to the datapad, jaw tightening."
-     ✗ "Malachor (tall, lean man with a scar) leans forward..."
+3. **Compose your hook by picking 4-8 words from the canonical
+   description.** Pick the 2-3 most distinguishing visual cues
+   (typically: ethnicity / skin tone, hair, one distinctive
+   clothing item). Examples of how to distill:
+     ✓ Canonical: "Black man, dark hoodie, short coiled hair"
+       → Hook: \`(Black man, short coiled hair, dark hoodie)\`
+     ✓ Canonical: "white man, scar through left eyebrow, charcoal
+       jacket, dark hair graying at temples"
+       → Hook: \`(white man, scarred eyebrow, charcoal jacket)\`
+     ✓ Canonical: "young Asian woman, neon-blue dyed hair, athletic
+       build, denim overalls"
+       → Hook: \`(Asian woman, neon-blue hair, denim overalls)\`
 
-4. If you absolutely must describe a character's appearance (e.g. to
-   contrast two characters at a glance), use the canonical phrasing
-   from the descriptions below — VERBATIM — and only the attributes
-   present there. Never add new ones.
+4. **Subsequent mentions of the same character** can drop the hook
+   (per the composition guide). Only the first mention in the prose
+   body needs it.
 
-CANONICAL DESCRIPTIONS (read-only — for your awareness so you don't
-invent contradicting attributes; do NOT copy these into your prose
-unless rule 4 applies):
+5. **For brief reference / blurred-background mentions** — when a
+   character only appears as a soft silhouette in the background — you
+   STILL write the hook on first mention. Klein's cross-attention is
+   what tells it which slot the silhouette comes from; without the
+   hook it may render a different character or blend features.
 
-${lines}
+CANONICAL DESCRIPTIONS (use these to compose your hooks — DO NOT
+invent beyond what's written here):
 
-Bottom line: the reference image carries the look. Your prose carries
-the action. Mixing the two is what produces hallucinated wrong
-characters.
+${hookLines}
+
+Bottom line: the reference image is Klein's visual truth, and the
+inline visual hook is what tells Klein which slot to bind to. Compose
+the hook from canonical content; never from invention.
 </character_descriptions>`;
 }
