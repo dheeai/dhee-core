@@ -368,6 +368,22 @@ export interface ExecutionNodeMetadata {
    * prompt. Value is a node id like `setting_image:bus_station_morning`.
    */
   derivedFrom?: string;
+  /**
+   * Set by `applyInvalidation` when the caller passes `keepPrompt: true`
+   * (typically from `dhee_invalidate` after the user hand-edited the
+   * prompt JSON). The executor's media-node skip-LLM path reads this
+   * flag and forces the on-disk prompt to be used even when
+   * `isPromptStale` would otherwise return true (i.e., upstream deps
+   * were re-completed after the prompt file was last written).
+   *
+   * Only meaningful on merged-LLM-and-media nodes (`setting_image`,
+   * `character_image`, `object_image`). Harmless on other types — they
+   * never hit the code path that reads this flag.
+   *
+   * Cleared by the executor after a successful media generation, so a
+   * subsequent natural invalidate re-runs the LLM as usual.
+   */
+  forceUseExistingPrompt?: boolean;
   // NOTE: approval / regeneration / feedback state is intentionally
   // NOT modeled here. Approval lives in pi-agent (the external
   // orchestrator); dhee-core just runs the executor. Don't

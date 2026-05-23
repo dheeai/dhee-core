@@ -169,16 +169,31 @@ export function createProjectInProcess(
   // Override title to match the requested folder name. createProject
   // generates a title from input content (good for the UI), but the
   // user picked an explicit name — surface that.
+  //
+  // Also seed the per-project `features` block with all known flags
+  // set to their default values. The interpretation logic also
+  // defaults to false on missing fields, but writing the flags
+  // explicitly makes the registry visible to anyone inspecting
+  // project.json (and matches the documented registry in
+  // docs/feature-flags.md). When a new flag lands, add it here so
+  // freshly-created projects show it.
   const projectJsonPath = join(projectDir, 'project.json');
   if (existsSync(projectJsonPath)) {
     try {
       const raw = readFileSync(projectJsonPath, 'utf8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       parsed['title'] = opts.name;
+      const existingFeatures = (parsed['features'] as Record<string, unknown> | undefined) ?? {};
+      parsed['features'] = {
+        skipHoldingBeatLF: false,
+        ...existingFeatures,
+      };
       writeFileSync(projectJsonPath, JSON.stringify(parsed, null, 2));
       project.title = opts.name;
     } catch {
-      // Title rewrite is cosmetic; project still works without it.
+      // Title + features rewrite is cosmetic; project still works
+      // without it (interpretation logic defaults to OFF on missing
+      // flags anyway).
     }
   }
 

@@ -3,3 +3,4 @@
 - Always check logs when debugging an issue
 - when debugging issues always look in the logs folder to see detailed recent debug logs
 - Never write tests that grep/search for text strings in source code files. Tests must exercise actual behavior — call functions, render components, check outputs. If you need to verify a feature exists, test it by using it, not by reading the source.
+- Per-project feature flags live under `project.features.*` in project.json. Central registry: `docs/feature-flags.md`. When adding a new flag, update that doc AND the seed in `src/server/runners/createProjectInProcess.ts` so new projects show the field.

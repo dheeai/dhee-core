@@ -23,6 +23,148 @@ import { join } from 'path';
  */
 const FRESH_PURPOSES = new Set<string>();
 
+/**
+ * Holding-beat purposes — shots where the LF visually matches the FF
+ * (subject still, camera static). LTX i2v handles these with subtle
+ * ambient improvisation; generating a distinct LF prompt + Klein edit
+ * costs ~$0.02-0.03/shot for no perceptual gain. See skip-wasted-LF
+ * todo and skip-lf branch.
+ */
+const HOLDING_BEAT_PURPOSES = new Set<string>([
+  'set_the_world',
+  'set_the_mood',
+  'hold_emotion',
+  'show_reaction',
+  'show_dialogue',
+  'show_clue',
+  'punctuate',
+]);
+
+/**
+ * Motion verbs in `cameraWork` that veto the holding-beat classification.
+ * If the camera is moving, the LF can't be the same frame as the FF —
+ * the camera's position has changed even if the subject hasn't.
+ */
+const CAMERA_MOTION_VERBS = [
+  'push in', 'push-in', 'pushin',
+  'pull back', 'pull-back', 'pullback',
+  'pan',
+  'dolly',
+  'tracking', 'track ',
+  'tilt',
+  'zoom',
+  'follow',
+  'crane',
+  'orbit',
+  'whip',
+  'swirl',
+  'rack focus', 'rack-focus',
+  'arc shot', 'arc ',
+];
+
+/**
+ * Decide whether a shot is a "holding beat" — its LF should be skipped
+ * and the video gen falls back to i2v (FF only).
+ *
+ * Triggers when:
+ *   - purpose ∈ HOLDING_BEAT_PURPOSES, AND
+ *   - cameraWork prose lacks any camera-motion verb.
+ *
+ * Be conservative: if either signal is unclear, return false so the
+ * default FL2V path runs.
+ */
+export function isHoldingBeat(purpose: string, cameraWork: string): boolean {
+  if (!purpose || !HOLDING_BEAT_PURPOSES.has(purpose)) return false;
+  const cw = (cameraWork ?? '').toLowerCase();
+  if (!cw) return true; // no cameraWork prose → trust the purpose
+  for (const verb of CAMERA_MOTION_VERBS) {
+    if (cw.includes(verb)) return false;
+  }
+  return true;
+}
+
+/**
+ * Per-project opt-in for the holding-beat skip-LF behavior.
+ *
+ * Reads `project.features.skipHoldingBeatLF`. Default is OFF — the
+ * skip-LF path was added on the 2026-05-22 skip-lf branch and is
+ * still experimental, so legacy projects (no `features` field) and
+ * new projects (created with `skipHoldingBeatLF: false`) keep the
+ * traditional FL2V generation with a separate last-frame prompt.
+ *
+ * Opt-in: set `"features": { "skipHoldingBeatLF": true }` in
+ * project.json. Strict boolean equality, not truthiness — a
+ * hand-edited `"skipHoldingBeatLF": "true"` (string) would be a
+ * silent surprise as "on" if we used `Boolean(v)`. Force the literal
+ * `true` to opt in.
+ *
+ * Read by: `ExecutorAgent.applyHoldingBeatSkip` (the live path) and
+ * the dead-code `generateShotImagePromptPipeline` (defense in depth).
+ *
+ * Documented in `docs/feature-flags.md`.
+ */
+export function isSkipHoldingBeatLFEnabled(
+  project: { features?: { skipHoldingBeatLF?: boolean } } | undefined | null,
+): boolean {
+  if (!project || !project.features) return false;
+  return project.features.skipHoldingBeatLF === true;
+}
+
+/**
+ * Strip `frames.last_frame` from a freshly-LLM-generated shot_image_prompt
+ * JSON string when the shot is a holding beat, and flip the JSON's
+ * `generationStrategy` to `'i2v'` so the downstream provider routes to
+ * the i2v workflow.
+ *
+ * Pure: takes the JSON content + the shot's purpose + cameraWork. No
+ * disk, no executor state. Returns the mutated JSON string when the
+ * skip fires, or null when nothing should change (caller keeps the
+ * original content).
+ *
+ * Returns null on every failure mode:
+ *   - Not a holding beat (purpose/cameraWork combination fails
+ *     `isHoldingBeat`).
+ *   - Content is malformed JSON.
+ *   - Parsed JSON has no `frames` key (partial / malformed LLM output).
+ *
+ * Code fences (```json ... ```) are stripped before parsing.
+ *
+ * When the JSON already lacks `last_frame` but the shot IS a holding
+ * beat, the strategy is still flipped to `'i2v'` so downstream routing
+ * stays consistent.
+ *
+ * `mid_frame`, if present, is preserved — i2v means a single anchor
+ * (first_frame); the workflow ignores mid/last slots when
+ * `num_images: 1`. Preserving mid_frame avoids losing data the LLM
+ * generated in case strategy changes later.
+ */
+export function stripLastFrameForHoldingBeat(
+  jsonContent: string,
+  purpose: string,
+  cameraWork: string,
+): string | null {
+  if (!isHoldingBeat(purpose, cameraWork)) return null;
+  let raw = (jsonContent ?? '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('```')) {
+    raw = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as { frames?: Record<string, unknown>; generationStrategy?: string };
+  if (!obj.frames || typeof obj.frames !== 'object') return null;
+  if (obj.frames['last_frame'] !== undefined) {
+    delete obj.frames['last_frame'];
+  }
+  obj.generationStrategy = 'i2v';
+  return JSON.stringify(obj, null, 2);
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface Reference {
@@ -829,24 +971,37 @@ export function assembleShotImagePrompt(input: AssembleInput): ShotImagePromptJs
   // The order matters slightly: strip refs first (smaller change), then
   // normalize verbs. Both are idempotent.
   const firstFrameProse = enforceFrozenInstant(stripInlineFromImageTokens(input.firstFramePrompt));
-  const lastFrameProse = enforceFrozenInstant(stripInlineFromImageTokens(input.lastFramePrompt));
   const composed = (line: string, prose: string) => (line ? `${line}\n\n${prose}` : prose);
+
+  // Skip-LF mode: when the pipeline emitted an empty LF prompt (holding
+  // beat detected upstream), omit last_frame from the frames map. The
+  // bridge node + executor + provider all read this absence and route
+  // shot_video to i2v. Effective video strategy becomes 'i2v' instead
+  // of 'flfv'. See skip-lf branch + isHoldingBeat() for the heuristic.
+  const lastFrameSkipped = !input.lastFramePrompt || !input.lastFramePrompt.trim();
+  const frames: ShotImagePromptJson['frames'] = {
+    first_frame: {
+      imagePrompt: composed(manifestLine, firstFrameProse),
+      generationMode: input.firstFrameMode,
+      references: input.firstFrameRefs,
+    },
+  };
+  if (!lastFrameSkipped) {
+    const lastFrameProse = enforceFrozenInstant(stripInlineFromImageTokens(input.lastFramePrompt));
+    frames.last_frame = {
+      imagePrompt: composed(manifestLine, lastFrameProse),
+      generationMode: 'edit_first_frame',
+      references: [],
+    };
+  }
 
   return {
     shotNumber: input.shotNumber,
-    generationStrategy: strategy,
-    frames: {
-      first_frame: {
-        imagePrompt: composed(manifestLine, firstFrameProse),
-        generationMode: input.firstFrameMode,
-        references: input.firstFrameRefs,
-      },
-      last_frame: {
-        imagePrompt: composed(manifestLine, lastFrameProse),
-        generationMode: 'edit_first_frame',
-        references: [],
-      },
-    },
+    // When LF is skipped, downstream video strategy must be i2v (see
+    // executor strategy override and ltx23_i2v_* manifests). Force it
+    // here so persisted JSON matches what the renderer will actually do.
+    generationStrategy: lastFrameSkipped ? 'i2v' : strategy,
+    frames,
     negativePrompt: input.negativePrompt,
     aspectRatio: '16:9',
   };
@@ -1068,6 +1223,16 @@ export interface PipelineContext {
   lastFrameChanges: string;
   generationStrategy: string;
   worldStyle?: string;
+  /**
+   * Per-project opt-in for skip-LF on holding beats. When false /
+   * undefined, the pipeline generates a full last-frame prompt
+   * regardless of `isHoldingBeat`. Mirrors the
+   * `project.features.skipHoldingBeatLF` flag the executor's live
+   * path reads via `isSkipHoldingBeatLFEnabled`. Default OFF so this
+   * dead-code path matches production behavior if it's ever
+   * resurrected.
+   */
+  skipHoldingBeatLFEnabled?: boolean;
 }
 
 interface LLMClient {
@@ -1164,18 +1329,35 @@ export async function generateShotImagePromptPipeline(
   emit?.({ type: 'tool_streaming', toolCallId: callId2, chunk: firstFramePrompt.substring(0, 200) + '...', done: true, agentName: agent, toolName: 'shot_first_frame' });
   emit?.({ type: 'tool_result', toolCallId: callId2, toolName: 'shot_first_frame', result: { prompt: firstFramePrompt }, agentName: agent });
 
-  // ── Call 3: Last Frame Prompt ──
-  const lastFrameInput = buildLastFramePrompt({
-    firstFramePrompt,
-    lastFrameChanges: ctx.lastFrameChanges,
-    shotDescription: ctx.shotDescription,
-  });
+  // ── Call 3: Last Frame Prompt (or skip for holding beats) ──
+  // Holding beats (static subject + static camera) get FF=LF treatment:
+  // skip the LLM call and emit an empty LF prompt. The assembler omits
+  // last_frame from the JSON; the executor's bridge node no-ops; the
+  // shot_video resolver flips strategy to i2v. See skip-lf branch.
+  // Gate on the per-project opt-in flag. Default OFF — full LF prompt
+  // generation continues unless the project explicitly enables the
+  // feature in project.json. See docs/feature-flags.md.
+  const skipLastFrame =
+    ctx.skipHoldingBeatLFEnabled === true &&
+    isHoldingBeat(ctx.shotPurpose, ctx.shotCameraWork);
+  let lastFramePrompt = '';
+  if (skipLastFrame) {
+    const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;
+    emit?.({ type: 'tool_call', toolCallId: callId3, toolName: 'shot_last_frame', arguments: { shot: ctx.itemId, skipped: true, reason: 'holding_beat' }, agentName: agent });
+    emit?.({ type: 'tool_result', toolCallId: callId3, toolName: 'shot_last_frame', result: { skipped: true, reason: 'holding_beat', purpose: ctx.shotPurpose }, agentName: agent });
+  } else {
+    const lastFrameInput = buildLastFramePrompt({
+      firstFramePrompt,
+      lastFrameChanges: ctx.lastFrameChanges,
+      shotDescription: ctx.shotDescription,
+    });
 
-  const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;
-  emit?.({ type: 'tool_call', toolCallId: callId3, toolName: 'shot_last_frame', arguments: { shot: ctx.itemId }, agentName: agent });
-  const lastFramePrompt = await callLLM(llm, lastFrameInput.system, lastFrameInput.user, 0.3, false);
-  emit?.({ type: 'tool_streaming', toolCallId: callId3, chunk: lastFramePrompt.substring(0, 200) + '...', done: true, agentName: agent, toolName: 'shot_last_frame' });
-  emit?.({ type: 'tool_result', toolCallId: callId3, toolName: 'shot_last_frame', result: { prompt: lastFramePrompt }, agentName: agent });
+    const callId3 = `pipeline_lf_${ctx.itemId}_${Date.now()}`;
+    emit?.({ type: 'tool_call', toolCallId: callId3, toolName: 'shot_last_frame', arguments: { shot: ctx.itemId }, agentName: agent });
+    lastFramePrompt = await callLLM(llm, lastFrameInput.system, lastFrameInput.user, 0.3, false);
+    emit?.({ type: 'tool_streaming', toolCallId: callId3, chunk: lastFramePrompt.substring(0, 200) + '...', done: true, agentName: agent, toolName: 'shot_last_frame' });
+    emit?.({ type: 'tool_result', toolCallId: callId3, toolName: 'shot_last_frame', result: { prompt: lastFramePrompt }, agentName: agent });
+  }
 
   // FML2V disabled: no Call 4 (mid frame). All shots use FL2V (2-frame) video.
 

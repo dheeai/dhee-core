@@ -68,7 +68,9 @@ import {
   resolveDerivedFromBase,
   buildReferenceMenu,
   buildTurn2UserMessage,
+  isSkipHoldingBeatLFEnabled,
   parseTurn2RefsJson,
+  stripLastFrameForHoldingBeat,
   type Reference,
   type ReferenceMenuItem,
 } from './shotImagePipeline.js';
@@ -1350,6 +1352,67 @@ export class ExecutorAgent extends TypedEventEmitter {
     return sceneVideoPromptOutputPath
       ?? sceneVideoPromptNode?.outputPath
       ?? this.executor.getNode(`scene_video_prompt:${sceneId}`)?.outputPath;
+  }
+
+  /**
+   * Post-LLM holding-beat skip for shot_image_prompt.
+   *
+   * Loads this shot's purpose + cameraWork from the upstream
+   * scene_video_prompt JSON and runs `isHoldingBeat`. If the heuristic
+   * fires, the LLM-generated `frames.last_frame` is stripped from the
+   * JSON and `generationStrategy` is flipped to `'i2v'`. The downstream
+   * `shot_image_last_frame` bridge no-ops on missing
+   * `frames.last_frame.imagePrompt`; the video provider reads
+   * `generationStrategy === 'i2v'` and routes to `ltx23_i2v_*`.
+   *
+   * Returns the mutated JSON string when the skip fires, or `null` when
+   * the heuristic doesn't fire / the shot brief can't be resolved.
+   * Callers fall back to the original `content` on null.
+   *
+   * Failure modes are non-fatal: any parsing / lookup error returns
+   * null and the original JSON ships unchanged.
+   */
+  private applyHoldingBeatSkip(content: string, node: ExecutionNode): string | null {
+    if (!node.itemId || node.typeId !== 'shot_image_prompt') return null;
+    // Per-project opt-in. Default OFF — legacy behavior (full FL2V with
+    // a separate LF prompt) until the project explicitly sets
+    // `features.skipHoldingBeatLF: true` in project.json. See
+    // docs/feature-flags.md for the flag registry.
+    if (!isSkipHoldingBeatLFEnabled(this.config.project as { features?: { skipHoldingBeatLF?: boolean } } | undefined)) {
+      return null;
+    }
+    const m = node.itemId.match(/^(scene_(\d+))_shot_(\d+)$/);
+    if (!m || !m[1] || !m[3]) return null;
+    const sceneId = m[1];
+    const shotNumber = parseInt(m[3], 10);
+
+    const svpOutputPath = this.resolveSceneVideoPromptOutputPath(sceneId);
+    if (!svpOutputPath) return null;
+    const svpAbs = join(this.config.projectDir, svpOutputPath);
+    if (!existsSync(svpAbs)) return null;
+
+    let svpRaw = readFileSync(svpAbs, 'utf-8').trim();
+    if (svpRaw.startsWith('```')) {
+      svpRaw = svpRaw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+    let svp: { shots?: Array<{ shotNumber?: number; purpose?: string; cameraWork?: string }> };
+    try {
+      svp = JSON.parse(svpRaw);
+    } catch {
+      return null;
+    }
+    const shot = svp.shots?.find((s) => s.shotNumber === shotNumber);
+    if (!shot) return null;
+
+    const purpose = shot.purpose ?? '';
+    const cameraWork = shot.cameraWork ?? '';
+    const mutated = stripLastFrameForHoldingBeat(content, purpose, cameraWork);
+    if (mutated) {
+      this.log(
+        `  [shot_image_prompt holding-beat] skip-LF: ${node.itemId} (purpose=${purpose}) → i2v`,
+      );
+    }
+    return mutated;
   }
 
   private parseSceneBreakdown(
@@ -3019,20 +3082,42 @@ export class ExecutorAgent extends TypedEventEmitter {
               const isMediaNode = nodeCategory === 'visual_ref' || nodeCategory === 'clip';
               if (isMediaNode) {
                 const existingPromptPath = this.findExistingPromptFile(node);
-                const promptIsStale = existingPromptPath ? this.isPromptStale(node, existingPromptPath) : false;
-                if (existingPromptPath && !promptIsStale) {
-                  this.log(`  Prompt file already exists: ${existingPromptPath} — skipping LLM`);
+                // forceUseExistingPrompt — set by applyInvalidation when the
+                // user invalidates with `keepPrompt: true` after hand-editing
+                // the prompt JSON. Overrides the staleness check so the LLM
+                // doesn't re-run and overwrite the edits. Cleared on success
+                // below so subsequent natural invalidations behave normally.
+                const forceKeepPrompt = !!(node.metadata as Record<string, unknown> | undefined)?.['forceUseExistingPrompt'];
+                const promptIsStale = existingPromptPath && !forceKeepPrompt
+                  ? this.isPromptStale(node, existingPromptPath)
+                  : false;
+                if (existingPromptPath && (forceKeepPrompt || !promptIsStale)) {
+                  if (forceKeepPrompt) {
+                    this.log(`  Prompt file exists and forceUseExistingPrompt is set — skipping LLM (user-edited prompt)`);
+                  } else {
+                    this.log(`  Prompt file already exists: ${existingPromptPath} — skipping LLM`);
+                  }
 
                   if (isMediaNode) {
                     // Media node: skip LLM, go straight to image/video generation
                     this.emit({
                       type: 'notification',
                       level: 'info',
-                      message: `Skipping LLM for ${node.displayName} — prompt exists, going to image gen`,
+                      message: forceKeepPrompt
+                        ? `Skipping LLM for ${node.displayName} — using hand-edited prompt`
+                        : `Skipping LLM for ${node.displayName} — prompt exists, going to image gen`,
                     });
                     const mediaPath = await this.executeMediaGenerationWithRetry(node, existingPromptPath, toolCallId);
                     if (mediaPath) {
                       finalOutputPath = mediaPath;
+                      // Clear the sentinel on success so a future natural
+                      // invalidate of this node re-runs the LLM as usual.
+                      // We leave it alone on failure so the user can retry
+                      // (e.g. Comfy queue blip) without losing their edit.
+                      const meta = node.metadata as Record<string, unknown> | undefined;
+                      if (meta && 'forceUseExistingPrompt' in meta) {
+                        delete meta['forceUseExistingPrompt'];
+                      }
                     } else {
                       this.executor.markFailed(node.id, this.consumeLastNodeError('Media generation failed (prompt saved, will retry)'));
                       this.emitTodoUpdate();
@@ -3409,6 +3494,22 @@ export class ExecutorAgent extends TypedEventEmitter {
                 } catch (err) {
                   this.log(
                     `  [shot_image_prompt turn-2] refinement skipped: ${(err as Error).message}`,
+                  );
+                }
+
+                // Skip-LF for holding beats: load this shot's purpose +
+                // cameraWork from scene_video_prompt, run isHoldingBeat,
+                // and if it fires, strip frames.last_frame from the JSON
+                // and flip generationStrategy to 'i2v'. The downstream
+                // executor reads strategy=i2v and routes shot_video to
+                // ltx23_i2v_* workflows; executeShotImageLastFrame
+                // already no-ops on missing frames.last_frame.imagePrompt.
+                try {
+                  const filtered = this.applyHoldingBeatSkip(content, node);
+                  if (filtered) content = filtered;
+                } catch (err) {
+                  this.log(
+                    `  [shot_image_prompt holding-beat] skip check failed: ${(err as Error).message}`,
                   );
                 }
               }

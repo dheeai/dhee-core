@@ -1539,3 +1539,308 @@ describe('shotImagePipeline: parseTurn2RefsJson — Must 1.1 (null/empty fallbac
     expect(msg).toContain('`derivedFrom`');
   });
 });
+
+describe('shotImagePipeline: isHoldingBeat — holding-beat detection for skip-LF', () => {
+  it('returns true for hold_emotion with static cameraWork', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('hold_emotion', 'medium close-up, eye-level')).toBe(true);
+  });
+
+  it('returns true for show_reaction without motion verbs', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('show_reaction', 'close-up, slight low angle')).toBe(true);
+  });
+
+  it('returns true for set_the_mood, set_the_world, show_dialogue, show_clue, punctuate when static', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('set_the_mood', 'wide')).toBe(true);
+    expect(isHoldingBeat('set_the_world', 'extreme wide establishing')).toBe(true);
+    expect(isHoldingBeat('show_dialogue', 'medium two-shot')).toBe(true);
+    expect(isHoldingBeat('show_clue', 'insert macro')).toBe(true);
+    expect(isHoldingBeat('punctuate', 'cut to black')).toBe(true);
+  });
+
+  it('returns false when cameraWork includes a motion verb', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('hold_emotion', 'slow push in on her face')).toBe(false);
+    expect(isHoldingBeat('show_reaction', 'tracking shot following her')).toBe(false);
+    expect(isHoldingBeat('set_the_mood', 'crane up over the city')).toBe(false);
+    expect(isHoldingBeat('show_dialogue', 'dolly back as they walk')).toBe(false);
+  });
+
+  it('returns false for action-y purposes regardless of cameraWork', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('show_action', 'static medium')).toBe(false);
+    expect(isHoldingBeat('show_change', 'static medium')).toBe(false);
+    expect(isHoldingBeat('meet_character', 'static medium')).toBe(false);
+    expect(isHoldingBeat('show_passage', 'static medium')).toBe(false);
+    expect(isHoldingBeat('show_tension', 'static medium')).toBe(false);
+  });
+
+  it('returns false on unknown / empty purpose', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('', 'medium')).toBe(false);
+    expect(isHoldingBeat('not_a_real_purpose', 'medium')).toBe(false);
+  });
+
+  it('returns true when cameraWork is empty (trusts the purpose alone)', async () => {
+    const { isHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isHoldingBeat('hold_emotion', '')).toBe(true);
+  });
+});
+
+describe('shotImagePipeline: assembleShotImagePrompt — skip-LF path', () => {
+  it('omits last_frame and forces generationStrategy=i2v when lastFramePrompt is empty', async () => {
+    const { assembleShotImagePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
+    const result = assembleShotImagePrompt({
+      shotNumber: 2,
+      generationStrategy: 'flfv',
+      firstFrameMode: 'image_text_to_image',
+      firstFramePrompt: 'A close-up of her face from image 1, evening light...',
+      firstFrameRefs: [{ imageNumber: 1, type: 'character' as const, refId: 'character_image:ruby' }],
+      lastFramePrompt: '',
+      negativePrompt: 'blurry, cartoon',
+    });
+
+    expect(result.frames.last_frame).toBeUndefined();
+    expect(result.frames.first_frame).toBeDefined();
+    expect(result.generationStrategy).toBe('i2v');
+
+    // Still passes the schema (last_frame is optional)
+    const validation = validateWithSchema('shot_image_prompt', result);
+    expect(validation.valid).toBe(true);
+  });
+
+  it('omits last_frame when lastFramePrompt is whitespace-only', async () => {
+    const { assembleShotImagePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
+    const result = assembleShotImagePrompt({
+      shotNumber: 3,
+      generationStrategy: 'flfv',
+      firstFrameMode: 'image_text_to_image',
+      firstFramePrompt: 'A wide of the empty street...',
+      firstFrameRefs: [{ imageNumber: 1, type: 'setting' as const, refId: 'setting_image:street' }],
+      lastFramePrompt: '   \n\t  ',
+      negativePrompt: 'blurry',
+    });
+
+    expect(result.frames.last_frame).toBeUndefined();
+    expect(result.generationStrategy).toBe('i2v');
+  });
+
+  it('retains last_frame when prompt is non-empty (no skip)', async () => {
+    const { assembleShotImagePrompt } = await import('../../src/core/planner/shotImagePipeline.js');
+    const result = assembleShotImagePrompt({
+      shotNumber: 4,
+      generationStrategy: 'flfv',
+      firstFrameMode: 'image_text_to_image',
+      firstFramePrompt: 'Ruby running toward the door...',
+      firstFrameRefs: [{ imageNumber: 1, type: 'character' as const, refId: 'character_image:ruby' }],
+      lastFramePrompt: 'Ruby has reached the door, hand on the handle...',
+      negativePrompt: 'blurry',
+    });
+
+    expect(result.frames.last_frame).toBeDefined();
+    expect(result.frames.last_frame!.imagePrompt).toContain('door');
+    expect(result.generationStrategy).toBe('flfv');
+  });
+});
+
+describe('shotImagePipeline: stripLastFrameForHoldingBeat — pure JSON mutation', () => {
+  // Case 1: happy path — holding-beat detected, LF stripped, strategy flipped
+  it('strips frames.last_frame and sets generationStrategy=i2v for a holding beat', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      shotNumber: 1,
+      generationStrategy: 'flfv',
+      frames: {
+        first_frame: { imagePrompt: 'FF prose', generationMode: 'image_text_to_image', references: [] },
+        last_frame: { imagePrompt: 'LF prose', generationMode: 'edit_first_frame', references: [] },
+      },
+      negativePrompt: 'blurry',
+      aspectRatio: '16:9',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'hold_emotion', 'medium close-up, static');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.frames.first_frame).toBeDefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+    expect(parsed.shotNumber).toBe(1);
+  });
+
+  // Case 2: holding purpose + cameraWork has motion verb → null
+  it('returns null when cameraWork contains a motion verb', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: {}, last_frame: {} },
+      generationStrategy: 'flfv',
+    });
+    expect(stripLastFrameForHoldingBeat(input, 'hold_emotion', 'slow push-in')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'show_reaction', 'tracking shot')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'set_the_mood', 'crane up')).toBeNull();
+  });
+
+  // Case 3: non-holding purpose + static cameraWork → null
+  it('returns null for action-y purposes regardless of cameraWork', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: {}, last_frame: {} },
+      generationStrategy: 'flfv',
+    });
+    expect(stripLastFrameForHoldingBeat(input, 'show_action', 'static medium')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'meet_character', 'static medium')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'show_change', 'static medium')).toBeNull();
+  });
+
+  // Case 4: empty purpose → null
+  it('returns null when purpose is empty/unknown', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({ frames: { first_frame: {}, last_frame: {} } });
+    expect(stripLastFrameForHoldingBeat(input, '', 'medium')).toBeNull();
+    expect(stripLastFrameForHoldingBeat(input, 'not_a_purpose', 'medium')).toBeNull();
+  });
+
+  // Case 5: empty cameraWork + holding purpose → still strips (trust purpose)
+  it('strips when cameraWork is empty and purpose is in holding set', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: { imagePrompt: 'FF' }, last_frame: { imagePrompt: 'LF' } },
+      generationStrategy: 'flfv',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'hold_emotion', '');
+    expect(out).not.toBeNull();
+    expect(JSON.parse(out!).frames.last_frame).toBeUndefined();
+  });
+
+  // Case 6: malformed JSON → null (don't crash the executor)
+  it('returns null on malformed JSON without throwing', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(stripLastFrameForHoldingBeat('{not json', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('   ', 'hold_emotion', 'static')).toBeNull();
+  });
+
+  // Case 7: code-fenced content — strip fences then mutate
+  it('strips ```json code fences before parsing', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const inner = JSON.stringify({
+      frames: { first_frame: { imagePrompt: 'FF' }, last_frame: { imagePrompt: 'LF' } },
+      generationStrategy: 'flfv',
+    });
+    const fenced = '```json\n' + inner + '\n```';
+    const out = stripLastFrameForHoldingBeat(fenced, 'show_dialogue', 'static medium');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+  });
+
+  // Case 8: JSON has frames but no last_frame already — still flip strategy
+  it('still flips generationStrategy=i2v when last_frame is already absent', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: { first_frame: { imagePrompt: 'FF' } },
+      generationStrategy: 'flfv',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'hold_emotion', 'static');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+  });
+
+  // Case 9: no frames key at all → null
+  it('returns null when frames key is missing entirely', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(stripLastFrameForHoldingBeat('{"shotNumber": 1}', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('"a string"', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('[]', 'hold_emotion', 'static')).toBeNull();
+    expect(stripLastFrameForHoldingBeat('null', 'hold_emotion', 'static')).toBeNull();
+  });
+
+  // Case 10: overwrites a pre-existing generationStrategy of any value
+  it('overwrites generationStrategy regardless of prior value', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    for (const prior of ['flfv', 'fmlfv', 'v2v_extend', undefined]) {
+      const input = JSON.stringify({
+        frames: { first_frame: { imagePrompt: 'FF' }, last_frame: { imagePrompt: 'LF' } },
+        ...(prior ? { generationStrategy: prior } : {}),
+      });
+      const out = stripLastFrameForHoldingBeat(input, 'set_the_world', 'wide locked-off');
+      expect(out, `prior=${prior}`).not.toBeNull();
+      expect(JSON.parse(out!).generationStrategy, `prior=${prior}`).toBe('i2v');
+    }
+  });
+
+  // Case 11: mid_frame is preserved (not stripped) when present
+  it('preserves mid_frame; only last_frame is removed', async () => {
+    const { stripLastFrameForHoldingBeat } = await import('../../src/core/planner/shotImagePipeline.js');
+    const input = JSON.stringify({
+      frames: {
+        first_frame: { imagePrompt: 'FF' },
+        mid_frame: { imagePrompt: 'MID' },
+        last_frame: { imagePrompt: 'LF' },
+      },
+      generationStrategy: 'fmlfv',
+    });
+    const out = stripLastFrameForHoldingBeat(input, 'show_clue', 'insert macro');
+    expect(out).not.toBeNull();
+    const parsed = JSON.parse(out!);
+    expect(parsed.frames.last_frame).toBeUndefined();
+    expect(parsed.frames.mid_frame).toBeDefined();
+    expect(parsed.frames.first_frame).toBeDefined();
+    expect(parsed.generationStrategy).toBe('i2v');
+  });
+});
+
+/**
+ * Feature flag: project.features.skipHoldingBeatLF
+ *
+ * Skip-LF for holding beats is new behavior — default OFF. A project
+ * opts in by setting `features.skipHoldingBeatLF: true` in
+ * project.json. Everything calling the holding-beat skip path must
+ * first check this flag and bail when it's not true; absent /
+ * undefined / false / wrong-type all mean OFF.
+ *
+ * Strict boolean equality (not truthiness) so a hand-edited
+ * "skipHoldingBeatLF": "true" (string) doesn't silently turn it on.
+ */
+describe('shotImagePipeline: isSkipHoldingBeatLFEnabled — opt-in feature flag', () => {
+  it('returns false when project is undefined / null', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled(undefined)).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled(null as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it('returns false when features is absent (legacy projects unaffected)', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({})).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ title: 'old project' } as Parameters<typeof isSkipHoldingBeatLFEnabled>[0])).toBe(false);
+  });
+
+  it('returns false when features object exists but skipHoldingBeatLF is not set', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: {} })).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ features: { otherFlag: true } as Record<string, unknown> })).toBe(false);
+  });
+
+  it('returns false when explicitly false', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: false } })).toBe(false);
+  });
+
+  it('returns true ONLY when explicitly true (strict boolean)', async () => {
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: true } })).toBe(true);
+  });
+
+  it('returns false for truthy non-boolean values — defends against hand-edit typos', async () => {
+    // A hand-edited project.json with "skipHoldingBeatLF": "true" or 1
+    // would be silently surprising as "on" if we used truthiness. Force
+    // people to write the literal boolean to opt in.
+    const { isSkipHoldingBeatLFEnabled } = await import('../../src/core/planner/shotImagePipeline.js');
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: 'true' as unknown as boolean } })).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: 1 as unknown as boolean } })).toBe(false);
+    expect(isSkipHoldingBeatLFEnabled({ features: { skipHoldingBeatLF: {} as unknown as boolean } })).toBe(false);
+  });
+});

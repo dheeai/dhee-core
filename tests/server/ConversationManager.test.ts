@@ -10,7 +10,7 @@ vi.mock('../../src/server/posthog.js', () => ({
   captureWorkflowStarted: vi.fn(),
 }));
 
-import { ConversationManager } from '../../src/server/ConversationManager.js';
+import { ConversationManager, isSilentAgentResult } from '../../src/server/ConversationManager.js';
 import { ProjectStateCache, RemoteClientFileSystem, createRemoteSession, runInSession } from '../../src/core/fs/index.js';
 import { writeProjectText } from '../../src/tasks/video/workflow/projectFileIO.js';
 
@@ -217,6 +217,306 @@ describe('ConversationManager session activity', () => {
       'Orchestrator',
     );
 
+    disposeManager(manager);
+  });
+});
+
+/**
+ * Persistent event bridge + status events.
+ *
+ * Problem this addresses (from the 2026-05-22 supervisor-invisible bug):
+ *
+ * The IPC bridge creates a fresh `eventCb` per runTask call and passes
+ * it down. When the runTask returns, `session.activeEvents` is cleared.
+ * A subsequent server-initiated turn (the supervisor pi-agent that
+ * auto-engages on runner `completed` events) calls runTask WITHOUT an
+ * eventCb — so the supervisor's tool calls and streaming text reach
+ * `setupEventListeners` and die there. The renderer never knows the
+ * supervisor ran.
+ *
+ * Fix: a session-scoped `persistentEvents` bridge, bound once by the
+ * IPC layer over the stable `webContents.send` closure. runTask falls
+ * back to it when no events are passed.
+ *
+ * Companion: every transition of `session.state.status` emits an
+ * `onSessionStatus` event so the renderer can render a "supervisor
+ * reviewing" pill / similar instead of being blind.
+ */
+describe('persistent event bridge + status emission', () => {
+  it('bindSessionEventBridge stores events on the session for later runTask calls', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    const events = { onToolCall: vi.fn() };
+
+    (manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: unknown) => void;
+    }).bindSessionEventBridge(session.id, events);
+
+    const stored = (manager as unknown as {
+      sessions: Map<string, { persistentEvents?: { onToolCall?: unknown } }>;
+    }).sessions.get(session.id)?.persistentEvents;
+
+    expect(stored).toBe(events);
+    disposeManager(manager);
+  });
+
+  it('bindSessionEventBridge is idempotent — last binding wins (renderer reload)', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    const eventsA = { onToolCall: vi.fn() };
+    const eventsB = { onToolCall: vi.fn() };
+
+    const bind = (manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: unknown) => void;
+    }).bindSessionEventBridge.bind(manager);
+
+    bind(session.id, eventsA);
+    bind(session.id, eventsB);
+
+    const stored = (manager as unknown as {
+      sessions: Map<string, { persistentEvents?: unknown }>;
+    }).sessions.get(session.id)?.persistentEvents;
+
+    expect(stored).toBe(eventsB);
+    disposeManager(manager);
+  });
+
+  it('unbindSessionEventBridge clears the binding (session not destroyed)', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    const events = { onToolCall: vi.fn() };
+
+    const m = manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: unknown) => void;
+      unbindSessionEventBridge: (sid: string) => void;
+    };
+    m.bindSessionEventBridge(session.id, events);
+    m.unbindSessionEventBridge(session.id);
+
+    const stored = (manager as unknown as {
+      sessions: Map<string, { persistentEvents?: unknown }>;
+    }).sessions.get(session.id)?.persistentEvents;
+
+    expect(stored).toBeUndefined();
+    expect(manager.hasSession(session.id)).toBe(true);
+    disposeManager(manager);
+  });
+
+  it('binding a session that does not exist is a silent no-op (no throw)', () => {
+    // Avoids race: IPC bridge may call bind before the session is fully
+    // created during a resume flow. Prefer silent skip over crash —
+    // the next bind will land once the session exists.
+    const manager = createManager();
+    expect(() => {
+      (manager as unknown as {
+        bindSessionEventBridge: (sid: string, e: unknown) => void;
+      }).bindSessionEventBridge('does-not-exist', { onToolCall: vi.fn() });
+    }).not.toThrow();
+    disposeManager(manager);
+  });
+
+  it('emitSessionStatus pushes onSessionStatus to bound events', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    const onSessionStatus = vi.fn();
+
+    (manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: { onSessionStatus: unknown }) => void;
+    }).bindSessionEventBridge(session.id, { onSessionStatus });
+
+    (manager as unknown as {
+      setSessionStatus: (sid: string, status: string, kind?: string) => void;
+    }).setSessionStatus(session.id, 'running');
+
+    expect(onSessionStatus).toHaveBeenCalledWith(
+      session.id,
+      expect.objectContaining({ status: 'running' }),
+    );
+    disposeManager(manager);
+  });
+
+  it('setSessionStatus skips emit when the status did not actually change', () => {
+    // Otherwise every internal status touch produces a duplicate event
+    // and the renderer's "supervisor reviewing" pill flickers.
+    const manager = createManager();
+    const session = manager.createSession();
+    const onSessionStatus = vi.fn();
+
+    const m = manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: { onSessionStatus: unknown }) => void;
+      setSessionStatus: (sid: string, status: string) => void;
+    };
+    m.bindSessionEventBridge(session.id, { onSessionStatus });
+
+    m.setSessionStatus(session.id, 'running');
+    m.setSessionStatus(session.id, 'running'); // no-op
+    m.setSessionStatus(session.id, 'completed');
+
+    expect(onSessionStatus).toHaveBeenCalledTimes(2);
+    expect(onSessionStatus.mock.calls[0]?.[1]).toMatchObject({ status: 'running' });
+    expect(onSessionStatus.mock.calls[1]?.[1]).toMatchObject({ status: 'completed' });
+    disposeManager(manager);
+  });
+
+  it('setSessionStatus surfaces turn kind so renderer can distinguish supervisor from user', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    const onSessionStatus = vi.fn();
+
+    const m = manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: { onSessionStatus: unknown }) => void;
+      setSessionStatus: (sid: string, status: string, kind?: string) => void;
+    };
+    m.bindSessionEventBridge(session.id, { onSessionStatus });
+
+    m.setSessionStatus(session.id, 'running', 'supervisor');
+
+    expect(onSessionStatus).toHaveBeenCalledWith(
+      session.id,
+      expect.objectContaining({ status: 'running', turnKind: 'supervisor' }),
+    );
+    disposeManager(manager);
+  });
+
+  it('resolveTaskEvents returns passed-in events when both are set (caller wins)', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    const persistent = { onToolCall: vi.fn() };
+    const passed = { onToolCall: vi.fn() };
+
+    (manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: unknown) => void;
+    }).bindSessionEventBridge(session.id, persistent);
+
+    const resolved = (manager as unknown as {
+      resolveTaskEvents: (sid: string, passed?: unknown) => unknown;
+    }).resolveTaskEvents(session.id, passed);
+
+    expect(resolved).toBe(passed);
+    disposeManager(manager);
+  });
+
+  it('resolveTaskEvents falls back to persistentEvents when none passed (supervisor path)', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    const persistent = { onToolCall: vi.fn() };
+
+    (manager as unknown as {
+      bindSessionEventBridge: (sid: string, e: unknown) => void;
+    }).bindSessionEventBridge(session.id, persistent);
+
+    const resolved = (manager as unknown as {
+      resolveTaskEvents: (sid: string, passed?: unknown) => unknown;
+    }).resolveTaskEvents(session.id);
+
+    expect(resolved).toBe(persistent);
+    disposeManager(manager);
+  });
+
+  it('resolveTaskEvents returns undefined when nothing bound and nothing passed', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+
+    const resolved = (manager as unknown as {
+      resolveTaskEvents: (sid: string, passed?: unknown) => unknown;
+    }).resolveTaskEvents(session.id);
+
+    expect(resolved).toBeUndefined();
+    disposeManager(manager);
+  });
+});
+
+/**
+ * Silent-agent detection — the loud-failure escape hatch.
+ *
+ * Today's bug repro: pi-agent did two reads, then went silent. The
+ * LLM was aborted mid-stream (cancelTask logs confirmed) and
+ * agent.run() resolved with no text. runTask returned 'completed'
+ * with empty/undefined output. The chat had nothing new to render,
+ * so it looked like the agent just stopped for no reason.
+ *
+ * Fix: classify the result, and when it's a "silent" termination
+ * (interrupted OR completed-but-empty), surface a system
+ * notification to the chat so the user sees that the turn ended
+ * without a response. Test enumerates the failure modes the helper
+ * has to recognize.
+ */
+describe('isSilentAgentResult — detects "no visible response" runTask outcomes', () => {
+  it('treats interrupted runs as silent regardless of output', () => {
+    expect(isSilentAgentResult({ status: 'interrupted' })).toBe(true);
+    expect(isSilentAgentResult({ status: 'interrupted', output: '' })).toBe(true);
+    // Even partial output on interrupt is suspicious — the user
+    // didn't see closure. Surface a notice. (We still keep the
+    // partial output in the transcript; the notice is an addition,
+    // not a replacement.)
+    expect(isSilentAgentResult({ status: 'interrupted', output: 'partial...' })).toBe(true);
+  });
+
+  it('treats completed runs with empty/missing output as silent', () => {
+    expect(isSilentAgentResult({ status: 'completed' })).toBe(true);
+    expect(isSilentAgentResult({ status: 'completed', output: '' })).toBe(true);
+    expect(isSilentAgentResult({ status: 'completed', output: '   \n\t  ' })).toBe(true);
+  });
+
+  it('does NOT flag completed runs with real text', () => {
+    expect(isSilentAgentResult({ status: 'completed', output: 'Done — shot 5 dialogue updated.' })).toBe(false);
+    expect(isSilentAgentResult({ status: 'completed', output: 'x' })).toBe(false);
+  });
+
+  it('does NOT flag waiting_for_user — user already knows the agent is alive (question in chat)', () => {
+    expect(isSilentAgentResult({ status: 'waiting_for_user' })).toBe(false);
+    expect(isSilentAgentResult({ status: 'waiting_for_user', output: '' })).toBe(false);
+  });
+
+  it('does NOT flag error — runTask already throws back to the IPC bridge which surfaces "Couldn\'t reach the agent"', () => {
+    // Double-surfacing would render two error rows in chat. Error
+    // path has its own visible message; silent-agent is for the
+    // resolved-but-empty case the error path doesn't cover.
+    expect(isSilentAgentResult({ status: 'error' })).toBe(false);
+    expect(isSilentAgentResult({ status: 'error', output: '' })).toBe(false);
+  });
+});
+
+/**
+ * cancelTask source attribution — the IPC bridge calls cancelTask
+ * with `userInitiated: true` when the user clicks Stop. The
+ * server-side auto-cancel path in runTask calls cancelTask without
+ * the flag. runTask's silent-agent escape hatch uses this to
+ * suppress the redundant "Agent didn't respond — interrupted"
+ * warning on user-clicked Stop.
+ */
+describe('cancelTask userInitiated flag', () => {
+  it('sets session.userInitiatedCancel = true when opts.userInitiated is true', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    // Without an agent on the session, cancelTask still records the
+    // intent (the flag is set BEFORE plan-decision, so even a no-op
+    // cancel still flags the source). The flag is what runTask later
+    // reads to suppress its silent-agent notification.
+    manager.cancelTask(session.id, undefined, { userInitiated: true });
+    const stored = (manager as unknown as {
+      sessions: Map<string, { userInitiatedCancel?: boolean }>;
+    }).sessions.get(session.id)?.userInitiatedCancel;
+    expect(stored).toBe(true);
+    disposeManager(manager);
+  });
+
+  it('leaves userInitiatedCancel unset when called without opts (auto-cancel path)', () => {
+    const manager = createManager();
+    const session = manager.createSession();
+    manager.cancelTask(session.id);
+    const stored = (manager as unknown as {
+      sessions: Map<string, { userInitiatedCancel?: boolean }>;
+    }).sessions.get(session.id)?.userInitiatedCancel;
+    expect(stored).toBeUndefined();
+    disposeManager(manager);
+  });
+
+  it('does not throw when called for a session that does not exist', () => {
+    const manager = createManager();
+    expect(() =>
+      manager.cancelTask('nonexistent-session-id', undefined, { userInitiated: true }),
+    ).not.toThrow();
     disposeManager(manager);
   });
 });

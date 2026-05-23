@@ -652,4 +652,156 @@ describe("applyInvalidation", () => {
     expect(proj.executorState.nodes["shot_breakdown:scene_1_shot_1"]!.completedAt).toBeUndefined();
     expect(proj.executorState.nodes["shot_breakdown:scene_1_shot_1"]!.outputPath).toBeUndefined();
   });
+
+  /**
+   * keepPrompt flag — for merged ref-image nodes (setting_image,
+   * character_image, object_image) where the LLM prompt-write and
+   * Comfy image-render are coupled in the same node. When the user
+   * has hand-edited the on-disk prompt JSON and wants only the image
+   * to regenerate, this flag tells the executor to skip the LLM
+   * phase by reading the existing prompt file.
+   *
+   * Failure modes enumerated:
+   *   1. Sentinel lands on the seed.
+   *   2. Sentinel does NOT propagate to cascaded dependents (otherwise
+   *      a downstream shot_image's prompt regen would also be
+   *      suppressed, which is wrong — the user only edited the ref
+   *      image's prompt).
+   *   3. Default (no flag) does NOT set the sentinel — existing
+   *      callers must be unaffected.
+   *   4. Existing metadata (e.g. derivedFrom, description from the
+   *      shot_image_prompt turn-2 LLM) is preserved, not overwritten.
+   *   5. Re-invalidating with keepPrompt=false clears the sentinel —
+   *      a subsequent natural invalidate should not silently keep the
+   *      keep-prompt behavior from a previous call.
+   */
+  describe("keepPrompt option", () => {
+    function buildRefImageProject(): ProjectFile {
+      return {
+        executorState: {
+          nodes: {
+            "setting_image:observation_deck_exit": {
+              id: "setting_image:observation_deck_exit",
+              typeId: "setting_image",
+              itemId: "observation_deck_exit",
+              displayName: "Setting: Observation Deck Exit",
+              status: "completed",
+              dependencies: ["setting", "world_style"],
+              dependents: ["shot_image:scene_1_shot_13"],
+              outputPath: "assets/images/setting_observation_deck_exit.png",
+              completedAt: 5000,
+            } as never,
+            "shot_image:scene_1_shot_13": {
+              id: "shot_image:scene_1_shot_13",
+              typeId: "shot_image",
+              itemId: "scene_1_shot_13",
+              displayName: "S1 Shot 13 Image",
+              status: "completed",
+              dependencies: ["setting_image:observation_deck_exit"],
+              dependents: [],
+              outputPath: "assets/images/scene_1_shot_13.png",
+              completedAt: 6000,
+            } as never,
+          },
+        } as never,
+      };
+    }
+
+    it("sets metadata.forceUseExistingPrompt on the seed when keepPrompt=true", () => {
+      const proj = buildRefImageProject();
+      applyInvalidation(proj, ["setting_image:observation_deck_exit"], {
+        keepPrompt: true,
+      });
+      const seed = proj.executorState.nodes["setting_image:observation_deck_exit"]!;
+      expect(seed.metadata?.forceUseExistingPrompt).toBe(true);
+      expect(seed.status).toBe("pending");
+    });
+
+    it("does NOT propagate the sentinel to cascaded dependents", () => {
+      // The downstream shot_image consumes the setting ref. The user
+      // edited only the SETTING'S prompt — the shot_image's own prompt
+      // (a different file) is unrelated and should regen normally.
+      const proj = buildRefImageProject();
+      applyInvalidation(proj, ["setting_image:observation_deck_exit"], {
+        keepPrompt: true,
+      });
+      const downstream = proj.executorState.nodes["shot_image:scene_1_shot_13"]!;
+      expect(downstream.status).toBe("pending");
+      expect(downstream.metadata?.forceUseExistingPrompt).toBeUndefined();
+    });
+
+    it("default (no keepPrompt) does NOT set the sentinel — existing callers unaffected", () => {
+      const proj = buildRefImageProject();
+      applyInvalidation(proj, ["setting_image:observation_deck_exit"]);
+      const seed = proj.executorState.nodes["setting_image:observation_deck_exit"]!;
+      expect(seed.metadata?.forceUseExistingPrompt).toBeUndefined();
+    });
+
+    it("preserves other metadata fields on the seed", () => {
+      const proj = buildRefImageProject();
+      // Simulate a node spawned by the shot_image_prompt turn-2 LLM
+      // with derivedFrom + description metadata.
+      const seed = proj.executorState.nodes["setting_image:observation_deck_exit"]!;
+      (seed as unknown as { metadata?: Record<string, unknown> }).metadata = {
+        derivedFrom: "setting_image:observation_deck",
+        description: "Wide reverse angle of the exit door.",
+      };
+      applyInvalidation(proj, ["setting_image:observation_deck_exit"], {
+        keepPrompt: true,
+      });
+      expect(seed.metadata?.forceUseExistingPrompt).toBe(true);
+      expect((seed.metadata as Record<string, unknown>).derivedFrom).toBe(
+        "setting_image:observation_deck",
+      );
+      expect((seed.metadata as Record<string, unknown>).description).toBe(
+        "Wide reverse angle of the exit door.",
+      );
+    });
+
+    it("re-invalidating with keepPrompt=false clears a previously-set sentinel", () => {
+      // Otherwise a stale sentinel from a previous keepPrompt run would
+      // silently suppress LLM regen on a totally unrelated subsequent
+      // invalidate — a confusing failure mode.
+      const proj = buildRefImageProject();
+      applyInvalidation(proj, ["setting_image:observation_deck_exit"], {
+        keepPrompt: true,
+      });
+      const seed = proj.executorState.nodes["setting_image:observation_deck_exit"]!;
+      expect(seed.metadata?.forceUseExistingPrompt).toBe(true);
+
+      applyInvalidation(proj, ["setting_image:observation_deck_exit"]);
+      expect(seed.metadata?.forceUseExistingPrompt).toBeUndefined();
+    });
+
+    it("keepPrompt=true on a pure-LLM node is a harmless no-op (sentinel still set; never read by that path)", () => {
+      // We don't gate the flag by typeId in applyInvalidation — the
+      // executor's skip-LLM code path is the only thing that reads the
+      // sentinel, and it only runs for media nodes. Setting it on a
+      // pure-LLM node like 'plot' is wasted but not destructive. This
+      // test pins the harmlessness so a future refactor doesn't add an
+      // incorrect "must be media node" gate here.
+      const proj: ProjectFile = {
+        executorState: {
+          nodes: {
+            plot: {
+              id: "plot",
+              typeId: "plot",
+              status: "completed",
+              dependencies: [],
+              dependents: [],
+              outputPath: "plans/plot.md",
+              completedAt: 1000,
+            } as never,
+          },
+        } as never,
+      };
+      applyInvalidation(proj, ["plot"], { keepPrompt: true });
+      expect(proj.executorState.nodes.plot!.status).toBe("pending");
+      // The sentinel is set; the executor's pure-LLM path doesn't
+      // check it, so behavior is unchanged.
+      expect(proj.executorState.nodes.plot!.metadata?.forceUseExistingPrompt).toBe(
+        true,
+      );
+    });
+  });
 });

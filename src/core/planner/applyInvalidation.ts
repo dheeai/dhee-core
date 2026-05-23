@@ -82,6 +82,26 @@ export interface ApplyInvalidationOptions {
    * For other frame keys, `outputPath` is preserved.
    */
   singleFrame?: string;
+  /**
+   * When true, mark each SEED node with
+   * `metadata.forceUseExistingPrompt = true`. The executor's media-node
+   * path reads this flag and skips the LLM phase, reading the on-disk
+   * prompt file directly. Used after the user hand-edits a setting_image
+   * / character_image / object_image prompt JSON and wants only the
+   * image to regenerate — without this, the LLM re-runs and overwrites
+   * the user's edits because `isPromptStale` is true (a parent dep
+   * `completedAt` is newer than the prompt file mtime).
+   *
+   * Only set on seeds, never on cascaded dependents (a downstream
+   * `shot_image` has its own prompt file, unrelated to the ref).
+   *
+   * When false / omitted, the sentinel is REMOVED from each seed (so a
+   * stale value from a previous keep-prompt run doesn't silently
+   * suppress LLM regen on a later natural invalidate). The executor's
+   * skip-LLM path also clears the sentinel after a successful image
+   * generation; this option is the caller-side clear path.
+   */
+  keepPrompt?: boolean;
 }
 
 type MutableNode = ExecutorState["nodes"][string] & {
@@ -196,6 +216,21 @@ export function applyInvalidation(
       ...(preserveFramesOther !== undefined ? { preserveFramesOther } : {}),
       ...(singleFrame !== undefined ? { singleFrame } : {}),
     });
+    // keepPrompt: seeds only. Set the sentinel when true, clear it
+    // when false/omitted so a stale value from a previous keep-prompt
+    // run doesn't silently suppress LLM regen on a later natural
+    // invalidate.
+    const nodeWithMeta = node as MutableNode & {
+      metadata?: Record<string, unknown>;
+    };
+    if (opts.keepPrompt) {
+      nodeWithMeta.metadata = {
+        ...(nodeWithMeta.metadata ?? {}),
+        forceUseExistingPrompt: true,
+      };
+    } else if (nodeWithMeta.metadata && "forceUseExistingPrompt" in nodeWithMeta.metadata) {
+      delete (nodeWithMeta.metadata as Record<string, unknown>)["forceUseExistingPrompt"];
+    }
     invalidated.push(id);
     seeds.push(id);
     queue.push(id);

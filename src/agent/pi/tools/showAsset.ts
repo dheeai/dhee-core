@@ -326,6 +326,119 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
   });
 }
 
+// ── Generic image-by-path show tool ─────────────────────────────────
+// For ref images (setting / character / object) and any other on-disk
+// image the agent wants to surface in chat. The shot-specific show
+// tools above are great for the structured shot pipeline, but the
+// agent often needs to display an arbitrary image — e.g. after
+// reading SettingRef_observationdeckexit_*.png, the agent should be
+// able to *show* it in the chat, not just describe it textually.
+//
+// Earlier behavior: `read path=*.png` would return text only (the
+// VLM description if oversight is on), no image rendered. The agent
+// has no other channel to push an image into the chat, so the user
+// got a description but never saw the actual image. This tool closes
+// that gap.
+//
+// Path resolution: absolute paths are used as-is; relative paths are
+// resolved against the project directory.
+const ShowImageParams = Type.Object({
+  project: Type.String({ description: "Project name." }),
+  path: Type.String({
+    description:
+      "Image path. Absolute paths are used as-is; relative paths are resolved against the project directory. PNG / JPG / WEBP / GIF.",
+  }),
+});
+
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+
+import { existsSync } from "node:fs";
+import { isAbsolute, extname, sep } from "node:path";
+
+export function createShowImageTool(opts: ShowAssetOpts = {}): ToolDefinition {
+  return defineTool({
+    name: "dhee_show_image",
+    label: "dhee show image",
+    description:
+      "Display an image in the chat. Use this whenever the user asks to SEE an image — setting refs, character refs, object refs, or any other on-disk image — and a more specific tool (dhee_show_first_frame / dhee_show_last_frame for shot frames) doesn't fit. Accepts an absolute path OR a path relative to the project directory. The chat renders an inline thumbnail. Do NOT use `read` on an image file when the user wants to see it — `read` returns text only and the image will never appear in the chat.",
+    parameters: ShowImageParams,
+    async execute(_id, params: Static<typeof ShowImageParams>): Promise<AgentToolResult<ShowDetails>> {
+      const ext = extname(params.path).toLowerCase();
+      if (!IMAGE_EXTS.has(ext)) {
+        return {
+          content: [{
+            type: "text",
+            text: `'${params.path}' is not an image (extension '${ext || "(none)"}' is not png/jpg/jpeg/webp/gif). Use dhee_show_shot_video for videos.`,
+          }],
+          details: {
+            file_path: params.path,
+            asset_id: params.path,
+            asset_type: "image",
+            created_at: 0,
+          },
+        };
+      }
+      let projectDir: string;
+      try {
+        projectDir = resolveProjectDir({
+          name: params.project,
+          basePath: getProjectsDir(),
+        });
+      } catch (err) {
+        return {
+          content: [{
+            type: "text",
+            text: `Could not resolve project '${params.project}': ${(err as Error).message}`,
+          }],
+          details: {
+            file_path: params.path,
+            asset_id: params.path,
+            asset_type: "image",
+            created_at: 0,
+          },
+        };
+      }
+      const absPath = isAbsolute(params.path) ? params.path : join(projectDir, params.path);
+      if (!existsSync(absPath)) {
+        return {
+          content: [{
+            type: "text",
+            text: `Image not found on disk: ${absPath}`,
+          }],
+          details: {
+            file_path: params.path,
+            asset_id: params.path,
+            asset_type: "image",
+            created_at: 0,
+          },
+        };
+      }
+      // Emit relative-to-project path when possible — the chat panel's
+      // media handler resolves relative paths against the focused
+      // project dir (see ChatPanelEmbedded.test "media_generated with
+      // a relative path resolves to an absolute file:// URL").
+      const emitPath = absPath.startsWith(projectDir + sep)
+        ? absPath.slice(projectDir.length + 1)
+        : absPath;
+      opts.onMedia?.({
+        kind: "image",
+        project: params.project,
+        path: emitPath,
+        source: "dhee_show_image",
+      });
+      return {
+        content: [{ type: "text", text: `Showed image: ${emitPath}` }],
+        details: {
+          file_path: emitPath,
+          asset_id: absPath,
+          asset_type: "image",
+          created_at: 0,
+        },
+      };
+    },
+  });
+}
+
 // ── Backwards-compat named exports ──────────────────────────────────
 // Equivalent to `createShow*Tool({})` (no onMedia). Kept so existing
 // imports from tools/index.ts and tests don't have to change.
@@ -333,3 +446,4 @@ export const dheeShowFirstFrame = createShowFirstFrameTool();
 export const dheeShowLastFrame = createShowLastFrameTool();
 export const dheeShowShotVideo = createShowShotVideoTool();
 export const dheeShowFinalVideo = createShowFinalVideoTool();
+export const dheeShowImage = createShowImageTool();

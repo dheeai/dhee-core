@@ -478,10 +478,14 @@ export function resolveWatermarkPath(cwd: string = process.cwd()): string | null
  *    Nth `-i` argument, 0-based)
  *  - outputLabel: where the watermarked stream is published (e.g. 'outv')
  *  - outputHeight: the final video's height in pixels (e.g. 720). The
- *    watermark scales to ~6.94% of this — 50px tall at 720p, 75px at
- *    1080p, 150px at 4K. Width auto-derived from the source PNG's
- *    aspect ratio (square logo → 50×50 at 720p, matching the design
- *    spec).
+ *    watermark scales to ~9.03% of this — 65px tall at 720p, 98px at
+ *    1080p, 195px at 4K. Width auto-derived from the source PNG's
+ *    aspect ratio. Bumped from the original 6.94% on 2026-05-22 to
+ *    accommodate the 'dhee.studio' wordmark added below the logo:
+ *    the source PNG is now logo(440) + gap(15) + text(130) = 585px
+ *    tall, so 65px output keeps the LOGO portion at ~50px (matching
+ *    its original on-screen size pre-wordmark) and the wordmark at
+ *    ~13px — small but readable. Math: 50 / (440 / 585) = 66.5 ≈ 65.
  *
  * The PNG must already carry its own alpha channel (transparent
  * background). Pre-processing happens once when the asset is
@@ -496,9 +500,11 @@ export function buildWatermarkOverlayFilter(
   outputLabel: string,
   outputHeight: number = 720,
 ): string {
-  // 50px / 720p ≈ 6.944%. Round to nearest pixel so the filter
-  // expression stays integer and predictable across runs.
-  const watermarkHeightPx = Math.max(16, Math.round(outputHeight * 0.0694));
+  // 65px / 720p ≈ 9.028%. Round to nearest pixel so the filter
+  // expression stays integer and predictable across runs. See header
+  // doc for the math behind 9.03% — preserves the logo's original
+  // 50px on-screen size while leaving room for the wordmark below.
+  const watermarkHeightPx = Math.max(16, Math.round(outputHeight * 0.0903));
   return (
     `[${watermarkInputIdx}:v]format=rgba,` +
       `scale=-1:${watermarkHeightPx}:flags=lanczos[wm];` +

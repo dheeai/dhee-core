@@ -146,22 +146,24 @@ describe('buildWatermarkOverlayFilter — bottom-right PNG overlay', () => {
     );
   });
 
-  it('scales the watermark proportionally to the output height — 50px @ 720p (design spec)', () => {
-    // 50 / 720 ≈ 6.94%. Anything between 48 and 52 is acceptable —
-    // we round the ratio to integer pixels.
+  it('scales the watermark proportionally to the output height — 65px @ 720p (design spec post-wordmark)', () => {
+    // 65 / 720 ≈ 9.03%. Anything between 63 and 67 is acceptable —
+    // we round the ratio to integer pixels. The 65px target keeps the
+    // LOGO part of the wordmarked watermark at ~50px, matching the
+    // pre-wordmark watermark's on-screen size.
     const f = buildWatermarkOverlayFilter('concated', 1, 'outv', 720);
     const match = f.match(/scale=-1:(\d+)/);
     expect(match).not.toBeNull();
     const px = parseInt(match![1]!, 10);
-    expect(px).toBeGreaterThanOrEqual(48);
-    expect(px).toBeLessThanOrEqual(52);
+    expect(px).toBeGreaterThanOrEqual(63);
+    expect(px).toBeLessThanOrEqual(67);
   });
 
-  it('scales proportionally for higher resolutions (1080p → ~75px, 4K → ~150px)', () => {
+  it('scales proportionally for higher resolutions (1080p → ~98px, 4K → ~195px)', () => {
     const f1080 = buildWatermarkOverlayFilter('concated', 1, 'outv', 1080);
-    expect(f1080).toMatch(/scale=-1:(7[3-7])/);
+    expect(f1080).toMatch(/scale=-1:(9[5-9]|10[0-2])/);
     const f4k = buildWatermarkOverlayFilter('concated', 1, 'outv', 2160);
-    expect(f4k).toMatch(/scale=-1:(14[8-9]|15[0-2])/);
+    expect(f4k).toMatch(/scale=-1:(19[2-9]|20[0-2])/);
   });
 
   it('clamps to a sensible minimum size for tiny outputs (16px floor)', () => {
@@ -176,9 +178,9 @@ describe('buildWatermarkOverlayFilter — bottom-right PNG overlay', () => {
 
   it('defaults to 720p sizing when no output height is supplied (back-compat)', () => {
     // Existing callers that haven't been updated still get a
-    // sensible default — same 50ish px as the design spec.
+    // sensible default — 65ish px per the post-wordmark spec.
     const f = buildWatermarkOverlayFilter('concated', 1, 'outv');
-    expect(f).toMatch(/scale=-1:(4[89]|5[0-2])/);
+    expect(f).toMatch(/scale=-1:(6[3-7])/);
   });
 
   it('emits the chained filters separated by a semicolon', () => {

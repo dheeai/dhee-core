@@ -99,6 +99,42 @@ const DEFAULT_CONSTRAINTS: DurationConstraints = {
 
 const TIMELINE_FILENAME = 'timeline.json';
 
+/**
+ * Reflow segment time ranges from their durations + array order.
+ *
+ * `duration` is the source of truth on each segment. `startTime`,
+ * `endTime`, and the timeline's `totalDuration` are derived: they
+ * exist on disk for readability and to keep downstream consumers
+ * (ffmpeg assembler, UI timeline panel) from having to recompute on
+ * every read, but they are not authoritative.
+ *
+ * Any mutation that touches a duration (resize a shot, insert,
+ * remove, reorder) used to require an explicit cascade — every
+ * downstream segment had to be shifted by the same delta or the file
+ * silently desynced. That was the load-bearing math that agents kept
+ * getting wrong (the "1-9 of 16" / "resize set duration but didn't
+ * reflow" failure modes the user explicitly named).
+ *
+ * Calling this function before save / after load makes the cascade
+ * automatic: callers only have to keep `duration` correct.
+ *
+ * Numbers are rounded to 2 decimal places to keep the JSON terse and
+ * to match the existing rounding behavior in
+ * `createTimelineSkeleton` / `splitSegmentIntoShots`.
+ */
+export function normalizeSegmentTimes(timeline: Timeline): Timeline {
+  let cursor = 0;
+  const segments = timeline.segments.map((segment) => {
+    const duration = Math.round((segment.duration ?? 0) * 100) / 100;
+    const startTime = Math.round(cursor * 100) / 100;
+    const endTime = Math.round((cursor + duration) * 100) / 100;
+    cursor = endTime;
+    return { ...segment, startTime, endTime, duration };
+  });
+  const totalDuration = Math.round(cursor * 100) / 100;
+  return { ...timeline, segments, totalDuration };
+}
+
 function isVisualLikeLayer(layer: TimelineLayerEntry | undefined): layer is TimelineLayerEntry {
   return layer?.type === 'visual' || layer?.type === 'narration_video';
 }
@@ -1073,7 +1109,11 @@ export function loadTimeline(projectDir: string): Timeline | null {
   }
   if (raw === null) return null;
   try {
-    return JSON.parse(raw) as Timeline;
+    const parsed = JSON.parse(raw) as Timeline;
+    // Heal stale start/end on load: any hand-edit that bumped a single
+    // segment's duration without reflowing downstream is silently
+    // reconciled here. `duration` is authoritative; ranges are derived.
+    return normalizeSegmentTimes(parsed);
   } catch {
     return null;
   }
@@ -1142,9 +1182,17 @@ export function saveTimeline(projectDir: string, timeline: Timeline): void {
     projectDir,
     timeline,
   );
-  // Revalidate before saving
-  canonical.validation = validateTimeline(canonical);
-  const content = JSON.stringify(canonical, null, 2);
+  // Derive `startTime` / `endTime` / `totalDuration` from segment
+  // durations + array order before persisting. `duration` is the
+  // source of truth; the time-range fields are cache. Any in-memory
+  // mutation that touched `duration` (or reordered / inserted /
+  // dropped segments) is reconciled here without callers needing to
+  // remember to reflow downstream segments by hand. See the timeline
+  // architecture comment near `normalizeSegmentTimes`.
+  const normalized = normalizeSegmentTimes(canonical);
+  // Revalidate after normalization
+  normalized.validation = validateTimeline(normalized);
+  const content = JSON.stringify(normalized, null, 2);
 
   // Remote-fs path: dispatch through projectFileIO so the desktop's
   // websocket peer hears about the write (and the in-process cache

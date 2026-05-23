@@ -1,56 +1,48 @@
 {
-  "id": "ltx23_fl2v_cloud",
-  "displayName": "LTX 2.3 FL2V (Cloud)",
+  "id": "ltx23_i2v_api",
+  "displayName": "LTX 2.3 I2V (API format)",
   "pipeline": "video_generation",
-  "llmDescription": "Cloud-based first+last frame video generation using LTX 2.3.",
-  "selectionCriteria": "Video generation from first and last frame images on ComfyUI Cloud.",
+  "llmDescription": "Image-to-video generation using LTX 2.3 with only a first-frame anchor. The model improvises subtle ambient motion. Use for holding beats where subject and camera are static.",
+  "selectionCriteria": "Use for holding beats (static subject + static camera). Skips last-frame generation entirely.",
   "outputType": "video",
   "priority": 10,
   "strategies": [
-    "flfv"
+    "i2v"
   ],
   "inputRequirements": [
     {
       "id": "prompt",
       "type": "text",
-      "source": "llm",
+      "source": "shot_motion_directive",
+      "description": "Motion prompt",
       "required": true
     },
     {
       "id": "negative_prompt",
       "type": "text",
-      "source": "llm",
-      "required": false
+      "source": "system",
+      "description": "Negative prompt",
+      "required": true
     },
     {
       "id": "first_frame",
       "type": "image",
       "source": "shot_image",
+      "description": "First frame image (the only anchor for i2v)",
       "required": true
-    },
-    {
-      "id": "last_frame",
-      "type": "image",
-      "source": "shot_image",
-      "required": false
     },
     {
       "id": "seed",
       "type": "number",
       "source": "system",
-      "required": false
-    },
-    {
-      "id": "durationSeconds",
-      "type": "number",
-      "source": "system",
-      "description": "Video duration in seconds",
+      "description": "Random seed",
       "required": false
     },
     {
       "id": "filenamePrefix",
       "type": "text",
       "source": "system",
+      "description": "Output filename prefix",
       "required": false
     },
     {
@@ -61,7 +53,7 @@
       "required": false
     }
   ],
-  "workflowFile": "ltx23_fl2v_cloud.json",
+  "workflowFile": "ltx23_i2v_api.json",
   "format": "api",
   "parameterMappings": [
     {
@@ -80,29 +72,9 @@
       "field": "image"
     },
     {
-      "input": "last_frame",
-      "nodeId": "47",
-      "field": "image"
-    },
-    {
-      "input": "durationSeconds",
-      "nodeId": "169",
-      "field": "value"
-    },
-    {
-      "input": "width",
-      "nodeId": "166",
-      "field": "value"
-    },
-    {
-      "input": "height",
-      "nodeId": "167",
-      "field": "value"
-    },
-    {
-      "input": "filenamePrefix",
-      "nodeId": "43",
-      "field": "filename_prefix"
+      "input": "seed",
+      "nodeId": "15",
+      "field": "noise_seed"
     },
     {
       "input": "seed",
@@ -110,9 +82,9 @@
       "field": "noise_seed"
     },
     {
-      "input": "seed",
-      "nodeId": "15",
-      "field": "noise_seed"
+      "input": "filenamePrefix",
+      "nodeId": "43",
+      "field": "filename_prefix"
     },
     {
       "input": "lora_strength",
@@ -120,8 +92,12 @@
       "field": "strength_model"
     }
   ],
+  "promptKeywords": {
+    "negativeAppend": "static, blurry, low quality, distorted"
+  },
   "builtIn": true,
   "active": true,
+  "mode": "local",
   "defaultValues": {
     "lora_strength": 1.0
   }

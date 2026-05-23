@@ -14,6 +14,7 @@ import {
   dheeShowLastFrame,
   dheeShowShotVideo,
   dheeShowFinalVideo,
+  dheeShowImage,
 } from "./showAsset.js";
 import {
   dheeValidateComfyWorkflow,
@@ -40,6 +41,7 @@ export const dheeTools = [
   dheeShowLastFrame,
   dheeShowShotVideo,
   dheeShowFinalVideo,
+  dheeShowImage,
   dheeValidateComfyWorkflow,
   dheeAnalyzeComfyWorkflow,
   dheeSaveComfyWorkflow,
@@ -64,6 +66,7 @@ export {
   dheeShowLastFrame,
   dheeShowShotVideo,
   dheeShowFinalVideo,
+  dheeShowImage,
   dheeValidateComfyWorkflow,
   dheeAnalyzeComfyWorkflow,
   dheeSaveComfyWorkflow,

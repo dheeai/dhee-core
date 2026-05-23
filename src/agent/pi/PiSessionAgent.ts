@@ -21,6 +21,7 @@ import { createRunToTool, type MediaCallback } from './tools/runTo.js';
 import { createShowShotTool } from './tools/showShot.js';
 import {
   createShowFirstFrameTool,
+  createShowImageTool,
   createShowLastFrameTool,
   createShowShotVideoTool,
   createShowFinalVideoTool,
@@ -234,12 +235,14 @@ export class PiSessionAgent extends TypedEventEmitter {
       const showLastFrame = createShowLastFrameTool({ onMedia: opts.onMedia });
       const showShotVideo = createShowShotVideoTool({ onMedia: opts.onMedia });
       const showFinalVideo = createShowFinalVideoTool({ onMedia: opts.onMedia });
+      const showImage = createShowImageTool({ onMedia: opts.onMedia });
       baseTools = baseTools.map(t => {
         if (t.name === 'dhee_run_to') return mediaRunTo;
         if (t.name === 'dhee_show_first_frame') return showFirstFrame;
         if (t.name === 'dhee_show_last_frame') return showLastFrame;
         if (t.name === 'dhee_show_shot_video') return showShotVideo;
         if (t.name === 'dhee_show_final_video') return showFinalVideo;
+        if (t.name === 'dhee_show_image') return showImage;
         return t;
       });
       baseTools = [...baseTools, showShot];

@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   createShowFirstFrameTool,
+  createShowImageTool,
   createShowLastFrameTool,
   createShowShotVideoTool,
   createShowFinalVideoTool,
@@ -175,6 +176,88 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
     const r = await exec(tool, { project: "TheVillage", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/images/s1shot1_first.png");
     // No media calls — and no crash.
+    expect(mediaCalls).toEqual([]);
+  });
+});
+
+describe("dhee_show_image — generic image-by-path tool", () => {
+  /**
+   * Why this tool exists: when the agent wants to surface a setting
+   * reference, character reference, or any other on-disk image to
+   * the user, it used to fall back to `read path=*.png` which returns
+   * text only — the chat never showed the image. This tool exists
+   * as the explicit "display an image in the chat" channel that fires
+   * onMedia.
+   */
+  it("relative path under project dir: resolves, fires onMedia with kind=image, source=dhee_show_image", async () => {
+    // Drop a setting ref under the existing test project so the path
+    // resolves cleanly.
+    const projDir = join(projectsDir, "TheVillage");
+    mkdirSync(join(projDir, "assets", "images"), { recursive: true });
+    const relPath = "assets/images/SettingRef_observationdeckexit_zimage_JKeqBh.png";
+    writeFileSync(join(projDir, relPath), "fake-png", "utf8");
+
+    const tool = createShowImageTool({ onMedia });
+    const r = await exec(tool, { project: "TheVillage", path: relPath });
+
+    expect(r.details["file_path"]).toBe(relPath);
+    expect(mediaCalls).toEqual([
+      {
+        kind: "image",
+        path: relPath,
+        project: "TheVillage",
+        source: "dhee_show_image",
+      },
+    ]);
+  });
+
+  it("absolute path under project dir: emits the relative form (renderer resolves against project)", async () => {
+    const projDir = join(projectsDir, "TheVillage");
+    mkdirSync(join(projDir, "assets", "images"), { recursive: true });
+    const relPath = "assets/images/abs_test.png";
+    const absPath = join(projDir, relPath);
+    writeFileSync(absPath, "fake-png", "utf8");
+
+    const tool = createShowImageTool({ onMedia });
+    await exec(tool, { project: "TheVillage", path: absPath });
+
+    // Emitted path is project-relative so the chat's relative→absolute
+    // resolver does the right thing on the renderer side.
+    expect(mediaCalls[0]?.path).toBe(relPath);
+  });
+
+  it("non-image extension is rejected — no onMedia emitted", async () => {
+    const projDir = join(projectsDir, "TheVillage");
+    mkdirSync(join(projDir, "logs"), { recursive: true });
+    const relPath = "logs/debug.log";
+    writeFileSync(join(projDir, relPath), "logline", "utf8");
+
+    const tool = createShowImageTool({ onMedia });
+    const r = await exec(tool, { project: "TheVillage", path: relPath });
+
+    expect(mediaCalls).toEqual([]);
+    expect(String(r.details["asset_type"])).toBe("image"); // returned for diagnostics
+  });
+
+  it("missing file: no onMedia emitted (no false positive thumbnail)", async () => {
+    const tool = createShowImageTool({ onMedia });
+    const r = await exec(tool, {
+      project: "TheVillage",
+      path: "assets/images/does_not_exist.png",
+    });
+    expect(mediaCalls).toEqual([]);
+    expect(String(r.details["asset_type"])).toBe("image");
+  });
+
+  it("works with no onMedia callback (CLI / smoke tests)", async () => {
+    const projDir = join(projectsDir, "TheVillage");
+    mkdirSync(join(projDir, "assets", "images"), { recursive: true });
+    const relPath = "assets/images/noemit.png";
+    writeFileSync(join(projDir, relPath), "fake-png", "utf8");
+
+    const tool = createShowImageTool({});
+    const r = await exec(tool, { project: "TheVillage", path: relPath });
+    expect(r.details["file_path"]).toBe(relPath);
     expect(mediaCalls).toEqual([]);
   });
 });

@@ -28,6 +28,46 @@ export interface ExecutionNode {
   error?: string;
   startedAt?: number;
   completedAt?: number;
+  /**
+   * Per-node metadata bag. Persisted in project.json. Narrow shape
+   * here; the planner's richer `ExecutionNodeMetadata` (see
+   * src/core/planner/types.ts) is structurally compatible.
+   *
+   * `forceUseExistingPrompt` — set by `applyInvalidation` when the
+   * caller passes `keepPrompt: true`. Tells the executor's media-node
+   * skip-LLM path to read the on-disk prompt file even if upstream
+   * deps were re-completed after it (i.e., override `isPromptStale`).
+   * Used after the user hand-edits a setting_image / character_image
+   * / object_image prompt and only wants the image to regenerate.
+   */
+  metadata?: Record<string, unknown> & {
+    forceUseExistingPrompt?: boolean;
+  };
+}
+
+/**
+ * Per-project opt-in flags. Lives under `project.features` in
+ * project.json. New flags should always default to "off" when absent
+ * so legacy projects (created before the flag existed) keep their
+ * historical behavior. Document each flag in `docs/feature-flags.md`
+ * — the central registry — so they're not forgotten.
+ */
+export interface ProjectFeatures {
+  /**
+   * Skip-LF for holding-beat shots. When true, the executor strips
+   * `frames.last_frame` from shot_image_prompt JSON for shots whose
+   * `purpose` is a holding beat (hold_emotion, show_reaction,
+   * show_dialogue, show_clue, punctuate, set_the_mood, set_the_world)
+   * and whose `cameraWork` lacks any motion verb, then routes the
+   * video render to LTX i2v instead of FL2V. Saves one LLM call per
+   * matching shot and avoids "mid-action" LF artifacts. Experimental;
+   * landed on the skip-lf branch 2026-05-22. Default OFF.
+   *
+   * Toggle by editing project.json directly or via pi-agent's `edit`
+   * tool. Read by `isSkipHoldingBeatLFEnabled` in
+   * `src/core/planner/shotImagePipeline.ts`.
+   */
+  skipHoldingBeatLF?: boolean;
 }
 
 export interface ProjectFile {
@@ -40,6 +80,7 @@ export interface ProjectFile {
   templateId?: string;
   targetDuration?: number;
   currentPhase?: string;
+  features?: ProjectFeatures;
   phases?: Record<string, { status: string; completedAt: number | null }>;
   executorState?: ExecutorState;
   [key: string]: unknown;
