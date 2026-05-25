@@ -38,6 +38,7 @@ export type AnalyticsEventName =
   | 'website_download_clicked'
   | 'desktop_auth_started'
   | 'desktop_token_issued'
+  | 'project_created'
   | 'core_session_started'
   | 'core_session_ended'
   | 'core_tool_call_started'
@@ -498,6 +499,7 @@ export function captureAnalyticsEvent(
       distinctId: identity.distinctId,
       event,
       timestamp: toDate(options.timestamp),
+      disableGeoip: commonProperties.platform !== 'desktop',
       properties: sanitizeAnalyticsProperties({
         ...commonProperties,
         ...extraCommonProperties,

@@ -8,6 +8,8 @@ It assumes the current analytics event contract:
 - Desktop launches use `desktop_app_started`, with first launch tracked as `desktop_app_first_started`.
 - Desktop live activity uses `desktop_heartbeat`.
 - Desktop screen/session activity uses `$screen` with `$screen_name = 'desktop_main'`.
+- Desktop project creation uses `project_created` with raw `project_name`,
+  `project_name_length`, `creation_surface`, and `project_creation_source`.
 - Core runtime sessions use `core_session_started` and `core_session_ended`.
 - Core work uses `core_task_started`, `core_task_completed`, `core_task_failed`, `core_tool_call_started`, and `core_tool_call_completed`.
 - Completed full length output uses `final_video_created`.
@@ -32,7 +34,8 @@ Create these dashboards in PostHog:
 2. `Dhee - Activation Funnel`
 3. `Dhee - Desktop Live Health`
 4. `Dhee - Video Creation`
-5. `Dhee - Analytics QA`
+5. `Dhee - Desktop Projects & Location`
+6. `Dhee - Analytics QA`
 
 For each query below:
 
@@ -40,6 +43,18 @@ For each query below:
 2. Paste the query.
 3. Save it as an insight with the suggested tile name.
 4. Add it to the dashboard named in the section.
+
+The `Dhee - Desktop Projects & Location` dashboard can also be provisioned
+through the PostHog API. It is pinned and uses the same
+`production-analytics` tag as the existing production dashboards:
+
+```bash
+POSTHOG_PERSONAL_API_KEY=... POSTHOG_PROJECT_ID=... pnpm analytics:dashboard:posthog
+```
+
+Use `pnpm analytics:dashboard:posthog --dry-run` to print the dashboard payload
+without credentials. The script uses `POSTHOG_API_HOST`, defaulting to
+`https://us.posthog.com`.
 
 Use the `Filter out internal and test users` control in PostHog while viewing
 dashboards. For SQL tiles that must respect dashboard filters or date overrides,
@@ -59,6 +74,7 @@ Recommended chart tiles:
 - `Dhee - Activation Funnel`: `Downloads By Platform Pie`, `Downloads Trend By Day`, `Website Pageviews Trend`, `Desktop First Starts Trend`
 - `Dhee - Desktop Live Health`: `Desktop Heartbeats By Hour`, `Desktop Starts By Version`, `Desktop Session Event Mix`
 - `Dhee - Video Creation`: `Videos Created By Day Chart`, `Task Outcome Pie`, `Core Tasks By Workflow`, `Tool Calls By Tool`, `Failed Workflows By Name`
+- `Dhee - Desktop Projects & Location`: `Projects Created By Day`, `Projects By Country`, `Projects By Region`, `Recent Project Names`
 - `Dhee - Analytics QA`: `Analytics Event Volume Last 24 Hours`, `Legacy Website Events Trend`, `Analytics Event Mix Pie`
 
 Keep the visual tiles above the raw SQL tables on each dashboard. The first row
@@ -124,6 +140,7 @@ WHERE timestamp >= now() - INTERVAL 30 DAY
   AND event IN (
     'desktop_app_started',
     'desktop_heartbeat',
+    'project_created',
     'core_session_started',
     'core_task_started',
     'final_video_created'
@@ -417,7 +434,110 @@ ORDER BY failures DESC
 LIMIT 20
 ```
 
-## Dashboard 5: Dhee - Analytics QA
+## Dashboard 5: Dhee - Desktop Projects & Location
+
+This dashboard answers which desktop users are creating projects, what project
+names they used, and where PostHog GeoIP places the usage. It intentionally
+does not collect local filesystem paths or project descriptions.
+
+### Projects Created, Last 30 Days
+
+```sql
+SELECT count() AS projects_created_30d
+FROM events
+WHERE event = 'project_created'
+  AND timestamp >= now() - INTERVAL 30 DAY
+```
+
+### Unique Project Creators, Last 30 Days
+
+```sql
+SELECT count(DISTINCT distinct_id) AS unique_project_creators_30d
+FROM events
+WHERE event = 'project_created'
+  AND timestamp >= now() - INTERVAL 30 DAY
+```
+
+### Projects Created By Day
+
+```sql
+SELECT
+  toStartOfDay(timestamp) AS day,
+  count() AS projects_created,
+  count(DISTINCT distinct_id) AS creators
+FROM events
+WHERE event = 'project_created'
+  AND timestamp >= now() - INTERVAL 30 DAY
+GROUP BY day
+ORDER BY day WITH FILL
+  FROM toStartOfDay(now() - INTERVAL 30 DAY)
+  TO toStartOfDay(now())
+  STEP INTERVAL 1 DAY
+```
+
+### Recent Desktop Project Names
+
+```sql
+SELECT
+  timestamp,
+  distinct_id,
+  properties.project_name AS project_name,
+  properties.project_name_length AS project_name_length,
+  properties.$geoip_country_name AS country,
+  properties.$geoip_subdivision_1_name AS region,
+  properties.$geoip_city_name AS city,
+  properties.app_version AS app_version
+FROM events
+WHERE event = 'project_created'
+  AND timestamp >= now() - INTERVAL 30 DAY
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+### Projects By Country, Region, And City
+
+```sql
+SELECT
+  coalesce(toString(properties.$geoip_country_name), 'Unknown') AS country,
+  coalesce(toString(properties.$geoip_subdivision_1_name), 'Unknown') AS region,
+  coalesce(toString(properties.$geoip_city_name), 'Unknown') AS city,
+  count() AS projects_created,
+  count(DISTINCT distinct_id) AS creators
+FROM events
+WHERE event = 'project_created'
+  AND timestamp >= now() - INTERVAL 30 DAY
+GROUP BY country, region, city
+ORDER BY projects_created DESC
+LIMIT 100
+```
+
+### Project Name Coverage QA
+
+```sql
+SELECT
+  count() AS total_project_created_events,
+  countIf(properties.project_name IS NOT NULL) AS with_project_name,
+  round(with_project_name * 100.0 / nullIf(total_project_created_events, 0), 2) AS project_name_coverage_percent
+FROM events
+WHERE event = 'project_created'
+  AND timestamp >= now() - INTERVAL 7 DAY
+```
+
+### Desktop Project GeoIP Coverage QA
+
+```sql
+SELECT
+  count() AS total_project_created_events,
+  countIf(properties.$geoip_country_name IS NOT NULL) AS with_geoip_country,
+  countIf(properties.$geoip_subdivision_1_name IS NOT NULL) AS with_geoip_region,
+  countIf(properties.$geoip_city_name IS NOT NULL) AS with_geoip_city,
+  round(with_geoip_country * 100.0 / nullIf(total_project_created_events, 0), 2) AS geoip_country_coverage_percent
+FROM events
+WHERE event = 'project_created'
+  AND timestamp >= now() - INTERVAL 7 DAY
+```
+
+## Dashboard 6: Dhee - Analytics QA
 
 This dashboard catches tracking regressions.
 
@@ -437,6 +557,7 @@ WHERE timestamp >= now() - INTERVAL 24 HOUR
     'desktop_app_first_started',
     'desktop_app_started',
     'desktop_heartbeat',
+    'project_created',
     'core_session_started',
     'core_session_ended',
     'core_task_started',
@@ -546,7 +667,7 @@ desktop's server-side events can still power session analytics through
 Recommended tags in PostHog Data Management:
 
 - `website`: `$pageview`, `website_download_clicked`
-- `desktop`: `$screen`, `desktop_app_first_started`, `desktop_app_started`, `desktop_heartbeat`, `desktop_app_quit`, `desktop_auth_started`
+- `desktop`: `$screen`, `desktop_app_first_started`, `desktop_app_started`, `desktop_heartbeat`, `desktop_app_quit`, `desktop_auth_started`, `project_created`
 - `core`: `core_session_started`, `core_session_ended`, `core_task_started`, `core_task_completed`, `core_task_failed`, `core_tool_call_started`, `core_tool_call_completed`, `final_video_created`
 - `legacy`: `app_started`, `session_started`, `session_ended`, `workflow_started`, `workflow_completed`, `workflow_failed`, `tool_call_started`, `tool_call_completed`, `website_page_viewed`
 
@@ -561,7 +682,7 @@ worth adding before production:
 - `desktop_update_available`, `desktop_update_started`, `desktop_update_completed`, `desktop_update_failed`
 - `desktop_app_crashed` with crash reason and version
 - `auth_completed`, `auth_failed`, and `auth_signed_out`
-- `project_created`, `project_opened`, and `project_deleted`
+- `project_opened` and `project_deleted`
 - `template_selected` with template ID and category
 - `video_generation_started`, `video_generation_failed`, and richer render timing properties
 - `export_started`, `export_completed`, and `export_failed`
