@@ -5,7 +5,7 @@ It assumes the current analytics event contract:
 
 - Website pageviews use `$pageview` with `$session_id`, `$current_url`, `$pathname`,
   `$referrer`, `referrer_domain`, `referrer_url`, `landing_url`, `landing_path`,
-  `landing_search`, and UTM fields.
+  `landing_search`, `referrer_path`, `reddit_subreddit`, and UTM fields.
 - Website downloads use `website_download_clicked`.
 - Desktop launches use `desktop_app_started`, with first launch tracked as `desktop_app_first_started`.
 - Desktop live activity uses `desktop_heartbeat`.
@@ -73,7 +73,7 @@ view is visual and scannable.
 Recommended chart tiles:
 
 - `Dhee - Production Overview`: `Desktop Active Users Trend`, `Desktop Launches By Day`, `Desktop Event Mix Last 24 Hours`, `Core Activity Mix Last 24 Hours`, `Video Creation Trend`
-- `Dhee - Activation Funnel`: `Downloads By Platform Pie`, `Downloads Trend By Day`, `Website Pageviews Trend`, `Desktop First Starts Trend`, `Website Visits By Source`
+- `Dhee - Activation Funnel`: `Downloads By Platform Pie`, `Downloads Trend By Day`, `Website Pageviews Trend`, `Desktop First Starts Trend`, `Website Visits By Source`, `Social Traffic Sources, Last 30 Days`, `Reddit Subreddit Sources, Last 30 Days`
 - `Dhee - Desktop Live Health`: `Desktop Heartbeats By Hour`, `Desktop Starts By Version`, `Desktop Session Event Mix`
 - `Dhee - Video Creation`: `Videos Created By Day Chart`, `Task Outcome Pie`, `Core Tasks By Workflow`, `Tool Calls By Tool`, `Failed Workflows By Name`
 - `Dhee - Desktop Projects & Location`: `Projects Created By Day`, `Projects By Country`, `Projects By Region`, `Recent Project Names`
@@ -400,6 +400,165 @@ SELECT
 FROM campaign_pageviews
 LEFT JOIN downloads_by_visitor USING distinct_id
 GROUP BY utm_source, utm_medium, utm_campaign, utm_content
+ORDER BY visits DESC
+LIMIT 100
+```
+
+### Social Traffic Sources, Last 30 Days
+
+Shows social traffic across Reddit, LinkedIn, WhatsApp, X/Twitter, Facebook,
+Instagram, YouTube, Product Hunt, and Hacker News. UTM source is preferred when
+present; otherwise the table falls back to referrer domain.
+
+```sql
+WITH
+  social_pageviews AS (
+    SELECT
+      distinct_id,
+      lower(coalesce(nullIf(toString(properties.utm_source), ''), '')) AS utm_source,
+      lower(coalesce(nullIf(toString(properties.referrer_domain), ''), '')) AS referrer_domain,
+      coalesce(nullIf(toString(properties.utm_medium), ''), 'unknown') AS medium,
+      coalesce(nullIf(toString(properties.utm_campaign), ''), 'none') AS campaign,
+      coalesce(nullIf(toString(properties.utm_content), ''), 'none') AS content,
+      coalesce(
+        nullIf(toString(properties.referrer_url), ''),
+        nullIf(toString(properties.$referrer), ''),
+        'unknown'
+      ) AS referrer_url,
+      coalesce(
+        nullIf(toString(properties.landing_url), ''),
+        nullIf(toString(properties.$current_url), ''),
+        'unknown'
+      ) AS landing_url,
+      count() AS visits
+    FROM events
+    WHERE event = '$pageview'
+      AND timestamp >= now() - INTERVAL 30 DAY
+      AND (
+        lower(toString(properties.utm_source)) IN (
+          'reddit',
+          'linkedin',
+          'whatsapp',
+          'x',
+          'twitter',
+          'facebook',
+          'instagram',
+          'youtube',
+          'producthunt',
+          'product_hunt',
+          'hackernews',
+          'hn'
+        )
+        OR lower(toString(properties.referrer_domain)) LIKE '%reddit.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%linkedin.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%whatsapp.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%x.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%twitter.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%facebook.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%instagram.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%youtube.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%youtu.be'
+        OR lower(toString(properties.referrer_domain)) LIKE '%producthunt.com'
+        OR lower(toString(properties.referrer_domain)) LIKE '%news.ycombinator.com'
+      )
+    GROUP BY distinct_id, utm_source, referrer_domain, medium, campaign, content, referrer_url, landing_url
+  ),
+  downloads_by_visitor AS (
+    SELECT
+      distinct_id,
+      count() AS downloads
+    FROM events
+    WHERE event = 'website_download_clicked'
+      AND timestamp >= now() - INTERVAL 30 DAY
+    GROUP BY distinct_id
+  )
+SELECT
+  multiIf(
+    utm_source != '', utm_source,
+    referrer_domain LIKE '%reddit.com', 'reddit',
+    referrer_domain LIKE '%linkedin.com', 'linkedin',
+    referrer_domain LIKE '%whatsapp.com', 'whatsapp',
+    referrer_domain LIKE '%x.com' OR referrer_domain LIKE '%twitter.com', 'x/twitter',
+    referrer_domain LIKE '%facebook.com', 'facebook',
+    referrer_domain LIKE '%instagram.com', 'instagram',
+    referrer_domain LIKE '%youtube.com' OR referrer_domain LIKE '%youtu.be', 'youtube',
+    referrer_domain LIKE '%producthunt.com', 'producthunt',
+    referrer_domain LIKE '%news.ycombinator.com', 'hackernews',
+    'unknown'
+  ) AS social_source,
+  medium,
+  campaign,
+  content,
+  referrer_domain,
+  referrer_url,
+  landing_url,
+  sum(visits) AS visits,
+  count(DISTINCT distinct_id) AS unique_visitors,
+  sum(ifNull(downloads_by_visitor.downloads, 0)) AS downloads
+FROM social_pageviews
+LEFT JOIN downloads_by_visitor USING distinct_id
+GROUP BY social_source, medium, campaign, content, referrer_domain, referrer_url, landing_url
+ORDER BY visits DESC
+LIMIT 100
+```
+
+### Reddit Subreddit Sources, Last 30 Days
+
+Shows the subreddit that sent traffic when Reddit provides a `/r/<subreddit>/...`
+referrer. For more reliable attribution, also tag Reddit links with
+`utm_source=reddit` and put the subreddit or post identifier in `utm_content`.
+
+```sql
+WITH
+  reddit_pageviews AS (
+    SELECT
+      distinct_id,
+      coalesce(
+        nullIf(toString(properties.reddit_subreddit), ''),
+        nullIf(toString(properties.utm_content), ''),
+        'unknown'
+      ) AS subreddit_or_post,
+      coalesce(
+        nullIf(toString(properties.referrer_url), ''),
+        nullIf(toString(properties.$referrer), ''),
+        'unknown'
+      ) AS referrer_url,
+      coalesce(
+        nullIf(toString(properties.landing_url), ''),
+        nullIf(toString(properties.$current_url), ''),
+        'unknown'
+      ) AS landing_url,
+      count() AS visits
+    FROM events
+    WHERE event = '$pageview'
+      AND timestamp >= now() - INTERVAL 30 DAY
+      AND (
+        properties.reddit_subreddit IS NOT NULL
+        OR properties.utm_source = 'reddit'
+        OR properties.referrer_domain LIKE '%reddit.com'
+        OR properties.$referrer LIKE '%reddit.com%'
+      )
+    GROUP BY distinct_id, subreddit_or_post, referrer_url, landing_url
+  ),
+  downloads_by_visitor AS (
+    SELECT
+      distinct_id,
+      count() AS downloads
+    FROM events
+    WHERE event = 'website_download_clicked'
+      AND timestamp >= now() - INTERVAL 30 DAY
+    GROUP BY distinct_id
+  )
+SELECT
+  subreddit_or_post,
+  referrer_url,
+  landing_url,
+  sum(visits) AS visits,
+  count(DISTINCT distinct_id) AS unique_visitors,
+  sum(ifNull(downloads_by_visitor.downloads, 0)) AS downloads
+FROM reddit_pageviews
+LEFT JOIN downloads_by_visitor USING distinct_id
+GROUP BY subreddit_or_post, referrer_url, landing_url
 ORDER BY visits DESC
 LIMIT 100
 ```
