@@ -3,7 +3,9 @@
 This runbook defines the PostHog dashboards Dhee should have before production.
 It assumes the current analytics event contract:
 
-- Website pageviews use `$pageview` with `$session_id`, `$current_url`, `$pathname`, and `$referrer`.
+- Website pageviews use `$pageview` with `$session_id`, `$current_url`, `$pathname`,
+  `$referrer`, `referrer_domain`, `referrer_url`, `landing_url`, `landing_path`,
+  `landing_search`, and UTM fields.
 - Website downloads use `website_download_clicked`.
 - Desktop launches use `desktop_app_started`, with first launch tracked as `desktop_app_first_started`.
 - Desktop live activity uses `desktop_heartbeat`.
@@ -71,7 +73,7 @@ view is visual and scannable.
 Recommended chart tiles:
 
 - `Dhee - Production Overview`: `Desktop Active Users Trend`, `Desktop Launches By Day`, `Desktop Event Mix Last 24 Hours`, `Core Activity Mix Last 24 Hours`, `Video Creation Trend`
-- `Dhee - Activation Funnel`: `Downloads By Platform Pie`, `Downloads Trend By Day`, `Website Pageviews Trend`, `Desktop First Starts Trend`
+- `Dhee - Activation Funnel`: `Downloads By Platform Pie`, `Downloads Trend By Day`, `Website Pageviews Trend`, `Desktop First Starts Trend`, `Website Visits By Source`
 - `Dhee - Desktop Live Health`: `Desktop Heartbeats By Hour`, `Desktop Starts By Version`, `Desktop Session Event Mix`
 - `Dhee - Video Creation`: `Videos Created By Day Chart`, `Task Outcome Pie`, `Core Tasks By Workflow`, `Tool Calls By Tool`, `Failed Workflows By Name`
 - `Dhee - Desktop Projects & Location`: `Projects Created By Day`, `Projects By Country`, `Projects By Region`, `Recent Project Names`
@@ -254,6 +256,152 @@ FROM
     WHERE event IN ('$pageview', 'website_download_clicked')
       AND timestamp >= now() - INTERVAL 30 DAY
   )
+```
+
+### Website Traffic Sources, Last 30 Days
+
+Groups website pageviews by UTM source/medium/campaign when available and falls
+back to referrer domain or direct traffic. Downloads are joined by website
+identity, so the count is directional when a visitor has multiple sources in the
+same 30-day window.
+
+```sql
+WITH
+  pageview_sources AS (
+    SELECT
+      distinct_id,
+      coalesce(
+        nullIf(toString(properties.utm_source), ''),
+        nullIf(toString(properties.referrer_domain), ''),
+        'direct'
+      ) AS source,
+      coalesce(nullIf(toString(properties.utm_medium), ''), 'unknown') AS medium,
+      coalesce(nullIf(toString(properties.utm_campaign), ''), 'none') AS campaign,
+      coalesce(nullIf(toString(properties.referrer_domain), ''), 'direct') AS referrer_domain,
+      count() AS visits
+    FROM events
+    WHERE event = '$pageview'
+      AND timestamp >= now() - INTERVAL 30 DAY
+    GROUP BY distinct_id, source, medium, campaign, referrer_domain
+  ),
+  downloads_by_visitor AS (
+    SELECT
+      distinct_id,
+      count() AS downloads
+    FROM events
+    WHERE event = 'website_download_clicked'
+      AND timestamp >= now() - INTERVAL 30 DAY
+    GROUP BY distinct_id
+  )
+SELECT
+  source,
+  medium,
+  campaign,
+  referrer_domain,
+  sum(visits) AS visits,
+  count(DISTINCT distinct_id) AS unique_visitors,
+  sum(ifNull(downloads_by_visitor.downloads, 0)) AS downloads
+FROM pageview_sources
+LEFT JOIN downloads_by_visitor USING distinct_id
+GROUP BY source, medium, campaign, referrer_domain
+ORDER BY visits DESC
+LIMIT 100
+```
+
+### Top Referring Links, Last 30 Days
+
+Shows specific URLs or posts when the browser provides a referrer. New events
+use `referrer_url`; old events fall back to `$referrer`.
+
+```sql
+WITH
+  referring_pageviews AS (
+    SELECT
+      distinct_id,
+      coalesce(
+        nullIf(toString(properties.referrer_url), ''),
+        nullIf(toString(properties.$referrer), ''),
+        'direct'
+      ) AS referrer_url,
+      coalesce(
+        nullIf(toString(properties.landing_url), ''),
+        nullIf(toString(properties.$current_url), ''),
+        'unknown'
+      ) AS landing_url,
+      count() AS visits
+    FROM events
+    WHERE event = '$pageview'
+      AND timestamp >= now() - INTERVAL 30 DAY
+    GROUP BY distinct_id, referrer_url, landing_url
+  ),
+  downloads_by_visitor AS (
+    SELECT
+      distinct_id,
+      count() AS downloads
+    FROM events
+    WHERE event = 'website_download_clicked'
+      AND timestamp >= now() - INTERVAL 30 DAY
+    GROUP BY distinct_id
+  )
+SELECT
+  referrer_url,
+  landing_url,
+  sum(visits) AS visits,
+  count(DISTINCT distinct_id) AS unique_visitors,
+  sum(ifNull(downloads_by_visitor.downloads, 0)) AS downloads
+FROM referring_pageviews
+LEFT JOIN downloads_by_visitor USING distinct_id
+GROUP BY referrer_url, landing_url
+ORDER BY visits DESC
+LIMIT 100
+```
+
+### Campaign / Post Links, Last 30 Days
+
+Use `utm_campaign` for campaign names and `utm_content` for specific posts,
+buttons, or links.
+
+```sql
+WITH
+  campaign_pageviews AS (
+    SELECT
+      distinct_id,
+      toString(properties.utm_source) AS utm_source,
+      toString(properties.utm_medium) AS utm_medium,
+      toString(properties.utm_campaign) AS utm_campaign,
+      toString(properties.utm_content) AS utm_content,
+      count() AS visits
+    FROM events
+    WHERE event = '$pageview'
+      AND timestamp >= now() - INTERVAL 30 DAY
+      AND (
+        properties.utm_campaign IS NOT NULL
+        OR properties.utm_content IS NOT NULL
+      )
+    GROUP BY distinct_id, utm_source, utm_medium, utm_campaign, utm_content
+  ),
+  downloads_by_visitor AS (
+    SELECT
+      distinct_id,
+      count() AS downloads
+    FROM events
+    WHERE event = 'website_download_clicked'
+      AND timestamp >= now() - INTERVAL 30 DAY
+    GROUP BY distinct_id
+  )
+SELECT
+  utm_source,
+  utm_medium,
+  utm_campaign,
+  utm_content,
+  sum(visits) AS visits,
+  count(DISTINCT distinct_id) AS unique_visitors,
+  sum(ifNull(downloads_by_visitor.downloads, 0)) AS downloads
+FROM campaign_pageviews
+LEFT JOIN downloads_by_visitor USING distinct_id
+GROUP BY utm_source, utm_medium, utm_campaign, utm_content
+ORDER BY visits DESC
+LIMIT 100
 ```
 
 ### Desktop First Starts By Day
