@@ -68,6 +68,7 @@
     "format": "prettier --write .",
     "remotion:studio": "cd remotion-infographics && remotion studio src/index.tsx",
     "analytics:backfill:posthog": "tsx scripts/backfill-posthog-from-sqlite.ts",
+    "analytics:dashboard:posthog": "tsx scripts/create-posthog-desktop-project-dashboard.ts",
     "stop": "tsx scripts/stop-executor.ts"
   },
   "keywords": [

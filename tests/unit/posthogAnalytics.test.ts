@@ -61,6 +61,7 @@ describe('posthog analytics', () => {
       expect.objectContaining({
         distinctId: 'install:install-1',
         event: 'desktop_app_started',
+        disableGeoip: false,
         properties: expect.objectContaining({
           app_component: 'dhee-desktop',
           app_version: '1.2.3',
@@ -87,6 +88,7 @@ describe('posthog analytics', () => {
       expect.objectContaining({
         distinctId: 'user:user-1',
         event: 'desktop_app_started',
+        disableGeoip: false,
       }),
     );
 
@@ -96,6 +98,7 @@ describe('posthog analytics', () => {
       expect.objectContaining({
         distinctId: 'install:install-1',
         event: 'desktop_app_started',
+        disableGeoip: false,
         properties: expect.not.objectContaining({
           user_id: 'user-1',
         }),
@@ -136,6 +139,7 @@ describe('posthog analytics', () => {
     expect(posthogMocks.capture).toHaveBeenLastCalledWith(
       expect.objectContaining({
         event: 'custom_event',
+        disableGeoip: true,
         properties: expect.objectContaining({
           session_id: 'core-session-1',
         }),
@@ -150,6 +154,11 @@ describe('posthog analytics', () => {
 
   it('preserves explicit PostHog $session_id for screen/session UI events', () => {
     process.env.POSTHOG_API_KEY = 'phc_test';
+    configureAnalytics({
+      platform: 'desktop',
+      appVersion: '1.2.3',
+      identity: { installId: 'install-1' },
+    });
 
     captureAnalyticsEvent('$screen', {
       '$session_id': 'desktop-launch-1',
@@ -159,6 +168,7 @@ describe('posthog analytics', () => {
     expect(posthogMocks.capture).toHaveBeenLastCalledWith(
       expect.objectContaining({
         event: '$screen',
+        disableGeoip: false,
         properties: expect.objectContaining({
           '$session_id': 'desktop-launch-1',
           '$screen_name': 'desktop_main',
@@ -187,6 +197,49 @@ describe('posthog analytics', () => {
         '$session_id': expect.any(String),
       }),
     );
+  });
+
+  it('captures project_created with raw project names and desktop GeoIP enabled', () => {
+    process.env.POSTHOG_API_KEY = 'phc_test';
+    configureAnalytics({
+      platform: 'desktop',
+      appVersion: '1.2.3',
+      identity: { installId: 'install-1' },
+    });
+
+    captureAnalyticsEvent(
+      'project_created',
+      {
+        project_name: 'Client Launch Film',
+        project_name_length: 18,
+        creation_surface: 'new_project_dialog',
+        project_creation_source: 'desktop',
+        '$session_id': 'desktop-launch-1',
+      },
+      {
+        component: 'dhee-desktop',
+      },
+    );
+
+    expect(posthogMocks.capture).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        distinctId: 'install:install-1',
+        event: 'project_created',
+        disableGeoip: false,
+        properties: expect.objectContaining({
+          app_component: 'dhee-desktop',
+          platform: 'desktop',
+          project_name: 'Client Launch Film',
+          project_name_length: 18,
+          creation_surface: 'new_project_dialog',
+          project_creation_source: 'desktop',
+          '$session_id': 'desktop-launch-1',
+        }),
+      }),
+    );
+    const properties = posthogMocks.capture.mock.calls.at(-1)?.[0].properties;
+    expect(properties).not.toHaveProperty('$geoip_disable');
+    expect(properties).not.toHaveProperty('project_dir');
   });
 
   it('removes sensitive property keys before capture', () => {
