@@ -72,10 +72,19 @@ vi.mock('../components/NewProjectInline', () => ({
 }))
 
 vi.mock('../components/TaskInput', () => ({
-  TaskInput: ({ onSend, placeholder }: { onSend: (value: string) => void; placeholder?: string }) => (
+  TaskInput: ({ onSend, placeholder }: { onSend: (value: string, attachments?: Array<Record<string, unknown>>) => void; placeholder?: string }) => (
     <div>
       <div>{placeholder ?? 'default-placeholder'}</div>
       <button onClick={() => onSend('project description')}>Submit Task</button>
+      <button onClick={() => onSend('project description', [{
+        name: 'alice.png',
+        path: '/tmp/dhee/uploads/alice.png',
+        url: '/api/v1/uploads/alice.png',
+        mimeType: 'image/png',
+        size: 123,
+      }])}>
+        Submit Task With Attachment
+      </button>
     </div>
   ),
 }))
@@ -159,6 +168,28 @@ describe('App project flow', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Complete Wizard')).toBeInTheDocument()
+    })
+  })
+
+  it('sends staged character reference image metadata when creating a project', async () => {
+    render(<App />)
+
+    await userEvent.click(screen.getByText('New Project'))
+    await userEvent.click(screen.getByText('Complete Wizard'))
+    await userEvent.click(screen.getByText('Submit Task With Attachment'))
+
+    expect(sendMock).toHaveBeenCalledWith({
+      type: 'create_project',
+      data: expect.objectContaining({
+        content: 'project description',
+        characterReferenceImages: [{
+          name: 'alice.png',
+          path: '/tmp/dhee/uploads/alice.png',
+          url: '/api/v1/uploads/alice.png',
+          mimeType: 'image/png',
+          size: 123,
+        }],
+      }),
     })
   })
 })

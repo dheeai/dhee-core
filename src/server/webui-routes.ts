@@ -3,10 +3,15 @@
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync } from 'fs';
-import { join, extname, basename } from 'path';
+import { join, extname } from 'path';
 import { scanProjects } from '../tasks/video/workflow/ProjectManager.js';
 import { getWebUIHtml } from './webui.js';
 import { builtInTemplates, initializeTemplates } from '../templates/index.js';
+import {
+  isAllowedCharacterImageFilename,
+  sanitizeUploadFilename,
+  uniqueFilename,
+} from './characterReferenceUploads.js';
 
 const DURATION_PRESETS: Record<string, { label: string; seconds: number }[]> = {
   short: [
@@ -314,7 +319,7 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Upload a file — saves to uploads/ dir, returns the absolute path for the agent
+  // Upload a character-reference image to the staging uploads/ dir.
   app.post<{ Querystring: { filename: string } }>(
     '/api/v1/upload',
     {
@@ -325,18 +330,26 @@ export async function registerWebUIRoutes(app: FastifyInstance): Promise<void> {
       if (!filename) {
         return reply.status(400).send({ error: 'filename query param required' });
       }
-      const safeName = basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_');
+      if (!isAllowedCharacterImageFilename(filename)) {
+        return reply.status(415).send({ error: 'Only image uploads are supported' });
+      }
+
+      const safeName = sanitizeUploadFilename(filename);
       const uploadDir = join(process.cwd(), 'uploads');
       if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true });
 
-      const destPath = join(uploadDir, safeName);
-      const body = request.body as Buffer;
+      const storedName = uniqueFilename(uploadDir, safeName);
+      const destPath = join(uploadDir, storedName);
+      const rawBody = request.body;
+      const body = Buffer.isBuffer(rawBody)
+        ? rawBody
+        : Buffer.from(typeof rawBody === 'string' ? rawBody : '');
       writeFileSync(destPath, body);
 
       return reply.send({
         name: filename,
         path: destPath,
-        url: `/api/v1/uploads/${safeName}`,
+        url: `/api/v1/uploads/${storedName}`,
       });
     }
   );

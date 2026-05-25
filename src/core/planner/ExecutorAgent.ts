@@ -87,6 +87,10 @@ import { buildShotAudioBlock } from './buildShotAudioBlock.js';
 import { buildShotNarrationDirective } from './buildShotNarrationDirective.js';
 import { skipEmptyCollectionAndDependents } from './skipEmptyCollection.js';
 import {
+  matchUploadedCharacterReferenceForTarget,
+  type CharacterReferenceMatchStrategy,
+} from './characterReferenceMatcher.js';
+import {
   expectedShotNumberFromItemId,
   validateShotNumber,
   validateRefMentions,
@@ -136,8 +140,9 @@ import type { SceneBundleShot, SceneBundleResult } from './sceneBundleRenderer.j
 import type { CharacterId } from '../../services/providers/promptRelayGlobalPrompt.js';
 import { SceneBundleLockMap } from './sceneBundleLockMap.js';
 import { checkSceneBundleEligibility } from './sceneBundleEligibility.js';
-import { addAsset } from '../../tasks/video/workflow/index.js';
+import { addAsset, type AssetInfo } from '../../tasks/video/workflow/index.js';
 import { captureFinalVideoCreated } from '../../server/posthog.js';
+import type { ProjectInput } from '../../tasks/video/workflow/types.js';
 
 /**
  * Configuration for creating an ExecutorAgent.
@@ -3038,6 +3043,10 @@ export class ExecutorAgent extends TypedEventEmitter {
               }
               finalOutputPath = assemblyResult;
             } else {
+              if (node.typeId === 'character_image' && this.completeCharacterImageFromUpload(node, toolCallId, agentName)) {
+                return;
+              }
+
               // Non-deterministic node — needs LLM (or skip-if-exists)
               // 1. Resolve inputs
               const inputs = resolveInputs(node, this.executor, this.config.projectDir);
@@ -6123,6 +6132,188 @@ Examples of common failure modes to avoid:
       }
     }
     return null;
+  }
+
+  private completeCharacterImageFromUpload(
+    node: ExecutionNode,
+    toolCallId: string,
+    agentName: string,
+  ): boolean {
+    if (node.typeId !== 'character_image' || !node.itemId) return false;
+
+    const projectWithInputs = this.config.project as typeof this.config.project & {
+      inputs?: ProjectInput[];
+    };
+    const match = matchUploadedCharacterReferenceForTarget({
+      projectDir: this.config.projectDir,
+      inputs: projectWithInputs.inputs,
+      targets: this.executor
+        .getAllNodes()
+        .filter((candidate) => candidate.typeId === 'character_image' && candidate.itemId)
+        .map((candidate) => ({
+          id: candidate.id,
+          itemId: candidate.itemId,
+          displayName: candidate.displayName,
+        })),
+      target: {
+        id: node.id,
+        itemId: node.itemId,
+        displayName: node.displayName,
+      },
+    });
+    if (!match) return false;
+
+    const fullPath = join(this.config.projectDir, match.relativePath);
+    if (!existsSync(fullPath)) return false;
+
+    const assetId = this.uploadedCharacterAssetId(node.itemId, match.input.id);
+    const createdAt = Date.now();
+    const asset: AssetInfo = {
+      id: assetId,
+      type: 'character_ref',
+      path: match.relativePath,
+      version: 1,
+      createdAt,
+      nodeId: node.id,
+      metadata: {
+        source: 'user_upload',
+        inputId: match.input.id,
+        originalFilename: match.originalFilename,
+        matchStrategy: match.matchStrategy,
+      },
+    };
+
+    this.markCharacterReferenceInputMatched(
+      match.input.id,
+      match.characterId,
+      match.characterName,
+      match.matchStrategy,
+    );
+    this.upsertManifestAsset(asset);
+    this.mirrorCharacterReferenceAssetToProject(asset, match.characterId, match.characterName);
+
+    this.emit({
+      type: 'tool_call',
+      toolCallId,
+      toolName: 'use_uploaded_character_reference',
+      arguments: {
+        character: match.characterName,
+        file: match.relativePath,
+        matchStrategy: match.matchStrategy,
+      },
+      agentName,
+    });
+    this.emit({
+      type: 'tool_result',
+      toolCallId,
+      toolName: 'use_uploaded_character_reference',
+      result: {
+        status: 'completed',
+        file_path: match.relativePath,
+        artifact_id: assetId,
+        source: 'user_upload',
+      },
+      agentName,
+    });
+    this.emit({
+      type: 'agent_text',
+      text: `**${node.displayName}** → \`${match.relativePath}\` (uploaded reference)`,
+      isFinal: false,
+    });
+
+    this.executor.markCompleted(node.id, match.relativePath, assetId);
+    this.persistState();
+    this.emitTodoUpdate();
+    this.log(`  COMPLETED from uploaded character reference: ${node.id} → ${match.relativePath}`);
+    return true;
+  }
+
+  private uploadedCharacterAssetId(characterId: string, inputId: string): string {
+    const safeCharacterId = characterId.replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const safeInputId = inputId.replace(/[^a-zA-Z0-9_-]+/g, '_');
+    return `uploaded_charref_${safeCharacterId}_${safeInputId}`;
+  }
+
+  private markCharacterReferenceInputMatched(
+    inputId: string,
+    characterId: string,
+    characterName: string,
+    matchStrategy: CharacterReferenceMatchStrategy,
+  ): void {
+    const projectWithInputs = this.config.project as typeof this.config.project & {
+      inputs?: ProjectInput[];
+    };
+    const input = projectWithInputs.inputs?.find((candidate) => candidate.id === inputId);
+    if (!input) return;
+
+    input.metadata = {
+      ...input.metadata,
+      matchedCharacterId: characterId,
+      matchedCharacterName: characterName,
+      matchStrategy,
+    };
+  }
+
+  private upsertManifestAsset(asset: AssetInfo): void {
+    const manifestPath = join(this.config.projectDir, 'assets', 'manifest.json');
+    mkdirSync(dirname(manifestPath), { recursive: true });
+
+    let manifest: { assets: AssetInfo[] } = { assets: [] };
+    if (existsSync(manifestPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { assets?: AssetInfo[] };
+        if (Array.isArray(parsed.assets)) {
+          manifest = { assets: parsed.assets };
+        }
+      } catch {
+        manifest = { assets: [] };
+      }
+    }
+
+    const existingIndex = manifest.assets.findIndex((existing) => existing.id === asset.id);
+    if (existingIndex >= 0) {
+      manifest.assets[existingIndex] = asset;
+    } else {
+      manifest.assets.push(asset);
+    }
+
+    atomicWriteFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  }
+
+  private mirrorCharacterReferenceAssetToProject(
+    asset: AssetInfo,
+    characterId: string,
+    characterName: string,
+  ): void {
+    const project = this.config.project as typeof this.config.project & {
+      assets?: string[];
+      characters?: Array<Record<string, unknown>>;
+    };
+
+    if (!Array.isArray(project.assets)) project.assets = [];
+    if (!project.assets.includes(asset.id)) project.assets.push(asset.id);
+
+    if (!Array.isArray(project.characters)) project.characters = [];
+    let character = project.characters.find((entry) => {
+      const id = typeof entry['id'] === 'string' ? entry['id'] : undefined;
+      const name = typeof entry['name'] === 'string' ? entry['name'] : undefined;
+      return id === characterId || name === characterName || name === characterId;
+    });
+    if (!character) {
+      character = { id: characterId, name: characterName };
+      project.characters.push(character);
+    }
+
+    const referenceImage = {
+      path: asset.path,
+      createdAt: asset.createdAt,
+      ...(asset.metadata ? { metadata: asset.metadata } : {}),
+    };
+    character['id'] = typeof character['id'] === 'string' ? character['id'] : characterId;
+    character['name'] = typeof character['name'] === 'string' ? character['name'] : characterName;
+    character['referenceImage'] = referenceImage;
+    character['referenceImageId'] = asset.id;
+    character['referenceImagePath'] = asset.path;
   }
 
   /**

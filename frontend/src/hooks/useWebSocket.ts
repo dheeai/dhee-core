@@ -135,11 +135,25 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (!mountedRef.current) return
-      setStatus('disconnected')
-      wsRef.current = null
-      onDisconnectRef.current?.()
+      const isCurrentSocket = wsRef.current === ws
+      if (isCurrentSocket) {
+        setStatus('disconnected')
+        wsRef.current = null
+        onDisconnectRef.current?.()
+      }
+
+      // When another tab/window resumes the same session, the server
+      // intentionally closes this older socket. Reconnecting here makes
+      // duplicate tabs fight forever and spams "Replacing stale socket".
+      if (event.code === 1000 && event.reason === 'session_resumed_elsewhere') {
+        return
+      }
+
+      // If a newer socket already replaced this one inside this hook, this
+      // close event is stale and must not schedule another reconnect.
+      if (!isCurrentSocket) return
 
       // Exponential backoff reconnect
       if (retriesRef.current < maxRetries) {

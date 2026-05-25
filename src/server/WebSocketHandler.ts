@@ -60,6 +60,11 @@ import {
   desktopAssemblyBroker,
   type DesktopSessionCapabilities,
 } from '../core/remote/DesktopAssemblyBroker.js';
+import {
+  appendCharacterReferenceImagesToContent,
+  buildCharacterReferenceProjectInputs,
+  copyCharacterReferenceImagesToProject,
+} from './characterReferenceUploads.js';
 
 interface ConnectionState {
   socket: WebSocket;
@@ -797,19 +802,51 @@ export class WebSocketHandler {
       // Create the project on disk
       createProject(data.content, data.style, undefined, data.duration, data.templateId);
 
-      // Store resolution in project.json
-      if (data.resolution || data.resolutionWidth) {
-        const { join } = await import('path');
-        const { readFileSync } = await import('fs');
-        const { atomicWriteFileSync } = await import('../utils/atomicWrite.js');
-        const projFile = join(process.cwd(), projectDirName, 'project.json');
+      const { readFileSync } = await import('fs');
+      const { atomicWriteFileSync } = await import('../utils/atomicWrite.js');
+      const projectDir = join(process.cwd(), projectDirName);
+      const projFile = join(projectDir, 'project.json');
+      const copiedCharacterRefs = copyCharacterReferenceImagesToProject({
+        projectDir,
+        stagedUploads: data.characterReferenceImages,
+      });
+
+      if (copiedCharacterRefs.length > 0) {
+        const contentWithReferences = appendCharacterReferenceImagesToContent(
+          data.content,
+          copiedCharacterRefs,
+        );
+        atomicWriteFileSync(join(projectDir, 'original_input.md'), contentWithReferences);
+      }
+
+      // Store resolution and durable character-reference input metadata in project.json.
+      if (data.resolution || data.resolutionWidth || copiedCharacterRefs.length > 0) {
         try {
           const projData = JSON.parse(readFileSync(projFile, 'utf-8'));
+          let dirty = false;
+
           projData.resolution = data.resolution || '480p';
           projData.resolutionWidth = data.resolutionWidth || 848;
           projData.resolutionHeight = data.resolutionHeight || 480;
-          atomicWriteFileSync(projFile, JSON.stringify(projData, null, 2));
-        } catch { /* non-fatal */ }
+          dirty = true;
+
+          if (copiedCharacterRefs.length > 0) {
+            const existingInputs = Array.isArray(projData.inputs) ? projData.inputs : [];
+            projData.inputs = [
+              ...existingInputs,
+              ...buildCharacterReferenceProjectInputs(copiedCharacterRefs),
+            ];
+            projData.updatedAt = Date.now();
+            dirty = true;
+          }
+
+          if (dirty) {
+            atomicWriteFileSync(projFile, JSON.stringify(projData, null, 2));
+          }
+        } catch (err) {
+          if (copiedCharacterRefs.length > 0) throw err;
+          // Resolution persistence is non-fatal for older behavior.
+        }
       }
 
       // Configure the session agent for this project

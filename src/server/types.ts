@@ -344,6 +344,14 @@ export interface CreateProjectData {
   style: string;
   duration: number;
   content: string;
+  /** Staged character reference images uploaded with the initial prompt */
+  characterReferenceImages?: Array<{
+    name: string;
+    path: string;
+    url?: string;
+    mimeType?: string;
+    size?: number;
+  }>;
   /** Video resolution preset (e.g., '480p', '720p', '1080p', '4k') */
   resolution?: string;
   /** Video width in pixels */

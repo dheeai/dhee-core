@@ -7,7 +7,7 @@ import { Sidebar } from './components/Sidebar'
 import { Storyboard } from './components/Storyboard'
 import { ChatTimeline } from './components/ChatTimeline'
 import { TimelineView } from './components/TimelineView'
-import { TaskInput } from './components/TaskInput'
+import { TaskInput, type CharacterReferenceAttachment } from './components/TaskInput'
 import { WorkflowManager } from './components/WorkflowManager'
 import { ProviderSettings } from './components/ProviderSettings'
 import { ProjectSelector } from './components/ProjectSelector'
@@ -85,7 +85,7 @@ export function App() {
     setShowNewProject(true)
   }, [dispatch, send, state.agentStatus])
 
-  const handleSendTask = useCallback((task: string) => {
+  const handleSendTask = useCallback((task: string, characterReferenceImages?: CharacterReferenceAttachment[]) => {
     if (!task.trim()) return
 
     // If we have a pending project config, this message is the project description
@@ -119,6 +119,7 @@ export function App() {
           duration: config.duration,
           content: task,
           title: task.substring(0, 60),
+          ...(characterReferenceImages?.length ? { characterReferenceImages } : {}),
           resolution: '480p',
           resolutionWidth: 848,
           resolutionHeight: 480,
@@ -277,7 +278,11 @@ export function App() {
                     }}
                   />
                 )}
-                <TaskInput onSend={handleSendTask} placeholder={inputPlaceholder} />
+                <TaskInput
+                  onSend={handleSendTask}
+                  placeholder={inputPlaceholder}
+                  allowAttachments={!!pendingProject}
+                />
               </main>
             </div>
 

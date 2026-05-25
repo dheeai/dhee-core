@@ -141,6 +141,12 @@ export interface ProjectInput {
     addedAt: number;
     /** Timestamp when processing completed */
     processedAt?: number;
+    /** Character ID this reference image was bound to by the executor */
+    matchedCharacterId?: string;
+    /** Character display name this reference image was bound to by the executor */
+    matchedCharacterName?: string;
+    /** How the executor matched this reference to a character */
+    matchStrategy?: 'metadata' | 'filename' | 'ordered_fallback';
   };
 
   /** Processing results */
