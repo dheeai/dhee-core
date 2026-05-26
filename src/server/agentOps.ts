@@ -35,6 +35,8 @@ export interface StatusSummary {
   targetDuration?: number;
   inputType?: string;
   templateId?: string;
+  /** Which render method this project uses end-to-end. Defaults to 'shot_by_shot' when missing. */
+  renderMethod?: string;
   currentPhase?: string;
   totalNodes: number;
   counts: Omit<StatusCounts, 'total'>;
@@ -80,12 +82,17 @@ export function computeStatus(project: ProjectFile): StatusSummary {
 
    
   const { total: _total, ...counts } = overall;
+  const renderMethod =
+    typeof (project as { renderMethod?: unknown }).renderMethod === 'string'
+      ? ((project as { renderMethod?: string }).renderMethod ?? 'shot_by_shot')
+      : 'shot_by_shot';
   return {
     title: project.title,
     ...(project.style !== undefined ? { style: project.style } : {}),
     ...(project.targetDuration !== undefined ? { targetDuration: project.targetDuration } : {}),
     ...(project.inputType !== undefined ? { inputType: project.inputType } : {}),
     ...(project.templateId !== undefined ? { templateId: project.templateId } : {}),
+    renderMethod,
     ...(project.currentPhase !== undefined ? { currentPhase: project.currentPhase } : {}),
     totalNodes: overall.total,
     counts,

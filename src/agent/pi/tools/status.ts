@@ -30,6 +30,7 @@ function formatSummary(s: StatusSummary): string {
   if (s.targetDuration !== undefined) lines.push(`Target duration: ${s.targetDuration}s`);
   if (s.inputType) lines.push(`Input type: ${s.inputType}`);
   if (s.templateId) lines.push(`Template: ${s.templateId}`);
+  if (s.renderMethod) lines.push(`Render method: ${s.renderMethod}`);
   if (s.currentPhase) lines.push(`Current phase: ${s.currentPhase}`);
   lines.push(`Total nodes: ${s.totalNodes}`);
   lines.push(

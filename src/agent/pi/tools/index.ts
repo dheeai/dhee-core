@@ -6,6 +6,8 @@ import { dheeRunTo } from "./runTo.js";
 import { dheeInvalidate } from "./invalidate.js";
 import { dheeReadArtifact } from "./readArtifact.js";
 import { dheeDescribeImage } from "./describeImage.js";
+import { dheeGetRenderMethods } from "./getRenderMethods.js";
+import { dheeSetRenderMethod } from "./setRenderMethod.js";
 import { dheeTaskStatus } from "./taskStatus.js";
 import { dheeTaskCancel } from "./taskCancel.js";
 import {
@@ -33,6 +35,8 @@ export const dheeTools = [
   dheeInvalidate,
   dheeReadArtifact,
   dheeDescribeImage,
+  dheeGetRenderMethods,
+  dheeSetRenderMethod,
   dheeTaskStatus,
   dheeTaskCancel,
   dheeShowFirstFrame,
@@ -57,6 +61,8 @@ export {
   dheeInvalidate,
   dheeReadArtifact,
   dheeDescribeImage,
+  dheeGetRenderMethods,
+  dheeSetRenderMethod,
   dheeTaskStatus,
   dheeTaskCancel,
   dheeShowFirstFrame,
