@@ -6,6 +6,10 @@ import {
   CreateProjectError,
 } from "../../../server/runners/createProjectInProcess.js";
 import { getProjectsDir } from "../paths.js";
+import {
+  RENDER_METHOD_IDS,
+  resolveRenderMethod,
+} from "../../../core/project/renderMethods.js";
 
 const Params = Type.Object({
   name: Type.String({ description: "Project name (folder will be <name>.dhee)" }),
@@ -20,6 +24,12 @@ const Params = Type.Object({
   ),
   template: Type.Optional(
     Type.String({ description: "Template id, e.g. narrative, infographic" }),
+  ),
+  renderMethod: Type.Optional(
+    Type.String({
+      description:
+        "Render method this project will use end-to-end. Valid: 'shot_by_shot' (default — original per-shot FL2V pipeline), 'prompt_relay' (LTX Director relay; requires local Comfy). Persists as project.json `renderMethod` field and drives the project-level dispatcher.",
+    }),
   ),
   existingDir: Type.Optional(
     Type.String({
@@ -70,6 +80,14 @@ export const dheeNew = defineTool({
         "input is required — pass a story or idea via the input parameter.",
       );
     }
+    // Validate renderMethod if supplied — surface a clear error rather
+    // than silently falling back. Default (when absent) is shot_by_shot,
+    // applied inside createProjectInProcess.
+    if (params.renderMethod !== undefined && !resolveRenderMethod(params.renderMethod)) {
+      return failure(
+        `renderMethod '${params.renderMethod}' is not a valid method. Valid: ${RENDER_METHOD_IDS.join(", ")}.`,
+      );
+    }
 
     try {
       const result = createProjectInProcess({
@@ -79,14 +97,18 @@ export const dheeNew = defineTool({
         duration: params.duration,
         basePath: getProjectsDir(),
         ...(params.template ? { templateId: params.template } : {}),
+        ...(params.renderMethod ? { renderMethod: params.renderMethod } : {}),
         ...(params.existingDir ? { existingDir: params.existingDir } : {}),
       });
 
+      const resolvedMethod =
+        (result.project as { renderMethod?: string }).renderMethod ?? "shot_by_shot";
       const lines = [
         `Created project: ${params.name}.dhee`,
         `  Style:        ${result.resolvedStyle} (from ${params.style})`,
         `  Duration:     ${params.duration}s`,
         `  Template:     ${params.template ?? "narrative"}`,
+        `  Method:       ${resolvedMethod}`,
         `  Input type:   ${result.project.inputType}`,
         `  Initial phase: ${result.project.currentPhase}`,
       ];
