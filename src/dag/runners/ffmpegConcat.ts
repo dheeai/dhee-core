@@ -1,21 +1,32 @@
 /**
- * `ffmpeg.concat` runner — concatenates N input videos into one mp4.
+ * `ffmpeg.concat` runner — concatenates N input videos into one mp4 and
+ * applies the dhee.studio watermark overlay.
  *
- * v1 uses the ffmpeg concat demuxer (no re-encode), which is the
- * fastest possible concat path when all inputs share the same codec,
- * resolution, and frame rate. The LTX Director workflow produces
- * consistent outputs so this works. If we later mix backends (LTX +
- * seedance) the runner can fall back to filter-based concat with a
- * single re-encode pass.
+ * v1 strategy:
+ *   1. Concat sources with the ffmpeg concat demuxer (`-c copy`, no
+ *      re-encode) into a temp file. Fast when the sources already share
+ *      codec/resolution/fps (true for all LTX Director outputs in this
+ *      project).
+ *   2. If a watermark PNG is found via `resolveWatermarkPath` and the
+ *      override `dhee_WATERMARK=off` is not set, re-encode the temp
+ *      through the watermark overlay filter into the final output.
+ *      Otherwise rename the temp to the final.
  *
- * Degenerate case (1 input) is handled — we just copy the file to the
- * goal path so the bundle's final_video node always produces an
- * artifact at its declared output location.
+ * This restores the watermark presence on every assembled final video
+ * — the previous (stripped) FFmpegAssembler path applied it, and the
+ * v1 of this runner skipped it as a regression. Reuses the existing
+ * `resolveWatermarkPath` + `buildWatermarkOverlayFilter` helpers so the
+ * watermark sizing and placement stay identical (~9% of output height,
+ * bottom-right with 24px inset).
+ *
+ * Degenerate case (1 input + no watermark) is still a copy. Single
+ * input + watermark re-encodes once through the overlay filter.
  */
 import { existsSync, mkdirSync, copyFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { resolveWatermarkPath, buildWatermarkOverlayFilter } from '../../core/timeline/FFmpegAssembler.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 
 interface FfmpegConcatConfig {
@@ -33,6 +44,51 @@ function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
     proc.on('close', (code) => resolve({ ok: code === 0, stderr }));
     proc.on('error', (e) => resolve({ ok: false, stderr: `spawn failed: ${e.message}` }));
   });
+}
+
+function probeHeight(inputPath: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=height',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      inputPath,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    proc.stdout?.on('data', (d) => { out += d.toString(); });
+    proc.on('close', () => {
+      const h = parseInt(out.trim(), 10);
+      resolve(Number.isFinite(h) && h > 0 ? h : null);
+    });
+    proc.on('error', () => resolve(null));
+  });
+}
+
+async function applyWatermark(
+  ctx: RunnerContext,
+  inputPath: string,
+  outputPath: string,
+  watermarkPath: string,
+): Promise<{ ok: boolean; stderr?: string }> {
+  const height = (await probeHeight(inputPath)) ?? 720;
+  const filter = buildWatermarkOverlayFilter('0:v', 1, 'outv', height);
+  ctx.log(`ffmpeg.concat: applying dhee watermark (output ${height}p) → ${outputPath}`);
+  const result = await runFFmpeg([
+    '-y',
+    '-i', inputPath,
+    '-i', watermarkPath,
+    '-filter_complex', filter,
+    '-map', '[outv]',
+    '-map', '0:a?',          // pass-through audio if present
+    '-c:v', 'libx264',
+    '-preset', 'fast',
+    '-crf', '20',
+    '-c:a', 'copy',
+    '-movflags', '+faststart',
+    outputPath,
+  ]);
+  return result.ok ? { ok: true } : { ok: false, stderr: result.stderr };
 }
 
 async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
@@ -54,46 +110,76 @@ async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
   const outputAbs = join(ctx.projectDir, cfg.outputPath);
   mkdirSync(dirname(outputAbs), { recursive: true });
 
-  if (cfg.inputs.length === 1) {
-    ctx.log(`ffmpeg.concat: single input — copying to ${cfg.outputPath}`);
-    copyFileSync(cfg.inputs[0]!, outputAbs);
-    return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'copy', inputCount: 1 } };
+  // Watermark resolution — same precedence as the legacy assembler.
+  // dhee_WATERMARK=off disables; otherwise look for an asset.
+  const watermarkDisabled = process.env['dhee_WATERMARK'] === 'off';
+  const watermarkPath = watermarkDisabled ? null : resolveWatermarkPath();
+  if (!watermarkPath && !watermarkDisabled) {
+    ctx.log(`ffmpeg.concat: WARNING — no watermark asset found via resolveWatermarkPath (looked for assets/watermark_dhee.png, assets/watermark.png). Final video will ship un-branded.`);
   }
 
-  // N>1 — use concat demuxer (no re-encode).
+  // ── Single-input path ──
+  if (cfg.inputs.length === 1) {
+    if (!watermarkPath) {
+      ctx.log(`ffmpeg.concat: single input + no watermark — copying`);
+      copyFileSync(cfg.inputs[0]!, outputAbs);
+      return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'copy', inputCount: 1, watermarked: false } };
+    }
+    const wm = await applyWatermark(ctx, cfg.inputs[0]!, outputAbs, watermarkPath);
+    if (!wm.ok) return { ok: false, error: `ffmpeg.concat: watermark pass failed — ${(wm.stderr ?? '').slice(-500)}` };
+    return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'watermark_reencode', inputCount: 1, watermarked: true } };
+  }
+
+  // ── N-input path: concat demuxer → temp → optional watermark pass ──
   const listFile = join(tmpdir(), `dag_concat_${Date.now()}.txt`);
   const listContent = cfg.inputs.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
   writeFileSync(listFile, listContent);
 
-  ctx.log(`ffmpeg.concat: concatenating ${cfg.inputs.length} clips → ${cfg.outputPath}`);
-  const result = await runFFmpeg([
+  const concatTarget = watermarkPath ? `${outputAbs}.preview.tmp.mp4` : outputAbs;
+  ctx.log(`ffmpeg.concat: concatenating ${cfg.inputs.length} clips → ${watermarkPath ? '<temp>' : cfg.outputPath}`);
+  const concat = await runFFmpeg([
     '-y',
     '-f', 'concat',
     '-safe', '0',
     '-i', listFile,
     '-c', 'copy',
-    outputAbs,
+    concatTarget,
   ]);
 
   try { unlinkSync(listFile); } catch { /* ignore */ }
 
-  if (!result.ok) {
-    return { ok: false, error: `ffmpeg.concat: ffmpeg failed — ${result.stderr.slice(-500)}` };
+  if (!concat.ok) {
+    try { if (existsSync(concatTarget)) unlinkSync(concatTarget); } catch { /* ignore */ }
+    return { ok: false, error: `ffmpeg.concat: ffmpeg concat failed — ${concat.stderr.slice(-500)}` };
   }
 
+  if (!watermarkPath) {
+    return {
+      ok: true,
+      outputPath: cfg.outputPath,
+      metadata: { mode: 'concat_demuxer', inputCount: cfg.inputs.length, watermarked: false },
+    };
+  }
+
+  // Apply watermark in a second pass over the temp.
+  const wm = await applyWatermark(ctx, concatTarget, outputAbs, watermarkPath);
+  try { unlinkSync(concatTarget); } catch { /* ignore */ }
+  if (!wm.ok) {
+    return { ok: false, error: `ffmpeg.concat: watermark pass failed — ${(wm.stderr ?? '').slice(-500)}` };
+  }
   return {
     ok: true,
     outputPath: cfg.outputPath,
-    metadata: { mode: 'concat_demuxer', inputCount: cfg.inputs.length },
+    metadata: { mode: 'concat_demuxer+watermark', inputCount: cfg.inputs.length, watermarked: true },
   };
 }
 
 function describe(): RunnerDescription {
   return {
     id: 'ffmpeg.concat',
-    displayName: 'FFmpeg concat',
-    description: 'Concatenates N input videos into one mp4 using the ffmpeg concat demuxer (no re-encode).',
-    capabilities: ['video_concat'],
+    displayName: 'FFmpeg concat + watermark',
+    description: 'Concatenates N input videos into one mp4 (concat demuxer, no re-encode) and applies the dhee.studio watermark overlay in a second pass when an asset is present.',
+    capabilities: ['video_concat', 'video_watermark'],
     modalities: { input: ['video'], output: ['video'] },
     configSchema: {
       type: 'object',

@@ -107,6 +107,19 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   if (!cfg.workflowPath || !cfg.shots || !cfg.firstFrames || !cfg.globalPrompt) {
     return { ok: false, error: 'comfy.ltx_director: missing required config (workflowPath/shots/firstFrames/globalPrompt)' };
   }
+
+  // Resume short-circuit: if the chunk's output mp4 already exists on
+  // disk, skip the (expensive) Comfy call and return success with the
+  // existing path. This lets a re-run after a Comfy crash pick up from
+  // where it left off without re-rendering completed chunks. Not a
+  // content-addressed cache (no upstream-change detection) — just an
+  // "output exists → trust it" pragmatic skip. Override by deleting the
+  // mp4 file or by setting DAG_BUNDLE_FORCE_RERENDER=1.
+  const outputAbs = join(ctx.projectDir, cfg.outputPath);
+  if (existsSync(outputAbs) && !process.env['DAG_BUNDLE_FORCE_RERENDER']) {
+    ctx.log(`comfy.ltx_director: ${cfg.outputPath} already exists — skipping render (set DAG_BUNDLE_FORCE_RERENDER=1 to force)`);
+    return { ok: true, outputPath: cfg.outputPath, metadata: { skipped: true, reason: 'output_exists' } };
+  }
   if (cfg.shots.length !== cfg.firstFrames.length) {
     return { ok: false, error: `comfy.ltx_director: shots (${cfg.shots.length}) must equal firstFrames (${cfg.firstFrames.length})` };
   }
@@ -151,7 +164,6 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   const localPrompts = cfg.shots.map(buildLocalPrompt);
 
   // ── Comfy submission ──
-  const outputAbs = join(ctx.projectDir, cfg.outputPath);
   const outputDir = dirname(outputAbs);
   mkdirSync(outputDir, { recursive: true });
 

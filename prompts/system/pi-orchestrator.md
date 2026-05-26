@@ -153,8 +153,6 @@ X", you pass `"X"` (no extension, no path).
 - **dhee_read_artifact(project, path)** — read a file inside a
   project folder. Path is resolved against the project; reads
   outside the project are rejected.
-- **dhee_render_scene_bundle(project, scene)** — prompt-relay
-  scene render trigger. Stub — not yet wired.
 
 ## dhee_show_* tools — display generated artifacts
 

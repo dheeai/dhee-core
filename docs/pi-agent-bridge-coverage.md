@@ -42,7 +42,6 @@ ops, host integration, etc.).
 | `focusProject.ts` | `dhee_focus_project` | Invokes a host-supplied callback (Electron / TUI). Bridge target is the **host**, not ExecutorAgent. **Tested in `tests/unit/focusProjectTool.test.ts`**. |
 | `newProject.ts` | `dhee_new` | Creates a project folder + bootstrap `project.json`. **Ported in-process; tested in `tests/unit/createProjectInProcess.test.ts` + `newProjectTool.test.ts`**. |
 | `readArtifact.ts` | `dhee_read_artifact` | Reads a file from inside a project dir; rejects path traversal. **Tested in `tests/unit/piAgentReadTools.test.ts`**. |
-| `renderSceneBundle.ts` | `dhee_render_scene_bundle` | Placeholder — NOT YET IMPLEMENTED. |
 | `reset.ts` | `dhee_reset` | Clears project state from a given stage onwards. Mutates `project.json` in place; no executor invocation. **Ported in-process; tested in `tests/unit/resetProjectStage.test.ts` + `resetTool.test.ts`**. |
 | `showAsset.ts` | `dhee_show_first_frame` / etc | Reads manifest entries and emits media events directly. Tested in `tests/unit/showAssetFromSchema.test.ts` + `showAssetTools.test.ts`. |
 | `showShot.ts` | `dhee_show_shot` | Same as `showAsset` — manifest-only. Tested in `tests/unit/showShotTool.test.ts`. |
