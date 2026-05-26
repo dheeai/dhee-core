@@ -32,6 +32,7 @@ import {
   type RenderMethod,
 } from '../../core/project/renderMethods.js';
 import type { GenericProjectFile } from '../../core/templates/types.js';
+import { REPO_ROOT } from '../../agent/pi/paths.js';
 
 export interface RunProjectOpts {
   projectDir: string;
@@ -156,8 +157,13 @@ export async function runProjectInProcess(opts: RunProjectOpts): Promise<RunProj
     }
 
     // Load bundle. v1: pinned to ltx_prompt_relay unless caller overrides.
+    // Resolve against the kshana-core package root (REPO_ROOT) — NOT
+    // process.cwd(). When kshana-core is loaded as a library by a host
+    // (desktop Electron, packaged CLI), cwd is the host's working dir,
+    // not kshana-core's source root. Using cwd silently fails ENOENT
+    // and the dispatcher returns "ok:false" with a confusing error.
     const bundleId = opts.bundleId ?? 'ltx_prompt_relay';
-    const bundlePath = resolve(process.cwd(), `src/dag/bundles/${bundleId}.json`);
+    const bundlePath = resolve(REPO_ROOT, `src/dag/bundles/${bundleId}.json`);
     const bundle = loadBundle(bundlePath);
 
     log(`runProjectInProcess: dispatching bundle '${bundle.id}' v${bundle.version} on scenes ${sceneIds.join(', ')}`);

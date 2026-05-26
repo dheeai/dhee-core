@@ -67,3 +67,6 @@ workflows/user/
 
 # Packed release artifacts
 *.tgz
+
+# Certum code-signing evidence (contains personal info)
+.certum/

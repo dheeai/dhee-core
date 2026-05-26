@@ -17,6 +17,7 @@ import { resolve } from 'node:path';
 import type { DagBundle, NodeDef, RunnerContext, RunnerResult } from './schema.js';
 import { getRunner } from './runners/index.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
+import { REPO_ROOT } from '../agent/pi/paths.js';
 
 export interface WalkerCliParams {
   /** Which scene(s) to render. */
@@ -172,10 +173,14 @@ function buildRunnerConfig(
     base['shots'] = resolved.shots;
     base['firstFrames'] = resolved.firstFrames;
     base['globalPrompt'] = resolved.globalPrompt;
-    // workflowPath may already be in config; resolve relative paths.
+    // workflowPath may already be in config; resolve relative paths
+    // against the kshana-core package root (NOT process.cwd()), so the
+    // bundle resolves correctly when kshana-core is loaded as a library
+    // by a host process (desktop Electron, packaged CLI) whose cwd is
+    // unrelated to where the workflow JSONs ship.
     const wfRaw = (base['workflowPath'] as string | undefined) ?? '';
     if (wfRaw && !wfRaw.startsWith('/')) {
-      base['workflowPath'] = resolve(process.cwd(), wfRaw);
+      base['workflowPath'] = resolve(REPO_ROOT, wfRaw);
     }
   } else if (node.runner.tool === 'ffmpeg.concat') {
     // Inputs come from upstream node outputs. Walk node.inputs and

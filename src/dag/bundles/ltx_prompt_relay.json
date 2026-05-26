@@ -22,7 +22,7 @@
       "runner": {
         "tool": "comfy.ltx_director",
         "config": {
-          "workflowPath": "workflows/built-in/ltx23_director_local.json",
+          "workflowPath": "workflows/built-in/ltx23_director_chain_local.json",
           "endpoint": "self.local",
           "fps": 24,
           "width": 854,
