@@ -54,13 +54,6 @@ export interface ExecuteShotImageLastFrameDeps {
    * whose source artifacts haven't been generated yet.
    */
   resolveRefIds(refs: FrameReference[]): string[];
-  /**
-   * In prompt_relay mode, the assembler renders entire scenes as one
-   * mp4 from per-segment first_frames only — last_frames are wasted
-   * image-gen budget. The bridge node should complete as a no-op so
-   * downstream `shot_video` can still proceed.
-   */
-  isPromptRelayMode(): boolean;
   log?(message: string): void;
 }
 
@@ -114,14 +107,6 @@ export async function executeShotImageLastFrame(
   }
   const itemId = node.itemId;
   const log = deps.log ?? (() => {});
-
-  // prompt_relay → no-op complete. The relay renders whole scenes as
-  // single mp4s using only per-segment first_frames, so generating a
-  // last_frame here would burn image budget for nothing.
-  if (deps.isPromptRelayMode()) {
-    log(`shot_image_last_frame:${itemId}: prompt_relay mode — completing as no-op`);
-    return { action: 'complete' };
-  }
 
   const upstreamId = `shot_image:${itemId}`;
   const upstream = deps.executor.getNode(upstreamId);

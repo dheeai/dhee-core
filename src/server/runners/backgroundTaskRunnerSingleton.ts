@@ -192,7 +192,6 @@ export function getBackgroundTaskRunner(): BackgroundTaskRunner {
           await executeRunTo(ctx);
           return;
         case 'regen':
-        case 'render_scene_bundle':
         case 'audit_fidelity':
           throw new Error(
             `Background task kind '${ctx.spec.kind}' is not yet wired to an executor.`,

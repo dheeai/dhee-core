@@ -2,8 +2,7 @@
  * Single-slot background task runner.
  *
  * Long-ish dhee operations (dhee_run_to, dhee_regen,
- * dhee_render_scene_bundle, dhee_audit_fidelity) take anywhere
- * from seconds to hours. If the agent dispatches them as ordinary
+ * dhee_audit_fidelity) take anywhere from seconds to hours. If the agent dispatches them as ordinary
  * blocking tool calls, the chat session is starved while the work
  * runs. This runner detaches them: dispatch returns instantly with
  * a task id, the actual execution happens off the agent's tool-call
@@ -35,7 +34,7 @@
 
 import { EventEmitter } from 'node:events';
 
-export type TaskKind = 'run_to' | 'regen' | 'render_scene_bundle' | 'audit_fidelity';
+export type TaskKind = 'run_to' | 'regen' | 'audit_fidelity';
 
 export type TaskStatus =
   | 'pending'

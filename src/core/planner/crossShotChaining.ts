@@ -81,7 +81,7 @@ export function getLastFramePath(node: ExecutionNode): string | null {
 
   // Multi-frame mode: outputPaths is the source of truth. Never silently
   // fall back to outputPath, which would copy the first frame as if it were
-  // the last frame (the silent-wrong-frame bug from Ruby V3 / prompt_relay).
+  // the last frame (the silent-wrong-frame bug from Ruby V3).
   if (node.outputPaths !== undefined) {
     return node.outputPaths['last_frame'] ?? null;
   }

@@ -180,7 +180,7 @@ export class PiSessionAgent extends TypedEventEmitter {
     systemPrompt?: string;
     /**
      * Session role. `'interactive'` strips long-running pipeline tools
-     * (dhee_run_to, dhee_render_scene_bundle, dhee_audit_fidelity)
+     * (dhee_run_to, dhee_audit_fidelity)
      * so a chat session can't be hijacked by a 1–4h blocking task.
      * `'background'` is the dedicated long-run session; it sees the
      * full toolkit. Defaults to `'interactive'` — the safer choice

@@ -131,11 +131,6 @@ import {
 } from './continuityValidator.js';
 import { getProviderRegistry } from '../../services/providers/index.js';
 import { getWorkflowModeRegistry } from '../../services/providers/WorkflowModeRegistry.js';
-import { shouldGenerateExtraFrame, isPromptRelayMode } from '../../services/providers/videoStrategy.js';
-import type { SceneBundleShot, SceneBundleResult } from './sceneBundleRenderer.js';
-import type { CharacterId } from '../../services/providers/promptRelayGlobalPrompt.js';
-import { SceneBundleLockMap } from './sceneBundleLockMap.js';
-import { checkSceneBundleEligibility } from './sceneBundleEligibility.js';
 import { addAsset } from '../../tasks/video/workflow/index.js';
 import { captureFinalVideoCreated } from '../../server/posthog.js';
 
@@ -364,20 +359,6 @@ export class ExecutorAgent extends TypedEventEmitter {
   }
   /** Pending media generation promises (parallel mode) */
   private pendingMedia = new Map<string, Promise<string | null>>();
-  /** prompt_relay mode: shot_video nodes for the same scene share one
-   *  bundle-rendering pass. Lock value is a Map<shotNumber, path>
-   *  because long scenes split into multiple chunks — different shots
-   *  in the same scene may resolve to different bundle files. First
-   *  arrival fires the render; later arrivals await the same promise.
-   *  On null/throw the lock clears so the next caller retries (handles
-   *  the race where shot_video fires before sibling shot_images are
-   *  ready). */
-  private sceneBundleLocks = new SceneBundleLockMap<Map<number, string>>();
-  /** prompt_relay: scenes we've already determined cannot be rendered
-   *  as a bundle (e.g. > 20 shots, > 1000 frames). These never retry —
-   *  the cap is structural, not transient. Subsequent shot_videos for
-   *  the scene skip the relay path entirely and go per-shot. */
-  private unbundleableScenes = new Set<number>();
   /** Timeline state — populated during execution, saved to timeline.json */
   private timeline: Timeline | null = null;
   /** Tracks how many times a dependency was regenerated for a given parent node (loop protection) */
@@ -2948,7 +2929,6 @@ export class ExecutorAgent extends TypedEventEmitter {
                 editImageLayered: ({ prompt, sourceImagePath, refPaths, outputDir, filenamePrefix }) =>
                   this.editImageLayered(prompt, sourceImagePath, refPaths, outputDir, filenamePrefix),
                 resolveRefIds: (refs) => this.resolveRefIds(refs),
-                isPromptRelayMode: () => isPromptRelayMode(),
                 log: (m) => this.log(`  ${m}`),
               });
 
@@ -2998,7 +2978,7 @@ export class ExecutorAgent extends TypedEventEmitter {
                   });
                 } catch { /* non-fatal */ }
               } else {
-                // No-op complete (prompt_relay or single-frame shot).
+                // No-op complete (single-frame shot).
                 this.emit({
                   type: 'tool_result',
                   toolCallId: lfCallId,
@@ -7412,22 +7392,14 @@ Examples of common failure modes to avoid:
         if (!firstFramePath) return null;
       }
 
-      // Generate additional frames. In prompt_relay mode (default),
-      // last/mid frames are skipped — the relay renders the whole scene
-      // as one mp4 driven only by per-segment first_frames, so any
-      // extra frames burn image-gen budget for nothing.
+      // Generate additional frames.
       //
       // Pattern B Phase 2: `last_frame` is excluded here — it lives on
       // the dedicated `shot_image_last_frame:X` node now (see
       // executeShotImageLastFrame.ts). `executeShotImage` only
       // produces `first_frame` (and `mid_frame` when present).
       const additionalFrames = Object.keys(parsedJson.frames)
-        .filter(k => k !== 'first_frame' && k !== 'last_frame')
-        .filter(k => shouldGenerateExtraFrame(k));
-      if (isPromptRelayMode() && additionalFrames.length === 0) {
-        const skipped = Object.keys(parsedJson.frames).filter(k => k !== 'first_frame');
-        if (skipped.length > 0) this.log(`  prompt_relay mode: skipping extra frames ${skipped.join(', ')}`);
-      }
+        .filter(k => k !== 'first_frame' && k !== 'last_frame');
       if (additionalFrames.length > 0) {
         node.outputPaths = { ...node.outputPaths, first_frame: firstFramePath };
 
@@ -7552,9 +7524,8 @@ Examples of common failure modes to avoid:
             // mirror never populates. Pinned by
             // tests/unit/addAssetDualWrite.test.ts under
             // "scene_image with nodeId but NO frame → scenes stays empty".
-            // The narrow cast is safe: additionalFrames is filtered
-            // through `shouldGenerateExtraFrame` which only admits the
-            // three known frame keys.
+            // The narrow cast is safe: additionalFrames only contains
+            // the three known frame keys (filtered by name above).
             const narrowFrame =
               frameId === 'first_frame' || frameId === 'last_frame' || frameId === 'mid_frame'
                 ? frameId
@@ -7597,7 +7568,7 @@ Examples of common failure modes to avoid:
       if (mode) {
         const frameInputs = mode.inputRequirements.filter(
           r => r.type === 'image' && r.source === 'shot_image' && r.id !== 'first_frame'
-        ).filter(r => shouldGenerateExtraFrame(r.id));
+        );
 
         if (frameInputs.length > 0) {
           node.outputPaths = { first_frame: firstFramePath };
@@ -8141,20 +8112,6 @@ Examples of common failure modes to avoid:
   ): Promise<string | null> {
     const agentName = this.config.name ?? 'dhee-executor';
 
-    // ── prompt_relay mode: render the whole scene as one bundle mp4
-    // and return that path for every shot in the scene. The render
-    // fires once; concurrent shot_video nodes for the same scene
-    // share the in-flight promise via sceneBundleLocks. The
-    // assembler-side dedupe (collapseBundleSegments) collapses the N
-    // identical timeline segments back to one concat input.
-    if (isPromptRelayMode()) {
-      const bundlePath = await this.renderOrAwaitSceneBundle(node, toolCallId, agentName);
-      if (bundlePath) return bundlePath;
-      // Fallthrough to per-shot if bundle render failed — better to
-      // limp than to drop the scene.
-      this.log(`  prompt_relay bundle render failed; falling back to per-shot for ${node.id}`);
-    }
-
     // 1. Find the MATCHING shot image (same itemId)
     let shotImagePath: string | undefined;
     const matchingImageId = `shot_image:${node.itemId}`;
@@ -8472,271 +8429,6 @@ Examples of common failure modes to avoid:
     }
   }
 
-  /**
-   * prompt_relay mode: render the scene as one or more bundle mp4s.
-   * The first shot_video for a scene to arrive fires the render(s);
-   * concurrent shot_videos for the same scene await the same
-   * in-flight promise (sceneBundleLocks). Long scenes that exceed
-   * the LTX caps (>20 shots or >1000 frames) are split into multiple
-   * chunks via chunkSceneIntoBundles; each chunk is rendered as its
-   * own scene_video asset with metadata.coversShots listing which
-   * shots it covers. The FFmpegAssembler's tier-3.5 fallback uses
-   * coversShots to pick the right chunk per shot.
-   */
-  private async renderOrAwaitSceneBundle(
-    node: ExecutionNode,
-    _toolCallId: string,
-    agentName: string,
-  ): Promise<string | null> {
-    const sceneMatch = node.itemId?.match(/scene_(\d+)/);
-    const shotMatch = node.itemId?.match(/shot_(\d+)$/);
-    if (!sceneMatch || !shotMatch) {
-      this.log(`  prompt_relay: cannot parse scene/shot from ${node.itemId}`);
-      return null;
-    }
-    const sceneNum = parseInt(sceneMatch[1]!, 10);
-    const shotNum = parseInt(shotMatch[1]!, 10);
-    if (this.unbundleableScenes.has(sceneNum)) {
-      return null;
-    }
-    const chunkMap = await this.sceneBundleLocks.acquire(sceneNum, () => this.executeSceneBundle(sceneNum, agentName));
-    if (!chunkMap) return null;
-    return chunkMap.get(shotNum) ?? null;
-  }
-
-  /** Gather all shots, split into chunks, render each. Returns a map
-   *  shotNumber → bundle relative path (the chunk covering that shot). */
-  private async executeSceneBundle(sceneNum: number, agentName: string): Promise<Map<number, string> | null> {
-    const { renderSceneBundle } = await import('./sceneBundleRenderer.js');
-    const { chunkSceneIntoBundles } = await import('./sceneBundleChunker.js');
-    void agentName;
-
-    // 1. Find all shot_video nodes for this scene, ordered by shot number
-    const allNodes = this.executor.getAllNodes();
-    const sceneShotNodes = allNodes
-      .filter(n => n.typeId === 'shot_video' && n.itemId?.startsWith(`scene_${sceneNum}_shot_`))
-      .map(n => {
-        const m = n.itemId?.match(/shot_(\d+)$/);
-        const shotNumber = m?.[1] ? parseInt(m[1], 10) : 0;
-        return { node: n, shotNumber };
-      })
-      .filter(x => x.shotNumber > 0)
-      .sort((a, b) => a.shotNumber - b.shotNumber);
-
-    if (sceneShotNodes.length === 0) {
-      this.log(`  prompt_relay: scene ${sceneNum} has no shot_video nodes`);
-      return null;
-    }
-
-    // 2. For each shot: first_frame path, motion prompt, duration
-    const shots: SceneBundleShot[] = [];
-    let svpJson: { shots?: Array<{ shotNumber?: number; duration?: number; description?: string }> } | null = null;
-    const svpNode = this.executor.getNode(`scene_video_prompt:scene_${sceneNum}`);
-    if (svpNode?.outputPath) {
-      try {
-        let c = readFileSync(join(this.config.projectDir, svpNode.outputPath), 'utf-8').trim();
-        if (c.startsWith('```')) c = c.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-        svpJson = JSON.parse(c);
-      } catch { /* ignore */ }
-    }
-
-    for (const { node, shotNumber } of sceneShotNodes) {
-      // first_frame from shot_image node
-      const imgNode = this.executor.getNode(`shot_image:${node.itemId}`);
-      const firstFrameRel = imgNode?.outputPaths?.['first_frame'] ?? imgNode?.outputPath;
-      if (!firstFrameRel) {
-        this.log(`  prompt_relay: scene ${sceneNum} shot ${shotNumber} has no first_frame yet — bundle waits`);
-        return null;
-      }
-      const firstFrameAbs = join(this.config.projectDir, firstFrameRel);
-      if (!existsSync(firstFrameAbs)) {
-        this.log(`  prompt_relay: first_frame missing on disk for scene ${sceneNum} shot ${shotNumber}: ${firstFrameAbs}`);
-        return null;
-      }
-
-      // motion prompt
-      let motionPrompt = '';
-      const mdNode = this.executor.getNode(`shot_motion_directive:${node.itemId}`);
-      if (mdNode?.outputPath) {
-        try {
-          let raw = readFileSync(join(this.config.projectDir, mdNode.outputPath), 'utf-8').trim();
-          if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-          try {
-            const parsed = JSON.parse(raw);
-            motionPrompt = (typeof parsed?.motionDirective === 'string' ? parsed.motionDirective : raw).trim();
-          } catch {
-            motionPrompt = raw;
-          }
-        } catch { /* ignore */ }
-      }
-      if (!motionPrompt) motionPrompt = `Cinematic shot, scene ${sceneNum} shot ${shotNumber}.`;
-
-      // duration from scene_video_prompt
-      const shotMeta = svpJson?.shots?.find(s => s.shotNumber === shotNumber);
-      const duration = typeof shotMeta?.duration === 'number' && shotMeta.duration > 0 ? shotMeta.duration : 5;
-
-      shots.push({ shotNumber, firstFramePath: firstFrameAbs, motionPrompt, duration });
-    }
-
-    // 3. Split into chunks that fit LTX caps. The chunker honors both
-    // 20-shot and 1000-frame caps, re-aligning frame counts per chunk
-    // (each chunk's first segment gets +1 to keep the chunk's total
-    // ≡ 1 mod 8). Single-bundle scenes return one chunk; long scenes
-    // return multiple chunks rendered one after another.
-    const chunks = chunkSceneIntoBundles(
-      shots.map(s => ({ shotNumber: s.shotNumber, durationSec: s.duration })),
-      24,
-    );
-    if (chunks.length === 0) return null;
-
-    // Defensive: confirm every chunk passed eligibility. The chunker
-    // is supposed to guarantee this, but if a single shot is so long
-    // that even alone it exceeds 1000 frames, we land here. Mark the
-    // scene unbundleable rather than submit a doomed render.
-    for (const chunk of chunks) {
-      const elig = checkSceneBundleEligibility({ shotCount: chunk.shots.length, totalFrames: chunk.totalFrames });
-      if (!elig.eligible) {
-        this.log(`  prompt_relay: scene ${sceneNum} chunk ${chunk.chunkIndex} ineligible — ${elig.reason}`);
-        if (elig.permanent) {
-          this.log(`  prompt_relay: marking scene ${sceneNum} unbundleable; falling back to per-shot`);
-          this.unbundleableScenes.add(sceneNum);
-        }
-        return null;
-      }
-    }
-
-    // 4. Render each chunk serially. Per-chunk output filename
-    // includes _chunk${index} so chunks for the same scene don't
-    // collide on disk.
-    const characters = this.collectCharacterIdentities();
-    const sceneDescription = this.collectSceneDescription(sceneNum, svpJson);
-    const width = this.config.project.resolutionWidth ?? 848;
-    const height = this.config.project.resolutionHeight ?? 480;
-    const style = (this.config.project as { style?: string }).style || 'cinematic';
-
-    this.log(`  prompt_relay: scene ${sceneNum} rendering ${shots.length} shots in ${chunks.length} chunk(s)`);
-
-    const chunkPathByShot = new Map<number, string>();
-
-    for (const chunk of chunks) {
-      // Map the chunker's shot list back to SceneBundleShot (carries
-      // the first_frame/motion data we already gathered).
-      const chunkShots: SceneBundleShot[] = chunk.shots
-        .map(c => shots.find(s => s.shotNumber === c.shotNumber))
-        .filter((s): s is SceneBundleShot => !!s);
-      if (chunkShots.length !== chunk.shots.length) {
-        this.log(`  prompt_relay: scene ${sceneNum} chunk ${chunk.chunkIndex} missing shot data — abort`);
-        return null;
-      }
-
-      this.log(`  prompt_relay: scene ${sceneNum} chunk ${chunk.chunkIndex + 1}/${chunks.length} (${chunkShots.length} shots, ${chunk.totalFrames} frames, ~${Math.round(chunk.totalFrames * 1.4 / 60)}min expected)`);
-      // Throttled progress logging so the user can see the chunk
-      // render is alive during its 10-25 minute window. Without this,
-      // executor.log goes silent between "uploaded N first frames"
-      // and the eventual completion — easy to mistake for a hang.
-      let lastProgressLog = 0;
-      const renderStart = Date.now();
-      const onProgress = (pct: number, msg: string) => {
-        const now = Date.now();
-        if (now - lastProgressLog < 15000) return;  // throttle to every 15s
-        lastProgressLog = now;
-        const elapsedSec = Math.round((now - renderStart) / 1000);
-        this.log(`  prompt_relay: scene ${sceneNum} chunk ${chunk.chunkIndex} [${pct.toFixed(0)}% / ${elapsedSec}s elapsed] ${msg}`);
-      };
-      let result: SceneBundleResult;
-      try {
-        result = await renderSceneBundle({
-          sceneNumber: sceneNum,
-          shots: chunkShots,
-          characters,
-          sceneDescription,
-          style,
-          projectDir: this.config.projectDir,
-          width,
-          height,
-          log: (m) => this.log(`  prompt_relay: ${m}`),
-          onProgress,
-          chunkIndex: chunks.length > 1 ? chunk.chunkIndex : undefined,
-        });
-      } catch (err) {
-        this.log(`  prompt_relay: scene ${sceneNum} chunk ${chunk.chunkIndex} render threw: ${String(err)}`);
-        return null;
-      }
-
-      try {
-        addAsset({
-          id: `scenebundle_${sceneNum}_chunk${chunk.chunkIndex}_${Date.now()}`,
-          type: 'scene_video',
-          path: result.bundleRelativePath,
-          createdAt: Date.now(),
-          metadata: {
-            sceneNumber: sceneNum,
-            isBundle: true,
-            coversShots: chunkShots.map(s => s.shotNumber),
-            chunkIndex: chunk.chunkIndex,
-            totalChunks: chunks.length,
-            generationStrategy: 'prompt_relay',
-            totalFrames: result.totalFrames,
-            segmentFrames: result.segmentFrames,
-            promptId: result.promptId,
-          },
-        });
-      } catch { /* non-fatal */ }
-
-      for (const s of chunkShots) {
-        chunkPathByShot.set(s.shotNumber, result.bundleRelativePath);
-      }
-      this.log(`  prompt_relay: scene ${sceneNum} chunk ${chunk.chunkIndex} saved → ${result.bundleRelativePath}`);
-    }
-
-    return chunkPathByShot;
-  }
-
-  /** Read each character's "Physical Description" from characters/*.md
-   *  for the global-prompt builder. Conservative — only files listed
-   *  on the project's content registry, deduped by name. */
-  private collectCharacterIdentities(): CharacterId[] {
-    const out: CharacterId[] = [];
-    const items = (this.config.project as unknown as { content?: { characters?: { items?: string[]; itemFiles?: Record<string, string> } } }).content?.characters;
-    const itemFiles = items?.itemFiles ?? {};
-    const seen = new Set<string>();
-    for (const name of items?.items ?? []) {
-      const key = name.trim().toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      const rel = itemFiles[name];
-      if (!rel) continue;
-      const abs = join(this.config.projectDir, rel);
-      if (!existsSync(abs)) continue;
-      try {
-        const md = readFileSync(abs, 'utf-8');
-        const m = md.match(/###\s*Physical Description\s*\n([\s\S]+?)(?:\n###|\n---|$)/i);
-        if (m) {
-          out.push({ name, description: m[1]!.replace(/\s+/g, ' ').trim() });
-        }
-      } catch { /* ignore */ }
-    }
-    return out;
-  }
-
-  /** Pull a brief, visual description for a scene from
-   *  prompts/scene_summaries.json or the SVP JSON, kept short to avoid
-   *  drowning the per-segment local prompts. */
-  private collectSceneDescription(
-    sceneNum: number,
-    svpJson: { shots?: Array<{ description?: string }> } | null,
-  ): string {
-    const summariesPath = join(this.config.projectDir, 'prompts/scene_summaries.json');
-    if (existsSync(summariesPath)) {
-      try {
-        const all = JSON.parse(readFileSync(summariesPath, 'utf-8')) as Record<string, string>;
-        const s = all[`scene_${sceneNum}`];
-        if (typeof s === 'string' && s.trim().length > 0) return s.trim();
-      } catch { /* ignore */ }
-    }
-    // Fall back to first shot's description
-    return svpJson?.shots?.[0]?.description?.trim() ?? '';
-  }
 
   /**
    * Run the focused story-essence LLM call and persist the result.

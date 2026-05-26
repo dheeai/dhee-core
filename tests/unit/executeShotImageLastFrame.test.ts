@@ -62,7 +62,6 @@ interface BuildArgs {
   upstreamFirstFrame?: string;
   upstreamFrames?: Record<string, string>;
   promptJson?: string | null;
-  promptRelay?: boolean;
   resolveRefIds?: (refs: Array<{ refId?: string; type?: string }>) => string[];
   editImageLayered?: ExecuteShotImageLastFrameDeps['editImageLayered'];
   preExistingOutputPath?: string;
@@ -124,7 +123,6 @@ function build(args: BuildArgs = {}) {
     fs,
     editImageLayered,
     resolveRefIds: args.resolveRefIds ?? ((refs) => refs.map((r) => `/refs/${r.refId}.png`)),
-    isPromptRelayMode: () => args.promptRelay === true,
   };
 
   return { deps, lastFrame, upstream, promptNode, fs, editImageLayered };
@@ -202,23 +200,6 @@ describe('executeShotImageLastFrame (Phase 2 — bridge node owns the artifact)'
       '/refs/character:cowboy.png',
       '/refs/setting:desert.png',
     ]);
-  });
-
-  it('completes as a no-op (no edit call) when prompt_relay mode is on', async () => {
-    const { deps, editImageLayered, lastFrame } = build({
-      upstreamFrames: { first_frame: 'assets/images/ff.png' },
-      promptJson: STANDARD_PROMPT_JSON,
-      promptRelay: true,
-    });
-
-    const result = await executeShotImageLastFrame(lastFrame, deps);
-
-    expect(result.action).toBe('complete');
-    if (result.action === 'complete') {
-      expect(result.outputPath).toBeUndefined();
-    }
-    expect(editImageLayered).not.toHaveBeenCalled();
-    expect(lastFrame.outputPath).toBeUndefined();
   });
 
   it('completes as a no-op when the prompt JSON has no last_frame block', async () => {

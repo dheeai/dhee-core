@@ -115,10 +115,10 @@ describe('Cross-shot chaining: dependency wiring', () => {
     expect(getLastFramePath(node as any)).toBeNull();
   });
 
-  // Bug 8a / 11: silent first_frame fallback when last_frame node didn't render
-  // (prompt_relay default + first-frame-only producer). The node has outputPaths
-  // populated with first_frame but no last_frame — must NOT silently fall back
-  // to outputPath, because outputPath in that case IS the first frame.
+  // Bug 8a / 11: silent first_frame fallback when last_frame node didn't render.
+  // The node has outputPaths populated with first_frame but no last_frame — must
+  // NOT silently fall back to outputPath, because outputPath in that case IS the
+  // first frame.
   it('getLastFramePath returns null when outputPaths has first_frame but no last_frame', async () => {
     const { getLastFramePath } = await import('../../src/core/planner/crossShotChaining.js');
 
@@ -128,7 +128,7 @@ describe('Cross-shot chaining: dependency wiring', () => {
       outputPath: 'assets/images/shots/scene_1_shot_1_first.png',
       outputPaths: {
         first_frame: 'assets/images/shots/scene_1_shot_1_first.png',
-        // last_frame deliberately absent — prompt_relay no-op
+        // last_frame deliberately absent
       },
     };
 

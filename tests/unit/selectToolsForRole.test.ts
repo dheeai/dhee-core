@@ -5,7 +5,6 @@ const fixtureTools = [
   { name: 'dhee_status' },
   { name: 'dhee_list_items' },
   { name: 'dhee_run_to' },
-  { name: 'dhee_render_scene_bundle' },
   { name: 'dhee_audit_fidelity' },
   { name: 'dhee_regen' },
   { name: 'dhee_read_artifact' },
