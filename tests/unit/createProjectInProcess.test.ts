@@ -83,6 +83,56 @@ describe('createProjectInProcess', () => {
     expect(inputContents).toBe('A noir detective in 1940s Los Angeles.');
   });
 
+  it('stores project-local character references in original_input.md and project.inputs', () => {
+    const projectDir = join(basePath, 'with-ref.dhee');
+    mkdirSync(join(projectDir, 'assets/uploads/characters'), { recursive: true });
+    writeFileSync(join(projectDir, 'assets/uploads/characters/hero.png'), 'hero');
+
+    const result = createProjectInProcess({
+      name: 'with-ref',
+      input: 'A hero returns to town.',
+      style: 'live',
+      duration: 60,
+      basePath,
+      existingDir: projectDir,
+      characterReferenceImages: [{
+        name: 'hero.png',
+        relativePath: 'assets/uploads/characters/hero.png',
+        sourcePath: '/Users/me/Desktop/Hero.png',
+        originalFilename: 'Hero.png',
+        mimeType: 'image/png',
+        size: 4,
+      }],
+    });
+
+    expect(readFileSync(join(projectDir, 'original_input.md'), 'utf8')).toBe(
+      'A hero returns to town.\n\nAttached character reference images:\n- hero.png: assets/uploads/characters/hero.png',
+    );
+
+    const raw = readFileSync(join(result.projectDir, 'project.json'), 'utf8');
+    const project = JSON.parse(raw) as {
+      inputs?: Array<{
+        source: { value: string; originalValue?: string };
+        mediaType: string;
+        purpose: string;
+        metadata: { originalFilename?: string };
+      }>;
+    };
+    expect(project.inputs).toEqual([
+      expect.objectContaining({
+        source: expect.objectContaining({
+          value: 'assets/uploads/characters/hero.png',
+          originalValue: '/Users/me/Desktop/Hero.png',
+        }),
+        mediaType: 'image',
+        purpose: 'character_ref',
+        metadata: expect.objectContaining({
+          originalFilename: 'Hero.png',
+        }),
+      }),
+    ]);
+  });
+
   it('writes project.json with the requested style + duration + name as title', () => {
     const result = createProjectInProcess({
       name: 'fight-scene',

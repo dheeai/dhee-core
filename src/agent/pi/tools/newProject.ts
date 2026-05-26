@@ -27,6 +27,31 @@ const Params = Type.Object({
         "Absolute path to a pre-created project folder. Use this when the host (e.g. dhee-desktop) has already created the workspace folder and you want to initialize it in place instead of creating a new <name>.dhee sibling. The folder must exist; original_input.md and project.json are written into it.",
     }),
   ),
+  characterReferenceImages: Type.Optional(
+    Type.Array(
+      Type.Object({
+        name: Type.String({
+          description: "Final project-local filename, e.g. hero.png",
+        }),
+        relativePath: Type.String({
+          description:
+            "Project-relative copied image path, e.g. assets/uploads/characters/hero.png",
+        }),
+        sourcePath: Type.Optional(
+          Type.String({
+            description: "Original absolute file path selected by the user.",
+          }),
+        ),
+        originalFilename: Type.Optional(
+          Type.String({
+            description: "Original user-selected filename before collision handling.",
+          }),
+        ),
+        mimeType: Type.Optional(Type.String()),
+        size: Type.Optional(Type.Number()),
+      }),
+    ),
+  ),
 });
 
 export interface NewProjectDetails {
@@ -80,6 +105,9 @@ export const dheeNew = defineTool({
         basePath: getProjectsDir(),
         ...(params.template ? { templateId: params.template } : {}),
         ...(params.existingDir ? { existingDir: params.existingDir } : {}),
+        ...(params.characterReferenceImages
+          ? { characterReferenceImages: params.characterReferenceImages }
+          : {}),
       });
 
       const lines = [

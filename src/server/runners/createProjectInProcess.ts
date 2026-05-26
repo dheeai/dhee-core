@@ -24,6 +24,12 @@ import {
 import { initializeTemplates } from '../../templates/index.js';
 import type { ProjectFile } from '../../tasks/video/workflow/types.js';
 import type { InputType } from '../../tasks/video/workflow/types.js';
+import {
+  addProjectLocalCharacterReferenceInputs,
+  appendCharacterReferenceImagesToContent,
+  normalizeProjectLocalCharacterReferenceImages,
+  type ProjectLocalCharacterReferenceImage,
+} from '../characterReferenceUploads.js';
 
 /**
  * Resolve user-friendly style aliases to canonical dhee style names.
@@ -76,6 +82,11 @@ export interface CreateProjectInProcessOpts {
    * appended.
    */
   existingDir?: string | undefined;
+  /**
+   * Project-local character reference images already copied by an
+   * embedding host such as dhee-desktop.
+   */
+  characterReferenceImages?: ProjectLocalCharacterReferenceImage[] | undefined;
 }
 
 export interface CreateProjectInProcessResult {
@@ -146,19 +157,37 @@ export function createProjectInProcess(
   setActiveProjectDir(projectDir);
 
   mkdirSync(projectDir, { recursive: true });
+  const characterReferenceImages =
+    normalizeProjectLocalCharacterReferenceImages({
+      projectDir,
+      images: opts.characterReferenceImages,
+    });
+  const inputWithReferences = appendCharacterReferenceImagesToContent(
+    opts.input,
+    characterReferenceImages,
+  );
   // Write the canonical input file. createProject will also write it
   // (via writeProjectText) but we want it present even if createProject
   // fails so the user can re-run without losing their input.
-  writeFileSync(join(projectDir, 'original_input.md'), opts.input);
+  writeFileSync(join(projectDir, 'original_input.md'), inputWithReferences);
 
   // ── Build the project ────────────────────────────────────────────
   let project = createProject(
-    opts.input,
+    inputWithReferences,
     canonicalStyle,
     opts.basePath,
     opts.duration,
     opts.templateId,
   );
+
+  if (characterReferenceImages.length > 0) {
+    const addedInputs = addProjectLocalCharacterReferenceInputs({
+      projectDir,
+      images: characterReferenceImages,
+      notes: 'Uploaded with the initial project prompt.',
+    });
+    project.inputs = [...(project.inputs ?? []), ...addedInputs];
+  }
 
   // Optional inputType override (skip auto-detection).
   if (opts.inputType && opts.inputType !== project.inputType) {

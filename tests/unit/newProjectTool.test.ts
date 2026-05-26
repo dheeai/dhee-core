@@ -269,6 +269,45 @@ describe('pi-agent dheeNew tool', () => {
       expect(onDisk).toBe(story);
     });
 
+    it('forwards characterReferenceImages into project creation', async () => {
+      const desktopDir = join(projectsDir, 'with_refs');
+      mkdirSync(join(desktopDir, 'assets/uploads/characters'), { recursive: true });
+      writeFileSync(join(desktopDir, 'assets/uploads/characters/hero.png'), 'hero');
+
+      const r = await executeNew({
+        name: 'with_refs',
+        input: 'A hero story.',
+        style: 'live',
+        duration: 30,
+        existingDir: desktopDir,
+        characterReferenceImages: [{
+          name: 'hero.png',
+          relativePath: 'assets/uploads/characters/hero.png',
+          sourcePath: '/Users/me/Desktop/hero.png',
+          originalFilename: 'hero.png',
+          mimeType: 'image/png',
+          size: 4,
+        }],
+      });
+
+      expect((r.details as { status: string }).status).toBe('completed');
+      expect(readFileSync(join(desktopDir, 'original_input.md'), 'utf8')).toContain(
+        '- hero.png: assets/uploads/characters/hero.png',
+      );
+
+      const project = JSON.parse(
+        readFileSync(join(desktopDir, 'project.json'), 'utf8'),
+      ) as { inputs?: Array<{ purpose?: string; source?: { value?: string } }> };
+      expect(project.inputs).toEqual([
+        expect.objectContaining({
+          purpose: 'character_ref',
+          source: expect.objectContaining({
+            value: 'assets/uploads/characters/hero.png',
+          }),
+        }),
+      ]);
+    });
+
     it('overwrites the desktop-stub project.json with v2.0 schema', async () => {
       const desktopDir = join(projectsDir, 'overwrite_stub');
       mkdirSync(desktopDir, { recursive: true });
