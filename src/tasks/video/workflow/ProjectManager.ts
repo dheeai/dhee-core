@@ -781,6 +781,20 @@ export function saveProject(project: ProjectFile, basePath: string = defaultBase
     ...('executorState' in project
       ? { executorState: project.executorState }
       : {}),
+    // renderMethod + features are declared on the newer
+    // core/project/projectTypes.ts:ProjectFile (which the dispatcher and
+    // pi-agent treat as authoritative) but NOT on the legacy
+    // workflow/types.ts ProjectFile this serializer is typed against.
+    // Without these passthroughs the dispatcher's prompt_relay routing
+    // and per-project feature flags get silently wiped on every
+    // executor save — silently restarting projects in shot_by_shot
+    // mode even when the wizard correctly persisted prompt_relay.
+    ...('renderMethod' in project
+      ? { renderMethod: (project as unknown as { renderMethod?: string }).renderMethod }
+      : {}),
+    ...('features' in project
+      ? { features: (project as unknown as { features?: unknown }).features }
+      : {}),
   };
   writeProjectText(PROJECT_FILE, JSON.stringify(orderedProject, null, 2), basePath);
 }

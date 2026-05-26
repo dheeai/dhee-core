@@ -245,6 +245,45 @@ describe('ProjectManager', () => {
           .status,
       ).toBe('completed');
     });
+
+    it('preserves renderMethod across save/load (dispatcher routing field)', () => {
+      // renderMethod is declared on core/project/projectTypes.ts:ProjectFile
+      // but NOT on the legacy workflow/types.ts ProjectFile that saveProject
+      // is typed against. Before the passthrough fix, every executor save
+      // silently dropped this field — leaving prompt_relay projects
+      // running the legacy shot_by_shot executor.
+      createProject('Test story', TEST_BASE_PATH);
+      const project = loadProject(TEST_BASE_PATH);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (project as any).renderMethod = 'prompt_relay';
+      saveProject(project!, TEST_BASE_PATH);
+
+      const onDisk = JSON.parse(
+        readFileSync(join(getProjectDir(TEST_BASE_PATH), 'project.json'), 'utf8'),
+      );
+      expect(onDisk.renderMethod).toBe('prompt_relay');
+
+      // Also exercise the round-trip path the dispatcher actually uses.
+      const reloaded = loadProject(TEST_BASE_PATH);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((reloaded as any)?.renderMethod).toBe('prompt_relay');
+    });
+
+    it('preserves features (per-project feature flags) across save/load', () => {
+      // features lives under project.features.* and drives per-project
+      // opt-ins like skipHoldingBeatLF. Same regression class as
+      // renderMethod — must survive executor saves.
+      createProject('Test story', TEST_BASE_PATH);
+      const project = loadProject(TEST_BASE_PATH);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (project as any).features = { skipHoldingBeatLF: true };
+      saveProject(project!, TEST_BASE_PATH);
+
+      const onDisk = JSON.parse(
+        readFileSync(join(getProjectDir(TEST_BASE_PATH), 'project.json'), 'utf8'),
+      );
+      expect(onDisk.features).toEqual({ skipHoldingBeatLF: true });
+    });
   });
 });
 
