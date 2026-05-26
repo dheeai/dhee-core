@@ -26,6 +26,7 @@ import { resolve, join } from 'path';
 import { readFileSync, existsSync } from 'fs';
 import { VALID_STAGES } from '../src/core/planner/stages.js';
 import { runExecutor } from '../src/server/runners/runExecutor.js';
+import { setActiveProjectDir } from '../src/tasks/video/workflow/activeProject.js';
 import type { GenericProjectFile } from '../src/core/templates/types.js';
 
 function usage(exitCode = 1): never {

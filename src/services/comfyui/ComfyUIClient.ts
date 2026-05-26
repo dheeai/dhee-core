@@ -896,8 +896,26 @@ export class ComfyUIClient {
         } catch {
           return; /* non-JSON */
         }
-        lastActivityTime = Date.now();
-        debugLog(`[queueAndWaitWS] WS msg: ${msg.type} prompt=${msg.data?.prompt_id || 'n/a'}`);
+        // Reset inactivity timer ONLY for prompt-relevant messages.
+        // Broadcast heartbeats (kaytool.resources, crystools.monitor,
+        // status) fire every ~500ms on some Comfy installs (esp. when
+        // the resource-monitor plugin is loaded). If we count those as
+        // "activity", the inactivity-timeout fallback to HTTP polling
+        // never triggers — we sit on the WS forever waiting for
+        // execution events that may never arrive (Comfy server-side
+        // bug where execution_success isn't routed to per-client WS).
+        // Per-prompt messages all carry data.prompt_id; broadcasts
+        // don't.
+        const promptIdInMsg = msg.data?.prompt_id;
+        const isBroadcastNoise =
+          !promptIdInMsg &&
+          (msg.type === 'kaytool.resources' ||
+            msg.type === 'crystools.monitor' ||
+            msg.type === 'status');
+        if (!isBroadcastNoise) {
+          lastActivityTime = Date.now();
+        }
+        debugLog(`[queueAndWaitWS] WS msg: ${msg.type} prompt=${promptIdInMsg || 'n/a'}`);
         const action = decideWsAction(msg, promptId);
         switch (action.kind) {
           case 'progress':
@@ -1159,8 +1177,21 @@ export class ComfyUIClient {
           }
 
           const data = JSON.parse(trimmed.slice(jsonStart));
-          lastActivityTime = Date.now(); // Reset inactivity timer on valid message
           const msgType: string = data.type;
+          // Reset inactivity timer ONLY for prompt-relevant messages.
+          // Broadcast heartbeats fire every ~500ms on some Comfy installs
+          // and would otherwise prevent the inactivity fallback from ever
+          // firing. See sister logic in queueAndWaitWS for the full
+          // explanation.
+          const promptIdInMsg = data.data?.prompt_id;
+          const isBroadcastNoise =
+            !promptIdInMsg &&
+            (msgType === 'kaytool.resources' ||
+              msgType === 'crystools.monitor' ||
+              msgType === 'status');
+          if (!isBroadcastNoise) {
+            lastActivityTime = Date.now();
+          }
 
           if (msgType === 'status' && data.data) {
             // Queue/server status updates

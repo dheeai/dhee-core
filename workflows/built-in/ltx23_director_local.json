@@ -514,7 +514,7 @@
   },
   "80": {
     "inputs": {
-      "lora_name": "Ltx2.3-Licon-VBVR-I2V-96000-R32.safetensors",
+      "lora_name": "ltx2.3-transition.safetensors",
       "strength_model": 1.0,
       "model": [
         "77",
@@ -523,7 +523,7 @@
     },
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
-      "title": "LoRA: Licon VBVR I2V (strength 1.0)"
+      "title": "LoRA: LTX 2.3 Transition (strength 1.0)"
     }
   },
   "84": {
