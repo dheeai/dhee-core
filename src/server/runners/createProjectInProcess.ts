@@ -24,6 +24,11 @@ import {
 import { initializeTemplates } from '../../templates/index.js';
 import type { ProjectFile } from '../../tasks/video/workflow/types.js';
 import type { InputType } from '../../tasks/video/workflow/types.js';
+import {
+  DEFAULT_RENDER_METHOD,
+  resolveRenderMethod,
+  type RenderMethod,
+} from '../../core/project/renderMethods.js';
 
 /**
  * Resolve user-friendly style aliases to canonical dhee style names.
@@ -76,6 +81,14 @@ export interface CreateProjectInProcessOpts {
    * appended.
    */
   existingDir?: string | undefined;
+  /**
+   * Render method to record in project.json. Determines which
+   * dispatcher path runs the project end-to-end. Pass `'shot_by_shot'`
+   * (default) or `'prompt_relay'`. Unknown values fall back to default
+   * silently — UI/CLI should validate before calling. See
+   * `src/core/project/renderMethods.ts` for the canonical registry.
+   */
+  renderMethod?: RenderMethod | string | undefined;
 }
 
 export interface CreateProjectInProcessResult {
@@ -178,11 +191,18 @@ export function createProjectInProcess(
   // docs/feature-flags.md). When a new flag lands, add it here so
   // freshly-created projects show it.
   const projectJsonPath = join(projectDir, 'project.json');
+  // Resolve render method up front so we can persist it cleanly.
+  // Unknown values fall back silently to the default — caller (CLI/UI)
+  // is responsible for validating before getting here.
+  const resolvedRenderMethod =
+    resolveRenderMethod(typeof opts.renderMethod === 'string' ? opts.renderMethod : undefined) ??
+    DEFAULT_RENDER_METHOD;
   if (existsSync(projectJsonPath)) {
     try {
       const raw = readFileSync(projectJsonPath, 'utf8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       parsed['title'] = opts.name;
+      parsed['renderMethod'] = resolvedRenderMethod;
       const existingFeatures = (parsed['features'] as Record<string, unknown> | undefined) ?? {};
       parsed['features'] = {
         skipHoldingBeatLF: false,
@@ -190,10 +210,11 @@ export function createProjectInProcess(
       };
       writeFileSync(projectJsonPath, JSON.stringify(parsed, null, 2));
       project.title = opts.name;
+      (project as unknown as { renderMethod?: string }).renderMethod = resolvedRenderMethod;
     } catch {
-      // Title + features rewrite is cosmetic; project still works
-      // without it (interpretation logic defaults to OFF on missing
-      // flags anyway).
+      // Title + features + renderMethod rewrite is cosmetic; project
+      // still works without it (interpretation logic defaults to
+      // `shot_by_shot` / OFF on missing fields).
     }
   }
 

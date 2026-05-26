@@ -79,6 +79,13 @@ export interface ProjectFile {
   inputType?: string;
   templateId?: string;
   targetDuration?: number;
+  /**
+   * Which render method this project uses end-to-end. Determines
+   * which dispatcher path runs (see `src/core/project/renderMethods.ts`
+   * and `src/server/runners/runProjectInProcess.ts`). Defaults to
+   * `shot_by_shot` for projects created before this field existed.
+   */
+  renderMethod?: string;
   currentPhase?: string;
   features?: ProjectFeatures;
   phases?: Record<string, { status: string; completedAt: number | null }>;

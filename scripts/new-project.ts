@@ -29,6 +29,12 @@ import {
   createProjectInProcess,
   CreateProjectError,
 } from '../src/server/runners/createProjectInProcess.js';
+import {
+  DEFAULT_RENDER_METHOD,
+  resolveRenderMethod,
+  RENDER_METHOD_IDS,
+  RENDER_METHODS,
+} from '../src/core/project/renderMethods.js';
 
 interface Args {
   projectName: string;
@@ -38,6 +44,7 @@ interface Args {
   duration?: number;
   templateId?: string;
   inputType?: 'idea' | 'story';
+  renderMethod?: string;
 }
 
 function parseArgs(): Args {
@@ -53,6 +60,7 @@ function parseArgs(): Args {
   let duration: number | undefined;
   let templateId: string | undefined;
   let inputType: 'idea' | 'story' | undefined;
+  let renderMethod: string | undefined;
 
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]!;
@@ -92,6 +100,11 @@ function parseArgs(): Args {
         inputType = next;
         i += 1;
         break;
+      case '--method':
+      case '-m':
+        renderMethod = next;
+        i += 1;
+        break;
       case '--help':
       case '-h':
         printUsageAndExit(0);
@@ -100,7 +113,7 @@ function parseArgs(): Args {
         printUsageAndExit();
     }
   }
-  return { projectName, inputFile, inputText, style, duration, templateId, inputType };
+  return { projectName, inputFile, inputText, style, duration, templateId, inputType, renderMethod };
 }
 
 /** Read all of stdin as UTF-8. Returns empty string if stdin is a TTY (no pipe). */
@@ -190,12 +203,30 @@ async function main() {
     console.error('Error: --duration is required (target video length in seconds, e.g. 60).');
     printUsageAndExit();
   }
+  // Validate --method early. Unknown values become a CLI error instead
+  // of silently falling back so the user knows we couldn't honor what
+  // they typed.
+  let resolvedMethod = DEFAULT_RENDER_METHOD;
+  if (args.renderMethod !== undefined) {
+    const r = resolveRenderMethod(args.renderMethod);
+    if (!r) {
+      console.error(
+        `Error: --method '${args.renderMethod}' is not a known render method. Valid: ${RENDER_METHOD_IDS.join(', ')}`,
+      );
+      for (const id of RENDER_METHOD_IDS) {
+        console.error(`  ${id} → ${RENDER_METHODS[id].shortDescription}`);
+      }
+      printUsageAndExit();
+    }
+    resolvedMethod = r;
+  }
 
   console.log(`Creating project: ${args.projectName}.dhee`);
   console.log(`  Source:     ${inputSource} (${inputContent.length} bytes)`);
   console.log(`  Style:      ${args.style!}`);
   console.log(`  Duration:   ${args.duration!}s`);
   console.log(`  Template:   ${args.templateId ?? 'narrative'}`);
+  console.log(`  Method:     ${resolvedMethod}${args.renderMethod === undefined ? ' (default)' : ''}`);
   console.log('');
 
   try {
@@ -205,6 +236,7 @@ async function main() {
       style: args.style!,
       duration: args.duration!,
       basePath: process.cwd(),
+      renderMethod: resolvedMethod,
       ...(args.templateId ? { templateId: args.templateId } : {}),
       ...(args.inputType ? { inputType: args.inputType } : {}),
     });
