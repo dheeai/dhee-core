@@ -8900,6 +8900,22 @@ Examples of common failure modes to avoid:
 
       const relPath = relative(this.config.projectDir, result.filePath);
       const workflowUsed = (result.metadata as Record<string, unknown>)?.['workflowName'] as string | undefined;
+
+      // Validate the returned asset is actually a video file. LTX
+      // cloud has been observed (bdry3 run 2026-05-23) returning a
+      // `.png` for an FL2V call — an unrelated asset from another
+      // project ended up in the response. Accepting that as a "shot
+      // video" then polluted the final cut. Fail loudly here so the
+      // executor retries instead of silently shipping a still image.
+      const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.webm', '.mkv', '.avi']);
+      const ext = (result.filePath.match(/\.([a-z0-9]+)$/i)?.[0] ?? '').toLowerCase();
+      if (!VIDEO_EXTENSIONS.has(ext)) {
+        throw new Error(
+          `Shot video provider returned non-video asset (extension=${ext || 'none'}, path=${relPath}). ` +
+          `LTX cloud occasionally returns image fallbacks on certain failures; refusing to accept.`,
+        );
+      }
+
       this.log(`  Shot video generated: ${relPath} (${shotDuration}s) [workflow: ${workflowUsed ?? 'unknown'}]`);
 
       try {
