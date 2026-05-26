@@ -16,24 +16,15 @@
  * Defaults / behavior:
  *   - --scenes is a comma-separated list of scene numbers (e.g. "1" or "1,2,3")
  *   - Bundle paths are looked up in src/dag/bundles/<id>.json if no .json suffix
- *   - The CLI sets COMFY_MODE=local + the user's zrok URL by default; override
- *     with env vars if needed.
+ *   - Endpoint routing is bundle-declared: each runner config has an
+ *     `endpoint` name (e.g. "self.local") that resolves to the URL
+ *     in the matching `ENDPOINT_<name>` env var (see .env). No global
+ *     COMFY_MODE override happens here — the user's .env is in control.
  */
 import 'dotenv/config';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { walkBundle, loadBundle } from '../src/dag/walker.js';
-
-// Force the local LTX endpoint (zrok tunnel) — the LTX 2.3 Director
-// workflow's model files only live on the local box. We unconditionally
-// override .env's COMFY_MODE=cloud here for the same reason the probe
-// scripts do; pass DAG_BUNDLE_COMFY_KEEP_ENV=1 to disable the override
-// if running against a cloud endpoint that has the right models.
-if (!process.env['DAG_BUNDLE_COMFY_KEEP_ENV']) {
-  process.env['COMFY_MODE'] = 'local';
-  process.env['COMFYUI_BASE_URL'] =
-    process.env['COMFY_LOCAL_URL'] ?? 'https://comfyui.share.zrok.io';
-}
 
 // ── CLI parsing ─────────────────────────────────────────────────────
 const args = process.argv.slice(2);

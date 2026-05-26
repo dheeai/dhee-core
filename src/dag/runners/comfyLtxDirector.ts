@@ -43,6 +43,39 @@ interface LtxDirectorConfig {
   outputPath: string;
   width?: number;
   height?: number;
+  /**
+   * Named endpoint this runner targets. Resolved against the user's
+   * endpoint registry — `ENDPOINT_<name_with_dots_replaced_by_underscores>`
+   * env var, mirrored from desktop Settings → ComfyUI Endpoints. The
+   * NAME is part of the bundle (portable across users); the URL lives
+   * in user config (per-user, never travels with the bundle). See the
+   * architecture doc on named endpoints + future P2P routing.
+   *
+   * Conventional names:
+   *   - 'self.local'   — user's own local ComfyUI box
+   *   - 'self.cloud'   — user's own private cloud / paid subscription
+   *   - 'public.cloud' — the public Comfy Cloud service
+   *   - (future) 'peer.<id>' — P2P peers, auto-registered on discovery
+   *
+   * If omitted, falls back to legacy COMFYUI_BASE_URL env for
+   * backwards-compatibility with bundles authored before this field.
+   */
+  endpoint?: string;
+}
+
+/**
+ * Resolve a named endpoint to its URL from the user's environment.
+ * Returns null when the named endpoint isn't configured — caller surfaces
+ * the actionable error.
+ *
+ * Naming convention: dots in the endpoint name become underscores in
+ * the env key (env names can't contain dots). So `self.local` reads
+ * `ENDPOINT_self_local`.
+ */
+function resolveEndpointUrl(endpointName: string): string | null {
+  const envKey = `ENDPOINT_${endpointName.replace(/\./g, '_')}`;
+  const url = process.env[envKey];
+  return url && url.trim().length > 0 ? url.trim() : null;
 }
 
 // ── Prompt-shaping helpers (ported verbatim from probe-ltx-director.ts) ──
@@ -167,7 +200,33 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   const outputDir = dirname(outputAbs);
   mkdirSync(outputDir, { recursive: true });
 
-  const client = new ComfyUIClient({ outputDir });
+  // Resolve the endpoint. Bundles declare the endpoint by NAME
+  // (portable across users). The URL lives in the user's env /
+  // desktop settings as `ENDPOINT_<name_with_dots_as_underscores>`.
+  // Fail loud with an actionable error when the named endpoint
+  // hasn't been configured — much better than a confusing "couldn't
+  // reach Comfy" timeout later.
+  let endpointBaseUrl: string | undefined;
+  if (cfg.endpoint) {
+    const resolved = resolveEndpointUrl(cfg.endpoint);
+    if (!resolved) {
+      return {
+        ok: false,
+        error:
+          `Bundle requires endpoint '${cfg.endpoint}' but ` +
+          `ENDPOINT_${cfg.endpoint.replace(/\./g, '_')} is not set. ` +
+          `Configure it in Settings → ComfyUI Endpoints (or your .env in dev mode). ` +
+          `Conventional names: self.local, self.cloud, public.cloud.`,
+      };
+    }
+    endpointBaseUrl = resolved;
+    ctx.log(`comfy.ltx_director: routing to endpoint '${cfg.endpoint}' → ${resolved}`);
+  }
+
+  const client = new ComfyUIClient({
+    outputDir,
+    ...(endpointBaseUrl ? { baseUrl: endpointBaseUrl } : {}),
+  });
 
   ctx.log(`comfy.ltx_director: uploading ${cfg.firstFrames.length} first-frame images...`);
   const uploadedNames: string[] = [];
