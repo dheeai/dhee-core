@@ -18,6 +18,21 @@ import type { DagBundle, NodeDef, RunnerContext, RunnerResult } from './schema.j
 import { getRunner } from './runners/index.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
 import { REPO_ROOT } from '../agent/pi/paths.js';
+import {
+  loadWalkState,
+  saveWalkState,
+  initWalkState,
+  pruneStaleEntries,
+  type WalkState,
+} from './walkState.js';
+
+export {
+  loadWalkState,
+  saveWalkState,
+  initWalkState,
+  pruneStaleEntries,
+} from './walkState.js';
+export type { WalkState, NodeStateEntry, NodeRunStatus } from './walkState.js';
 
 export interface WalkerCliParams {
   /** Which scene(s) to render. */
@@ -29,6 +44,38 @@ export interface WalkerOptions {
   bundle: DagBundle;
   cli?: WalkerCliParams;
   log?: (msg: string) => void;
+  /**
+   * Bundle source URI (e.g. 'built-in:narrative_relay'). Required for
+   * walkState persistence — when set, the walker reads/writes
+   * project.json walkState. When absent (legacy callers like
+   * runProjectInProcess), the walker runs without state.
+   */
+  bundleSource?: string;
+  /**
+   * Stop after running this node id (and its upstream). When set, the
+   * walker runs everything topologically ≤ stopAt, then stops; nodes
+   * downstream stay pending in walkState. Stopping at the bundle's
+   * goal node is equivalent to no stopAt (run to completion).
+   */
+  stopAt?: string;
+  /**
+   * When set, walker runs only these node ids and their transitive
+   * dependents. Everything not in the cascade is skipped (state
+   * preserved as-is). Used by `dhee_run_to scope=last_invalidated`
+   * to redo a single node without re-cascading the whole graph. Empty
+   * array means "explicitly run nothing" (legitimate signal, not a
+   * no-op fallback).
+   */
+  runOnly?: string[];
+  /**
+   * Absolute path to the bundle directory. Threaded into every
+   * runner's ctx.bundleDir for resolving prompt templates, workflow
+   * JSONs, schemas. Optional; legacy callers may omit it (single-file
+   * bundles have no co-located resources).
+   */
+  bundleDir?: string;
+  /** Cooperative cancellation signal — threaded into every runner ctx. */
+  signal?: AbortSignal;
 }
 
 interface NodeInstance {
@@ -200,6 +247,47 @@ function buildRunnerConfig(
   return base;
 }
 
+/**
+ * Compute the cascade set for runOnly: the requested nodes plus every
+ * node that transitively depends on any of them. Returns a Set of node
+ * ids (bundle-level, not per-instance).
+ *
+ * Throws when a requested node isn't in the bundle — callers turn this
+ * into ok:false at the walkBundle boundary.
+ */
+function computeCascade(bundle: DagBundle, runOnly: string[]): Set<string> {
+  const bundleNodeIds = new Set(bundle.nodes.map((n) => n.id));
+  for (const id of runOnly) {
+    if (!bundleNodeIds.has(id)) {
+      throw new Error(`runOnly node id '${id}' is not in bundle (valid nodes: ${[...bundleNodeIds].join(', ')})`);
+    }
+  }
+  // Build reverse adjacency: who points AT each node?
+  const dependents = new Map<string, Set<string>>();
+  for (const n of bundle.nodes) {
+    for (const inp of n.inputs) {
+      let s = dependents.get(inp.from);
+      if (!s) {
+        s = new Set();
+        dependents.set(inp.from, s);
+      }
+      s.add(n.id);
+    }
+  }
+  // BFS from each runOnly id over dependents.
+  const cascade = new Set<string>();
+  const queue = [...runOnly];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (cascade.has(id)) continue;
+    cascade.add(id);
+    for (const d of dependents.get(id) ?? []) {
+      queue.push(d);
+    }
+  }
+  return cascade;
+}
+
 /** Walk the bundle and run every reachable node to completion. */
 export async function walkBundle(opts: WalkerOptions): Promise<{
   ok: boolean;
@@ -209,29 +297,88 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
 }> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const cli = opts.cli ?? {};
+
+  // Topo validation up front — surfaces invalid stopAt / runOnly with
+  // the bundle's actual node list before doing any work.
+  const bundleNodeIds = new Set(opts.bundle.nodes.map((n) => n.id));
+  if (opts.stopAt && !bundleNodeIds.has(opts.stopAt)) {
+    return {
+      ok: false,
+      error: `stopAt '${opts.stopAt}' is not in bundle (valid nodes: ${[...bundleNodeIds].join(', ')}).`,
+      instances: [],
+    };
+  }
+  let cascadeSet: Set<string> | null = null;
+  if (opts.runOnly !== undefined) {
+    try {
+      cascadeSet = computeCascade(opts.bundle, opts.runOnly);
+    } catch (e) {
+      return { ok: false, error: (e as Error).message, instances: [] };
+    }
+  }
+
   const ordered = topoFromGoal(opts.bundle);
   log(`walker: bundle '${opts.bundle.id}' v${opts.bundle.version}, ${ordered.length} reachable nodes`);
+
+  // walkState: load + prune stale entries from previous bundles.
+  let state: WalkState | null = null;
+  if (opts.bundleSource) {
+    state =
+      loadWalkState(opts.projectDir) ??
+      initWalkState({
+        bundleSource: opts.bundleSource,
+        bundleVersion: opts.bundle.version,
+        engineVersion: '0.1.0',
+      });
+    if (state.bundleSource !== opts.bundleSource) {
+      log(`walker: walkState bundleSource changed (${state.bundleSource} → ${opts.bundleSource}); reinitializing.`);
+      state = initWalkState({
+        bundleSource: opts.bundleSource,
+        bundleVersion: opts.bundle.version,
+        engineVersion: '0.1.0',
+      });
+    }
+    const pruned = pruneStaleEntries(state, bundleNodeIds);
+    if (pruned > 0) {
+      log(`walker: pruned ${pruned} stale walkState entries (nodes no longer in bundle).`);
+    }
+    // Initialize entries for any bundle nodes that aren't yet in
+    // walkState. Status defaults to 'pending' so callers can read the
+    // full DAG state in one go (the agent shows "5 of 8 done"; the
+    // missing 3 need to be visible as pending).
+    for (const n of opts.bundle.nodes) {
+      if (!state.nodes[n.id]) {
+        state.nodes[n.id] = { status: 'pending' };
+      }
+    }
+  }
+
+  const persistState = (): void => {
+    if (opts.bundleSource && state) {
+      saveWalkState(opts.projectDir, state);
+    }
+  };
 
   // Materialize instances per node.
   const instancesById = new Map<string, NodeInstance[]>();
   for (const node of ordered) {
     if (node.kind === 'collection') {
-      instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli));
+      // Try materializing only when scene inputs are present; tests using
+      // stage-only bundles never hit this path.
+      if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
+        instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli));
+      } else if (node.itemSource === 'scene') {
+        // Legacy: throw when collection node has no scene specs (preserves
+        // existing prompt_relay path's error).
+        instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli));
+      } else {
+        // New collection kinds for narrative bundles — Phase 3 will fill
+        // these in. For now treat as a single instance so the walker
+        // doesn't crash on unsupported itemSource.
+        instancesById.set(node.id, [{ def: node, status: 'pending' }]);
+      }
     } else {
       instancesById.set(node.id, [{ def: node, status: 'pending' }]);
-    }
-  }
-
-  // Summary log: planned execution shape.
-  for (const node of ordered) {
-    const insts = instancesById.get(node.id) ?? [];
-    if (insts.length === 1 && !insts[0]!.itemId) {
-      log(`  plan: ${node.id} (stage)`);
-    } else {
-      const summary = insts
-        .map((i) => `${i.itemId}${i.shotRange ? ` shots ${i.shotRange[0]}-${i.shotRange[1]}` : ''}`)
-        .join(', ');
-      log(`  plan: ${node.id} × ${insts.length} (${summary})`);
     }
   }
 
@@ -240,16 +387,54 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
     allInstances.push(...(instancesById.get(node.id) ?? []));
   }
 
-  // Run in topo order. Within a node, run all its instances (single
-  // for stage; one per item for collection).
+  // Run in topo order.
+  let stopAtReached = false;
   for (const node of ordered) {
+    if (stopAtReached) break;
     const insts = instancesById.get(node.id) ?? [];
+
+    // runOnly filter — skip nodes not in the cascade.
+    if (cascadeSet !== null && !cascadeSet.has(node.id)) {
+      // Mark instances as skipped (preserve any prior state from walkState).
+      continue;
+    }
+
     for (const inst of insts) {
+      const stateKey = inst.itemId ? `${node.id}:${inst.itemId}` : node.id;
+
+      // Resume short-circuit: if walkState says completed AND output
+      // file is present, skip. (If output is gone, treat as missing
+      // and re-run.)
+      //
+      // EXCEPTION: when runOnly is set AND this node is in the cascade,
+      // the caller explicitly asked to redo this node — bypass the
+      // short-circuit. Skipping here would silently turn a redo
+      // request into a no-op.
+      const explicitlyRunning = cascadeSet !== null && cascadeSet.has(node.id);
+      if (state && !explicitlyRunning) {
+        const prior = state.nodes[stateKey];
+        if (prior && prior.status === 'completed' && prior.outputPath) {
+          const priorAbs = resolve(opts.projectDir, prior.outputPath);
+          if (existsSync(priorAbs)) {
+            inst.status = 'completed';
+            inst.outputRel = prior.outputPath;
+            inst.outputAbs = priorAbs;
+            if (prior.metadata) inst.metadata = prior.metadata;
+            log(`◌ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} (already completed)`);
+            continue;
+          }
+        }
+      }
+
       const runner = getRunner(node.runner.tool);
       if (!runner) {
         const err = `runner '${node.runner.tool}' not registered`;
         log(`✗ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''}: ${err}`);
         inst.status = 'failed';
+        if (state) {
+          state.nodes[stateKey] = { status: 'failed', error: err };
+          persistState();
+        }
         return { ok: false, error: err, instances: allInstances };
       }
 
@@ -261,11 +446,18 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
 
       const ctx: RunnerContext = {
         projectDir: opts.projectDir,
+        ...(opts.bundleDir ? { bundleDir: opts.bundleDir } : {}),
         node: runtimeNode,
         ...(inst.itemId !== undefined && { itemId: inst.itemId }),
         inputs: {},
+        ...(opts.signal ? { signal: opts.signal } : {}),
         log: (m) => log(`  ${m}`),
       };
+
+      if (state) {
+        state.nodes[stateKey] = { status: 'in_progress', startedAt: Date.now() };
+        persistState();
+      }
 
       log(`→ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} via ${node.runner.tool}`);
       let result: RunnerResult;
@@ -278,6 +470,10 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       if (!result.ok) {
         log(`✗ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''}: ${result.error}`);
         inst.status = 'failed';
+        if (state) {
+          state.nodes[stateKey] = { status: 'failed', error: result.error };
+          persistState();
+        }
         return { ok: false, error: result.error, instances: allInstances };
       }
 
@@ -285,21 +481,41 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       inst.outputRel = result.outputPath;
       inst.outputAbs = resolve(opts.projectDir, result.outputPath);
       if (result.metadata !== undefined) inst.metadata = result.metadata;
+      if (state) {
+        state.nodes[stateKey] = {
+          status: 'completed',
+          outputPath: result.outputPath,
+          completedAt: Date.now(),
+          ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+          ...(result.metadata ? { metadata: result.metadata } : {}),
+        };
+        persistState();
+      }
       log(`✓ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} → ${result.outputPath}`);
+    }
+
+    if (opts.stopAt && node.id === opts.stopAt) {
+      stopAtReached = true;
+      log(`walker: reached stopAt='${opts.stopAt}', halting.`);
     }
   }
 
-  // Goal output.
+  // Goal output (only meaningful when the goal node ran).
   const goalInsts = instancesById.get(opts.bundle.goal) ?? [];
   const goalInst = goalInsts[0];
-  if (!goalInst || goalInst.status !== 'completed' || !goalInst.outputAbs) {
-    return { ok: false, error: 'goal node did not complete', instances: allInstances };
+  if (goalInst && goalInst.status === 'completed' && goalInst.outputAbs) {
+    return {
+      ok: true,
+      goal: { outputRel: goalInst.outputRel!, outputAbs: goalInst.outputAbs },
+      instances: allInstances,
+    };
   }
-  return {
-    ok: true,
-    goal: { outputRel: goalInst.outputRel!, outputAbs: goalInst.outputAbs },
-    instances: allInstances,
-  };
+  // If stopAt was used or runOnly was set, the goal isn't expected to
+  // have completed — return ok without a goal payload.
+  if (opts.stopAt || opts.runOnly !== undefined) {
+    return { ok: true, instances: allInstances };
+  }
+  return { ok: false, error: 'goal node did not complete', instances: allInstances };
 }
 
 /** Load a bundle JSON from disk. */
