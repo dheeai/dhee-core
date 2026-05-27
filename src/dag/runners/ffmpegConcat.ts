@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, copyFileSync, writeFileSync, unlinkSync } from '
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { resolveWatermarkPath, buildWatermarkOverlayFilter } from '../../core/timeline/FFmpegAssembler.js';
+import { resolveWatermarkPath, buildWatermarkOverlayFilter } from '../../core/timeline/watermark.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 
 interface FfmpegConcatConfig {

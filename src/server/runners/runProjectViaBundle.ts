@@ -21,8 +21,8 @@ import {
 } from '../../dag/bundleSource.js';
 import { walkBundle, loadBundle } from '../../dag/walker.js';
 import type { DagBundle, NodeDef } from '../../dag/schema.js';
-import type { GenericProjectFile } from '../../core/templates/types.js';
-import type { AssetEvent } from '../../agent/pi/tools/parseAssetLines.js';
+import type { GenericProjectFile } from './runProjectViaBundle-stubs.js';
+import type { AssetEvent } from './runProjectViaBundle-stubs.js';
 
 export interface RunProjectViaBundleOpts {
   projectDir: string;
