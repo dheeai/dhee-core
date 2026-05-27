@@ -284,6 +284,51 @@ describe('ProjectManager', () => {
       );
       expect(onDisk.features).toEqual({ skipHoldingBeatLF: true });
     });
+
+    it('preserves bundleSource across save/load (bundle architecture dispatch field)', () => {
+      // bundleSource tells executeRunTo to route through
+      // runProjectViaBundle (the bundle architecture) vs the legacy
+      // executor. Same regression class as renderMethod — must
+      // survive executor / saveProject calls.
+      createProject('Test story', TEST_BASE_PATH);
+      const project = loadProject(TEST_BASE_PATH);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (project as any).bundleSource = 'built-in:ltx_prompt_relay';
+      saveProject(project!, TEST_BASE_PATH);
+
+      const onDisk = JSON.parse(
+        readFileSync(join(getProjectDir(TEST_BASE_PATH), 'project.json'), 'utf8'),
+      );
+      expect(onDisk.bundleSource).toBe('built-in:ltx_prompt_relay');
+
+      // Round-trip via loadProject too.
+      const reloaded = loadProject(TEST_BASE_PATH);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((reloaded as any)?.bundleSource).toBe('built-in:ltx_prompt_relay');
+    });
+
+    it('preserves walkState across save/load (walker owns this; saveProject must passthrough)', () => {
+      createProject('Test story', TEST_BASE_PATH);
+      const project = loadProject(TEST_BASE_PATH);
+      const ws = {
+        bundleSource: 'built-in:ltx_prompt_relay',
+        bundleVersion: '0.1.0',
+        engineVersion: '0.1.0',
+        nodes: {
+          scene_clip: { status: 'pending' },
+          'scene_clip:scene_1_chunk_1': { status: 'completed', outputPath: 'x.mp4' },
+        },
+        lastInvalidatedIds: [],
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (project as any).walkState = ws;
+      saveProject(project!, TEST_BASE_PATH);
+
+      const onDisk = JSON.parse(
+        readFileSync(join(getProjectDir(TEST_BASE_PATH), 'project.json'), 'utf8'),
+      );
+      expect(onDisk.walkState).toEqual(ws);
+    });
   });
 });
 

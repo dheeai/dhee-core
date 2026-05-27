@@ -781,19 +781,24 @@ export function saveProject(project: ProjectFile, basePath: string = defaultBase
     ...('executorState' in project
       ? { executorState: project.executorState }
       : {}),
-    // renderMethod + features are declared on the newer
-    // core/project/projectTypes.ts:ProjectFile (which the dispatcher and
-    // pi-agent treat as authoritative) but NOT on the legacy
-    // workflow/types.ts ProjectFile this serializer is typed against.
-    // Without these passthroughs the dispatcher's prompt_relay routing
-    // and per-project feature flags get silently wiped on every
-    // executor save — silently restarting projects in shot_by_shot
-    // mode even when the wizard correctly persisted prompt_relay.
+    // renderMethod + features + bundleSource + walkState are declared
+    // on newer ProjectFile shapes (project/projectTypes.ts) but NOT on
+    // the legacy workflow/types.ts ProjectFile this serializer is
+    // typed against. Without these passthroughs, every executor save
+    // silently wipes them — which is exactly how the prompt_relay
+    // dispatcher path silently fell back to shot_by_shot the first
+    // time we tested it (see git history of feat/dag-bundles).
     ...('renderMethod' in project
       ? { renderMethod: (project as unknown as { renderMethod?: string }).renderMethod }
       : {}),
     ...('features' in project
       ? { features: (project as unknown as { features?: unknown }).features }
+      : {}),
+    ...('bundleSource' in project
+      ? { bundleSource: (project as unknown as { bundleSource?: string }).bundleSource }
+      : {}),
+    ...('walkState' in project
+      ? { walkState: (project as unknown as { walkState?: unknown }).walkState }
       : {}),
   };
   writeProjectText(PROJECT_FILE, JSON.stringify(orderedProject, null, 2), basePath);
