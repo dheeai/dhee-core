@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { DagBundle, NodeDef, RunnerContext, RunnerResult } from './schema.js';
 import { getRunner } from './runners/index.js';
+import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
 import { REPO_ROOT } from '../agent/pi/paths.js';
 import {
@@ -297,6 +298,19 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
 }> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const cli = opts.cli ?? {};
+
+  // Bundle dependency validation — fail BEFORE walking when a declared
+  // runner isn't registered, version doesn't satisfy, or required
+  // credential env var is missing. Cheap pre-flight that saves the
+  // user a half-rendered project.
+  if (opts.bundle.dependencies) {
+    const v = getGlobalRegistry().validateBundle(opts.bundle);
+    if (!v.ok) {
+      const msg = `bundle validation failed:\n  - ${v.errors.join('\n  - ')}`;
+      log(msg);
+      return { ok: false, error: msg, instances: [] };
+    }
+  }
 
   // Topo validation up front — surfaces invalid stopAt / runOnly with
   // the bundle's actual node list before doing any work.

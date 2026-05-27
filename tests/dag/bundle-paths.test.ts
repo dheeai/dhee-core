@@ -15,7 +15,7 @@
  * REPO_ROOT-anchored paths still resolve to real files.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 
@@ -89,10 +89,20 @@ describe('DAG bundle path resolution', () => {
     expect(existsSync(repoRootRelative)).toBe(true);
   });
 
-  it('the chain workflow is what the bundle points at (not the 4-seg-limit variant)', () => {
-    // Project memory: the chain workflow has no segment-count limit;
-    // the non-chain variant caps at ~4 segments. Stories with >4 shots
-    // in one chunk silently truncate. Pin that the bundle uses chain.
+  it('BUG-001 regression — bundle points at the non-chain director workflow (first-chunk safe)', () => {
+    // Originally this test pinned the chain workflow (commit 25b7edf)
+    // on the mistaken belief that the non-chain variant had a 4-seg
+    // cap. The 4-seg cap actually belongs to a separate workflow file
+    // (`ltx23_promptrelay_4seg_local.json`). The chain variant
+    // requires an EXISTING source video (for continuation across
+    // chunks) — when run on a first chunk with no source, its
+    // VHS_LoadVideo node errors with "input directory could not be
+    // loaded with cv" because no `video` input was supplied. That
+    // bug, BUG-001, surfaced live on The Cup project's first
+    // end-to-end relay attempt. Fix: revert to non-chain for the
+    // default single-chunk path. Multi-chunk runs that need chain
+    // continuation should be a future per-instance workflow switch
+    // inside the runner (BUG-001 manifestation (b)).
     const bundle = loadBundle(
       resolve(REPO_ROOT, 'src/dag/bundles/ltx_prompt_relay.json'),
     );
@@ -100,6 +110,21 @@ describe('DAG bundle path resolution', () => {
     const declared = (sceneClipNode!.runner.config as Record<string, unknown>)[
       'workflowPath'
     ] as string;
-    expect(declared).toMatch(/ltx23_director_chain_local\.json$/);
+    expect(declared).toMatch(/ltx23_director_local\.json$/);
+    expect(declared).not.toMatch(/_chain_/);
+
+    // Independent assertion: the declared workflow on disk must NOT
+    // contain a VHS_LoadVideo node. The runner doesn't supply a
+    // source video; the workflow can't depend on one for first-chunk
+    // operation.
+    const wfPath = resolve(REPO_ROOT, declared);
+    const wf = JSON.parse(readFileSync(wfPath, 'utf-8')) as Record<
+      string,
+      { class_type?: string }
+    >;
+    const vhsLoaders = Object.entries(wf).filter(
+      ([, n]) => n.class_type === 'VHS_LoadVideo',
+    );
+    expect(vhsLoaders).toEqual([]);
   });
 });

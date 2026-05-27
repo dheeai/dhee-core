@@ -85,6 +85,7 @@ mkdirSync(join(projectDir, 'logs'), { recursive: true });
 const result = await walkBundle({
   projectDir,
   bundle,
+  bundleSource: `built-in:${bundle.id}`,
   cli: { sceneIds },
 });
 
