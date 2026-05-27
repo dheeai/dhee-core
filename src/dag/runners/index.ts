@@ -10,6 +10,7 @@
 import type { Runner } from '../schema.js';
 import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
+import { llmGenerateRunner } from './llmGenerate.js';
 import {
   RunnerRegistry,
   getGlobalRegistry,
@@ -29,6 +30,25 @@ export {
 // registered together.
 
 const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
+  {
+    manifest: {
+      tool: 'llm.generate',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      // No required env credentials at the runner level — the LLM
+      // provider's API key is read by the LLMRouter from user
+      // settings / env (OPENAI_API_KEY etc.), and the router's own
+      // error path surfaces "missing credentials for tier X" with a
+      // useful message. Listing them here would duplicate the gate
+      // and force every bundle to declare credentials it doesn't
+      // actually know about.
+      credentials: [],
+      displayName: 'LLM Generate',
+      description:
+        'Universal LLM runner. Renders a prompt template with variable substitution, calls the routed LLM at the declared tier, and writes markdown or schema-validated JSON to the output path.',
+    },
+    runner: llmGenerateRunner,
+  },
   {
     manifest: {
       tool: 'comfy.ltx_director',

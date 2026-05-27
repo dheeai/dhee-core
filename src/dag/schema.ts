@@ -144,6 +144,15 @@ export interface RunnerDescription {
 export interface RunnerContext {
   /** Absolute project directory. */
   projectDir: string;
+  /**
+   * Absolute path to the bundle directory the runner was dispatched from.
+   * Runners that load files declared in their config by path (prompt
+   * templates, output schemas, Comfy workflows) resolve them against
+   * this dir. Optional for back-compat with legacy callers that
+   * pre-resolve all paths into config; new runners require it and
+   * fail loudly when absent.
+   */
+  bundleDir?: string;
   /** The node being executed. */
   node: NodeDef;
   /** For collection items: the specific item id (e.g. 'scene_1'). */
@@ -153,6 +162,13 @@ export interface RunnerContext {
    * walker pulled from upstream — file paths, parsed JSON, aggregated lists.
    */
   inputs: Record<string, unknown>;
+  /**
+   * Cooperative cancellation signal. Walker passes its own AbortSignal
+   * through; runners thread it to network calls / subprocess spawns so
+   * the chain cancels cleanly. Optional — runners must tolerate its
+   * absence (legacy tests, CLI smoke).
+   */
+  signal?: AbortSignal;
   /** Log function (writes to CLI + project log file). */
   log: (msg: string) => void;
 }
