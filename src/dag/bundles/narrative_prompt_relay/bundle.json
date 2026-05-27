@@ -309,7 +309,7 @@
           "outputSchema": "schemas/scenes_plan.schema.json",
           "tier": "heavy",
           "outputFormat": "json",
-          "maxTokens": 8000
+          "maxTokens": 16000
         }
       }
     },
@@ -375,88 +375,6 @@
       "outputs": {
         "format": "image",
         "pattern": "assets/images/shots/{{item_id}}_first.png"
-      },
-      "runner": {
-        "tool": "comfy.image",
-        "config": {
-          "workflowPath": "workflows/klein.json",
-          "manifestPath": "workflows/klein.manifest.json",
-          "endpoint": "public.cloud",
-          "width": 1920,
-          "height": 1080
-        }
-      }
-    },
-    {
-      "id": "shot_image_last_frame_prompt",
-      "kind": "collection",
-      "itemSource": "shot_image_prompt",
-      "inputs": [
-        {
-          "from": "shot_image_prompt",
-          "usage": "input",
-          "scope": "matching"
-        },
-        {
-          "from": "scenes_plan",
-          "usage": "context"
-        },
-        {
-          "from": "world_style",
-          "usage": "context"
-        },
-        {
-          "from": "characters_plan",
-          "usage": "context"
-        },
-        {
-          "from": "settings_plan",
-          "usage": "context"
-        }
-      ],
-      "outputs": {
-        "format": "json",
-        "pattern": "prompts/shot_image_last_frame/{{item_id}}.json"
-      },
-      "runner": {
-        "tool": "llm.generate",
-        "config": {
-          "promptTemplate": "prompts/shot_image_last_frame.md",
-          "outputSchema": "schemas/shot_image_prompt.schema.json",
-          "tier": "heavy",
-          "outputFormat": "json"
-        }
-      }
-    },
-    {
-      "id": "shot_image_last_frame",
-      "kind": "collection",
-      "itemSource": "shot_image_last_frame_prompt",
-      "inputs": [
-        {
-          "from": "shot_image_last_frame_prompt",
-          "usage": "input",
-          "scope": "matching"
-        },
-        {
-          "from": "shot_image",
-          "usage": "reference",
-          "scope": "all"
-        },
-        {
-          "from": "character_image",
-          "usage": "reference",
-          "scope": "all"
-        },
-        {
-          "from": "setting_image",
-          "usage": "reference",
-          "scope": "all"
-        }
-      ],
-      "outputs": {
-        "format": "image",
-        "pattern": "assets/images/shots/{{item_id}}_last.png"
       },
       "runner": {
         "tool": "comfy.image",
@@ -541,11 +459,6 @@
       "inputs": [
         {
           "from": "shot_image",
-          "usage": "input",
-          "scope": "all"
-        },
-        {
-          "from": "shot_image_last_frame",
           "usage": "input",
           "scope": "all"
         },

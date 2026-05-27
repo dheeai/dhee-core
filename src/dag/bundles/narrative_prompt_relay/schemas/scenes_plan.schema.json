@@ -20,7 +20,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "scene", "shotNumber", "duration", "description"],
+        "required": ["id", "duration", "description"],
         "properties": {
           "id": { "type": "string", "pattern": "^scene_[0-9]+_shot_[0-9]+$" },
           "scene": { "type": "integer" },
@@ -28,7 +28,9 @@
           "duration": { "type": "integer", "minimum": 1, "maximum": 15 },
           "description": { "type": "string" },
           "cameraWork": { "type": "string" },
-          "mainSubject": { "type": "string" }
+          "mainSubject": { "type": "string" },
+          "dialogue": { "type": ["string", "null"] },
+          "speaker": { "type": ["string", "null"] }
         }
       }
     }

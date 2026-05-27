@@ -31,6 +31,8 @@ interface ShotInput {
   description?: string;
   cameraWork?: string;
   audio?: string;
+  dialogue?: string | null;
+  speaker?: string | null;
   purpose?: string;
 }
 
@@ -118,7 +120,16 @@ function buildLocalPrompt(s: ShotInput): string {
     if (cleaned.length > 0) parts.push(cleaned);
   }
   if (s.cameraWork) parts.push(s.cameraWork.trim());
-  if (s.audio && s.audio.trim().length > 0) {
+  // Surface dialogue: prefer explicit dialogue/speaker fields (set by
+  // scenes_plan), fall back to legacy audio field.
+  if (s.dialogue && s.dialogue.trim().length > 0) {
+    const speaker = (s.speaker ?? '').trim();
+    const line = s.dialogue.trim().replace(/^["']|["']$/g, '');
+    const formatted = speaker
+      ? `${speaker.charAt(0).toUpperCase()}${speaker.slice(1).toLowerCase()} says: "${line}".`
+      : `"${line}".`;
+    parts.push(`Audio: ${formatted}`);
+  } else if (s.audio && s.audio.trim().length > 0) {
     parts.push(`Audio: ${reformatDialogue(s.audio.trim())}`);
   }
   return parts.join(' ');

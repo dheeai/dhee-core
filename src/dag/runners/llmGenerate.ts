@@ -36,7 +36,7 @@ import * as ajvNs from 'ajv';
 import * as ajvFormatsNs from 'ajv-formats';
 import type { Runner, RunnerContext, RunnerResult, RunnerDescription } from '../schema.js';
 import type { LLMPurpose, LLMTier } from '../../core/llm/purposes.js';
-import { LLMRouter } from '../../core/llm/router.js';
+import { LLMRouter, loadRoutingFromEnv, isRoutingEnabledFromEnv } from '../../core/llm/router.js';
 import { getLLMConfig } from '../../core/llm/config.js';
 
 // Pull the actual constructor from whichever export shape ajv ships.
@@ -109,7 +109,13 @@ function defaultClientFactory(tier: LLMTier, purpose?: LLMPurpose): LlmGenerateC
   // Without this, the router uses hardcoded LM Studio defaults which
   // require a local server running.
   const envDefault = getLLMConfig();
-  const router = new LLMRouter(envDefault, {}, false);
+  // Honor LLM_ROUTING_ENABLED + LLM_TIER_*_MODEL env so bundles using
+  // `tier: 'heavy'` actually route to LLM_TIER_HEAVY_MODEL rather than
+  // falling back to OPENAI_MODEL. Without this, OPENAI_MODEL leaks
+  // through (e.g. a deprecated model) and overrides per-tier choices.
+  const routing = loadRoutingFromEnv();
+  const enabled = isRoutingEnabledFromEnv();
+  const router = new LLMRouter(envDefault, routing, enabled);
   const eff = purpose ?? TIER_REPRESENTATIVE_PURPOSE[tier];
   const client = router.getClient(eff);
   return {

@@ -12,8 +12,19 @@
  * frames) on disk — it produces only the new ones declared by the
  * bundle. See docs/dag-bundles-sketch.md "Backward walker" section.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
+function formatSrtTime(totalSeconds: number): string {
+  const ms = Math.floor((totalSeconds % 1) * 1000);
+  const s = Math.floor(totalSeconds) % 60;
+  const m = Math.floor(totalSeconds / 60) % 60;
+  const h = Math.floor(totalSeconds / 3600);
+  return (
+    `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},` +
+    `${ms.toString().padStart(3, '0')}`
+  );
+}
 import type { DagBundle, NodeDef, RunnerContext, RunnerResult } from './schema.js';
 import type { BundleInputDecl } from './schema.js';
 import { getRunner } from './runners/index.js';
@@ -251,6 +262,89 @@ function materializeCollection(
           `materializeCollection: upstream '${node.itemSource}' output ${upstreamPath} has no items to materialize`,
         );
       }
+      // ── chunkBy on upstream-driven materializer ──
+      // When the node declares chunkBy AND items are scenes (itemKey='scenes')
+      // AND the upstream JSON also has a sibling 'shots' array, slice each
+      // scene's shots into chunks under the frame cap and emit one instance
+      // per chunk. itemId becomes 'scene_N_chunk_M', shotRange is set.
+      if (
+        node.chunkBy &&
+        node.chunkBy.constraint === 'max_frames' &&
+        node.itemKey === 'scenes' &&
+        raw &&
+        typeof raw === 'object' &&
+        Array.isArray((raw as Record<string, unknown>)['shots'])
+      ) {
+        const cap = node.chunkBy.limit;
+        const fps = node.chunkBy.fps ?? 24;
+        const firstPlusOne = node.chunkBy.firstSegmentPlusOne ?? false;
+        const allShots = (raw as { shots: Array<{ id?: string; scene?: number; shotNumber?: number; duration?: number }> }).shots;
+        // Derive scene/shotNumber from shot.id when missing (LLM drift safety).
+        for (const s of allShots) {
+          if (s.scene === undefined || s.shotNumber === undefined) {
+            const m = (s.id ?? '').match(/^scene_(\d+)_shot_(\d+)$/);
+            if (m) {
+              if (s.scene === undefined) s.scene = parseInt(m[1]!, 10);
+              if (s.shotNumber === undefined) s.shotNumber = parseInt(m[2]!, 10);
+            }
+          }
+        }
+        const alignFrames = (durSec: number): number =>
+          Math.max(8, Math.round((durSec * fps) / 8) * 8);
+        const out: NodeInstance[] = [];
+        for (const item of items) {
+          const itemId =
+            typeof item === 'string'
+              ? item.replace(/\s+/g, '_').toLowerCase()
+              : String(item.id ?? item.name ?? '').replace(/\s+/g, '_').toLowerCase();
+          const sceneMatch = itemId.match(/^scene_(\d+)/);
+          const sceneNumber = sceneMatch ? parseInt(sceneMatch[1]!, 10) : undefined;
+          if (sceneNumber === undefined) {
+            out.push({ def: node, itemId, status: 'pending' });
+            continue;
+          }
+          const sceneShots = allShots
+            .filter((s) => s.scene === sceneNumber)
+            .sort((a, b) => (a.shotNumber ?? 0) - (b.shotNumber ?? 0));
+          if (sceneShots.length === 0) {
+            out.push({ def: node, itemId, sceneNumber, status: 'pending' });
+            continue;
+          }
+          // Greedy-pack shots into chunks under cap.
+          type Chunk = { startShot: number; endShot: number; frames: number };
+          const chunks: Chunk[] = [];
+          let cur: Chunk | null = null;
+          let firstInChunk = true;
+          for (const s of sceneShots) {
+            let f = alignFrames(s.duration ?? 3);
+            if (firstInChunk && firstPlusOne) f += 1;
+            if (cur && cur.frames + f > cap) {
+              chunks.push(cur);
+              cur = null;
+              firstInChunk = true;
+              f = alignFrames(s.duration ?? 3) + (firstPlusOne ? 1 : 0);
+            }
+            if (!cur) cur = { startShot: s.shotNumber ?? 0, endShot: s.shotNumber ?? 0, frames: 0 };
+            cur.endShot = s.shotNumber ?? 0;
+            cur.frames += f;
+            firstInChunk = false;
+          }
+          if (cur) chunks.push(cur);
+          chunks.forEach((c, idx) => {
+            out.push({
+              def: node,
+              itemId: `scene_${sceneNumber}_chunk_${idx + 1}`,
+              sceneNumber,
+              shotRange: [c.startShot, c.endShot],
+              chunkIndex: idx + 1,
+              chunkCount: chunks.length,
+              status: 'pending',
+            });
+          });
+        }
+        return out;
+      }
+
       return items.map((item) => {
         const itemId =
           typeof item === 'string'
@@ -402,8 +496,22 @@ function buildRunnerConfig(
       if (existsSync(scenesPlanPath)) {
         const plan = JSON.parse(readFileSync(scenesPlanPath, 'utf-8')) as {
           scenes?: Array<{ id?: string }>;
-          shots?: Array<{ id?: string; scene?: number; shotNumber?: number; duration?: number; description?: string; cameraWork?: string }>;
+          shots?: Array<{ id?: string; scene?: number; shotNumber?: number; duration?: number; description?: string; cameraWork?: string; dialogue?: string | null; speaker?: string | null }>;
         };
+        // Derive scene + shotNumber from shot.id when the LLM omits
+        // them — id format is `scene_N_shot_M`. This makes the runner
+        // robust to LLM output drift (DeepSeek sometimes skips fields
+        // the prompt asks for; the schema's relaxed shotNumber/scene
+        // requirement plus this derivation are paired).
+        for (const s of (plan.shots ?? []) as Array<{ id?: string; scene?: number; shotNumber?: number }>) {
+          if (s.scene === undefined || s.shotNumber === undefined) {
+            const m = (s.id ?? '').match(/^scene_(\d+)_shot_(\d+)$/);
+            if (m) {
+              if (s.scene === undefined) s.scene = parseInt(m[1]!, 10);
+              if (s.shotNumber === undefined) s.shotNumber = parseInt(m[2]!, 10);
+            }
+          }
+        }
         const sceneShots = (plan.shots ?? []).filter((s) => s.scene === inst.sceneNumber);
         if (sceneShots.length === 0) {
           throw new Error(`comfy.ltx_director: scenes_plan has no shots for scene ${inst.sceneNumber}`);
@@ -443,6 +551,8 @@ function buildRunnerConfig(
           duration: s.duration ?? 3,
           ...(s.description ? { description: s.description } : {}),
           ...(s.cameraWork ? { cameraWork: s.cameraWork } : {}),
+          ...(s.dialogue ? { dialogue: s.dialogue } : {}),
+          ...(s.speaker ? { speaker: s.speaker } : {}),
         }));
         base['firstFrames'] = firstFrames;
         base['globalPrompt'] = globalPrompt || `Scene ${inst.sceneNumber}`;
@@ -490,6 +600,48 @@ function buildRunnerConfig(
       }
     }
     base['inputs'] = inputs;
+
+    // Subtitles: build an SRT from scenes_plan dialogue if present.
+    // Cumulative timing across all shots in order. Walker writes the SRT
+    // and hands the path to ffmpeg.concat; runner overlays it via the
+    // subtitles filter during the watermark/encode pass.
+    const scenesPlanInsts = instancesById.get('scenes_plan') ?? [];
+    const scenesPlanInst = scenesPlanInsts[0];
+    if (scenesPlanInst?.outputRel) {
+      const scenesPlanPath = resolve(projectDir, scenesPlanInst.outputRel);
+      if (existsSync(scenesPlanPath)) {
+        const plan = JSON.parse(readFileSync(scenesPlanPath, 'utf-8')) as {
+          shots?: Array<{ id?: string; duration?: number; dialogue?: string | null; speaker?: string | null }>;
+        };
+        const srtLines: string[] = [];
+        let cursor = 0;
+        let entryNum = 1;
+        for (const s of plan.shots ?? []) {
+          const dur = s.duration ?? 3;
+          const start = cursor;
+          const end = cursor + dur;
+          cursor = end;
+          if (s.dialogue && s.dialogue.trim().length > 0) {
+            const speaker = (s.speaker ?? '').trim();
+            const line = s.dialogue.trim().replace(/^["']|["']$/g, '');
+            const text = speaker ? `${speaker}: ${line}` : line;
+            srtLines.push(
+              `${entryNum}`,
+              `${formatSrtTime(start)} --> ${formatSrtTime(end)}`,
+              text,
+              '',
+            );
+            entryNum += 1;
+          }
+        }
+        if (srtLines.length > 0) {
+          const srtPath = resolve(projectDir, 'assets/subtitles/final.srt');
+          mkdirSync(dirname(srtPath), { recursive: true });
+          writeFileSync(srtPath, srtLines.join('\n'));
+          base['subtitlesPath'] = srtPath;
+        }
+      }
+    }
   }
 
   return base;
@@ -754,6 +906,11 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
         const ctxVars = {
           item_id: inst.itemId ?? '',
           scene_id: inst.sceneNumber ? `scene_${inst.sceneNumber}` : '',
+          // chunk_id is only meaningful when the instance is a chunked
+          // sub-piece of a scene (chunkBy materializer). For unchunked
+          // instances it's empty — bundle authors who don't use chunkBy
+          // simply don't reference {{chunk_id}} in their output pattern.
+          chunk_id: inst.chunkIndex !== undefined ? `chunk_${inst.chunkIndex}` : '',
           shot_id: inst.itemId ?? '',
         };
         (cfg as Record<string, unknown>)['outputPath'] = applyPattern(

@@ -111,3 +111,57 @@ prompted the migration are documented in the commit history of the
 - **Manifestations to test:** (a) item id like 'scene_3' → sceneNumber=3; (b) item id like 'scene_3_shot_2' → sceneNumber=3 (parsed from prefix); (c) item id with no scene prefix → sceneNumber undefined (won't cause an error unless a runner consumes it; runners that need it should error clearly).
 - **Test:** `tests/dag/walkerSceneNumberDerive.test.ts` (added with this fix).
 - **Fix commit:** materializer regex `^scene_(\d+)` on itemId to derive sceneNumber when present.
+
+### BUG-011 — scenes_plan total duration falls short of targetDuration (148s vs 180s)
+- **Status:** open
+- **Discovered:** 2026-05-27 (SLOP project run 3)
+- **Reporter:** user
+- **Symptom:** scenes_plan prompt says "sum of all shot durations == {{targetDuration}}". For SLOP at targetDuration=180, the LLM produced 34 shots summing to 148s — 32s short. Final video runs shorter than user-requested duration.
+- **Evidence:** plans/scenes_plan.json shows 34 shots, sum(duration)=148, vs project.targetDuration=180.
+- **Suspected root cause:** the "Hard rules: sum must equal" instruction is a soft instruction that LLMs (DeepSeek V4 Flash here) routinely violate. Without an arithmetic check at LLM time or a walker-side enforcement (pad shortest shots, or reject and retry with an error pointing at the gap), the constraint isn't enforced.
+- **Manifestations to test:** (a) sum equals target → accept; (b) sum < target by N seconds → walker pads N seconds distributed across shots OR rejects with "needs X more seconds" feedback for retry; (c) sum > target → walker shrinks proportionally OR rejects; (d) targets the model can't physically meet at 3-6s/shot get auto-extended to the nearest feasible value.
+- **Test:** (none yet — needs regression test before fix)
+- **Fix commit:** (none)
+
+### BUG-012 — scenes_plan doesn't split a recurring scene around a cutaway insert
+- **Status:** open
+- **Discovered:** 2026-05-27 (SLOP project run 3)
+- **Reporter:** user
+- **Symptom:** Story has setting A → B → A → C pattern (interview room → Carla's cubicle cutaway → back to interview room → montage). LLM emitted scene_1=room (entire interview, 28 shots), scene_2=cubicle (1 shot), scene_3=montage. The "back to A" section got lumped into scene_1 instead of being split out, so when ffmpeg.concat stitches in scene order, the cubicle cutaway plays AFTER the entire interview, not interleaved into the middle where the story places it.
+- **Evidence:** plans/scenes_plan.json — scene_1 ends with "Unfortunately, the next stage is also me. It's a journey." (the climax). scene_2 is the cubicle cutaway. The cubicle cut in the source story happens DURING Marcus's "is there a human reviewing any of this" exchange, mid-interview.
+- **Suspected root cause:** prompt says "every time the camera cuts to a different location/setting, start a new scene" but doesn't explicitly cover the A→B→A case — i.e. the LLM grouped all A shots into one scene regardless of when they occur chronologically.
+- **Manifestations to test:** (a) A→B→A → three scenes (s1=A, s2=B, s3=A reusing settingId), chronological; (b) A→B→A→B→A → five scenes; (c) brief insert (1 shot at B) returning to A vs proper scene break — should still split; (d) the closing montage as a final scene is fine.
+- **Test:** (none yet)
+- **Fix commit:** (none) — tighten the scenes_plan.md prompt to explicitly require chronological ordering and prohibit grouping non-contiguous same-setting shots into one scene.
+
+### BUG-013 — narrative_prompt_relay generates unused last-frame images (wasted cloud spend)
+- **Status:** open
+- **Discovered:** 2026-05-27 (SLOP project run 3)
+- **Reporter:** user (questioning why last frames are generated)
+- **Symptom:** narrative_prompt_relay bundle declares shot_image_last_frame_prompt + shot_image_last_frame nodes that produce one prompt + one cloud Comfy image per shot. For SLOP that's 34 prompt LLM calls and 34 cloud Klein renders that are never consumed. Adds ~$0.50 + ~15min per run.
+- **Evidence:** src/dag/runners/comfyLtxDirector.ts — ShotInput interface has no lastFrame field, runner only consumes firstFrames. Walker (walker.ts comfy.ltx_director branch) only sets `firstFrames` in runner config. shot_image_last_frame output is declared in bundle.json scene_clip.inputs but never read.
+- **Suspected root cause:** copy-paste from narrative_shot_by_shot bundle (where each shot uses LTX FL2V needing first + last anchors). Director relay path doesn't need them.
+- **Manifestations to test:** (a) prompt_relay bundle runs without shot_image_last_frame_* nodes and still produces valid final video — confirms not load-bearing; (b) shot_by_shot bundle keeps them — confirms still needed there.
+- **Test:** (none yet) — add e2e test that prompt_relay walks to completion with last_frame nodes removed.
+- **Fix commit:** (pending) — remove shot_image_last_frame_prompt + shot_image_last_frame from narrative_prompt_relay/bundle.json, remove their input declarations from scene_clip.inputs.
+
+### BUG-014 — Walker chunkBy not applied to upstream-driven collection materialization
+- **Status:** investigating
+- **Discovered:** 2026-05-27 (SLOP project run 4)
+- **Reporter:** user (LTX 1000-frame cap exceeded at scene_clip)
+- **Symptom:** scene_clip declared `chunkBy: {constraint: 'max_frames', limit: 1000, fps: 24, firstSegmentPlusOne: true}` and `itemKey: 'scenes'`. For scene_1 with 28 shots totaling 2929 frames (>1000), the walker still materialized scene_1 as ONE instance, and the LTX director runner threw "total frames 2929 exceeds LTX 2.3 audio-latent cap (1000)".
+- **Evidence:** /tmp/slop-run4.log — "✗ scene_clip[scene_1]: comfy.ltx_director: total frames 2929 exceeds LTX 2.3 audio-latent cap (1000)".
+- **Suspected root cause:** Walker materializeCollection has chunkBy handling ONLY in the legacy 'itemSource: scene' branch (line 169). The upstream-driven branch (`itemSource: <upstreamNodeId>`) ignores chunkBy entirely.
+- **Manifestations to test:** (a) upstream scenes_plan + chunkBy declared + scene total < cap → one chunk per scene (chunkIndex=1, chunkCount=1, full shotRange); (b) upstream scenes_plan + chunkBy + scene total > cap → multiple chunks with disjoint shotRanges covering all shots; (c) no chunkBy → single instance per scene (back-compat); (d) chunkBy declared but itemKey != 'scenes' → no chunking attempted (chunkBy is scene-specific).
+- **Test:** tests/dag/walkerChunkByUpstream.test.ts (to be added with fix).
+- **Fix commit:** (pending)
+
+### BUG-015 — ffmpeg.concat subtitles filter chokes on paths with special chars
+- **Status:** fixed
+- **Discovered:** 2026-05-27 (SLOP run 5 final_video)
+- **Reporter:** user
+- **Symptom:** ffmpeg.concat re-encode pass failed with `[AVFilterGraph] Error parsing filterchain '[0:v]subtitles='...Everything\'s SLOP...'[withsubs]'`. ffmpeg's filter-graph parser doesn't handle escaped single quotes inside a single-quoted argument.
+- **Suspected root cause:** Filter arguments are parsed by ffmpeg's filter graph, not by the shell. Even with proper escaping, paths containing apostrophes/spaces/colons confuse the parser.
+- **Fix:** Stage the SRT to /tmp/dag_subs_<hex>.srt (no special chars), reference that in the filter, unlink after the ffmpeg call.
+- **Test:** (not added yet) — should add a test that runs ffmpeg.concat with a projectDir whose path contains spaces+apostrophes.
+- **Fix commit:** src/dag/runners/ffmpegConcat.ts — stageSrtForFilter helper.
