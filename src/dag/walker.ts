@@ -144,43 +144,119 @@ function topoFromGoal(bundle: DagBundle): NodeDef[] {
  * it. Swapping to a runner with a different cap is a config change here,
  * not a code change.
  */
-function materializeCollection(node: NodeDef, projectDir: string, cli: WalkerCliParams): NodeInstance[] {
-  if (node.itemSource !== 'scene') {
-    throw new Error(
-      `materializeCollection: itemSource '${node.itemSource}' not supported in v1 (only 'scene')`,
-    );
-  }
-
-  const sceneIds = cli.sceneIds ?? [];
-  if (sceneIds.length === 0) {
-    throw new Error(`Collection node '${node.id}' requires --scenes CLI arg`);
-  }
-
-  const out: NodeInstance[] = [];
-  for (const sceneNum of sceneIds) {
-    if (node.chunkBy && node.chunkBy.constraint === 'max_frames') {
-      const fps = node.chunkBy.fps ?? 24;
-      const firstPlusOne = node.chunkBy.firstSegmentPlusOne ?? false;
-      const chunks = chunkScene(projectDir, sceneNum, node.chunkBy.limit, fps, firstPlusOne);
-      if (chunks.length === 0) {
-        throw new Error(`materializeCollection: no chunks computed for scene ${sceneNum}`);
-      }
-      chunks.forEach((c, idx) => {
-        out.push({
-          def: node,
-          itemId: `scene_${sceneNum}_chunk_${idx + 1}`,
-          sceneNumber: sceneNum,
-          shotRange: [c.startShot, c.endShot],
-          chunkIndex: idx + 1,
-          chunkCount: chunks.length,
-          status: 'pending',
+function materializeCollection(
+  node: NodeDef,
+  projectDir: string,
+  cli: WalkerCliParams,
+  upstreamInstances: Map<string, NodeInstance[]>,
+): NodeInstance[] {
+  // ── Legacy 'scene' path (ltx_prompt_relay's scene_clip chunking) ──
+  if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
+    const out: NodeInstance[] = [];
+    for (const sceneNum of cli.sceneIds) {
+      if (node.chunkBy && node.chunkBy.constraint === 'max_frames') {
+        const fps = node.chunkBy.fps ?? 24;
+        const firstPlusOne = node.chunkBy.firstSegmentPlusOne ?? false;
+        const chunks = chunkScene(projectDir, sceneNum, node.chunkBy.limit, fps, firstPlusOne);
+        if (chunks.length === 0) {
+          throw new Error(`materializeCollection: no chunks computed for scene ${sceneNum}`);
+        }
+        chunks.forEach((c, idx) => {
+          out.push({
+            def: node,
+            itemId: `scene_${sceneNum}_chunk_${idx + 1}`,
+            sceneNumber: sceneNum,
+            shotRange: [c.startShot, c.endShot],
+            chunkIndex: idx + 1,
+            chunkCount: chunks.length,
+            status: 'pending',
+          });
         });
-      });
-    } else {
-      out.push({ def: node, itemId: `scene_${sceneNum}`, sceneNumber: sceneNum, status: 'pending' });
+      } else {
+        out.push({ def: node, itemId: `scene_${sceneNum}`, sceneNumber: sceneNum, status: 'pending' });
+      }
     }
+    return out;
   }
-  return out;
+
+  // ── Upstream-driven materialization ──
+  // Collection node's items come from a JSON array in an upstream
+  // node's output. Format: `itemSource: <upstreamNodeId>`, the
+  // upstream output is a JSON file containing an array of `{id, ...}`
+  // objects OR a top-level array of strings/objects. Each becomes one
+  // instance with `itemId = <object.id>` (or stringified value).
+  //
+  // The walker reads the upstream node's outputPath (resolved against
+  // projectDir) when materializing this collection. The upstream must
+  // therefore have completed before this node's materialization runs
+  // — guaranteed by topo order, but the walker enforces it explicitly
+  // here for clarity.
+  if (node.itemSource) {
+    const upstream = upstreamInstances.get(node.itemSource);
+    if (!upstream || upstream.length === 0) {
+      throw new Error(
+        `materializeCollection: itemSource '${node.itemSource}' has no instances (upstream not materialized yet)`,
+      );
+    }
+    // For single-stage upstreams, read its output file.
+    if (upstream.length === 1 && upstream[0]!.outputRel) {
+      const upstreamPath = resolve(projectDir, upstream[0]!.outputRel);
+      if (!existsSync(upstreamPath)) {
+        throw new Error(
+          `materializeCollection: upstream '${node.itemSource}' output not on disk at ${upstreamPath}`,
+        );
+      }
+      const raw = JSON.parse(readFileSync(upstreamPath, 'utf-8')) as unknown;
+      // Accept either: top-level array, or { items: [...] }, or a
+      // map of the right shape under a node-specific key (e.g.
+      // story.characters[], scene.shots[]).
+      let items: Array<{ id?: string; name?: string } | string> = [];
+      if (Array.isArray(raw)) {
+        items = raw as Array<{ id?: string; name?: string } | string>;
+      } else if (raw && typeof raw === 'object') {
+        const obj = raw as Record<string, unknown>;
+        // Try `items`, then any top-level array property.
+        if (Array.isArray(obj['items'])) items = obj['items'] as Array<{ id?: string; name?: string } | string>;
+        else {
+          for (const v of Object.values(obj)) {
+            if (Array.isArray(v)) {
+              items = v as Array<{ id?: string; name?: string } | string>;
+              break;
+            }
+          }
+        }
+      }
+      if (items.length === 0) {
+        throw new Error(
+          `materializeCollection: upstream '${node.itemSource}' output ${upstreamPath} has no items to materialize`,
+        );
+      }
+      return items.map((item) => {
+        const itemId =
+          typeof item === 'string'
+            ? item.replace(/\s+/g, '_').toLowerCase()
+            : String(item.id ?? item.name ?? '').replace(/\s+/g, '_').toLowerCase();
+        if (!itemId) {
+          throw new Error(
+            `materializeCollection: item in '${node.itemSource}' has no id or name`,
+          );
+        }
+        return { def: node, itemId, status: 'pending' as const };
+      });
+    }
+    // For collection upstreams (e.g. shot_breakdown is one-per-shot,
+    // and shot_image is also one-per-shot), each upstream instance
+    // becomes one downstream instance with the same itemId.
+    return upstream.map((u) => ({
+      def: node,
+      ...(u.itemId !== undefined ? { itemId: u.itemId } : {}),
+      ...(u.sceneNumber !== undefined ? { sceneNumber: u.sceneNumber } : {}),
+      status: 'pending' as const,
+    }));
+  }
+
+  // No itemSource: treat as a stage node with one instance.
+  return [{ def: node, status: 'pending' }];
 }
 
 /**
@@ -373,23 +449,20 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
     }
   };
 
-  // Materialize instances per node.
+  // Materialize instances per node. For 'scene'-sourced collections
+  // with CLI-provided scene ids, we can materialize up front. For
+  // upstream-driven collections (where items come from a not-yet-run
+  // node's output), we defer materialization to run-time — the
+  // upstream will be completed by the time we reach this node thanks
+  // to topo order.
   const instancesById = new Map<string, NodeInstance[]>();
   for (const node of ordered) {
     if (node.kind === 'collection') {
-      // Try materializing only when scene inputs are present; tests using
-      // stage-only bundles never hit this path.
       if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
-        instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli));
-      } else if (node.itemSource === 'scene') {
-        // Legacy: throw when collection node has no scene specs (preserves
-        // existing prompt_relay path's error).
-        instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli));
+        instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli, instancesById));
       } else {
-        // New collection kinds for narrative bundles — Phase 3 will fill
-        // these in. For now treat as a single instance so the walker
-        // doesn't crash on unsupported itemSource.
-        instancesById.set(node.id, [{ def: node, status: 'pending' }]);
+        // Lazy: empty for now; materialized when we reach the node.
+        instancesById.set(node.id, []);
       }
     } else {
       instancesById.set(node.id, [{ def: node, status: 'pending' }]);
@@ -405,6 +478,22 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
   let stopAtReached = false;
   for (const node of ordered) {
     if (stopAtReached) break;
+
+    // Lazy materialization for upstream-driven collections. By topo
+    // order, every input.from upstream has already run; their output
+    // files exist on disk and their instance metadata is in
+    // instancesById. materializeCollection reads from these.
+    if (node.kind === 'collection' && (instancesById.get(node.id) ?? []).length === 0) {
+      try {
+        const materialized = materializeCollection(node, opts.projectDir, cli, instancesById);
+        instancesById.set(node.id, materialized);
+      } catch (e) {
+        const err = `${node.id}: materializeCollection failed: ${(e as Error).message}`;
+        log(`✗ ${err}`);
+        return { ok: false, error: err, instances: allInstances };
+      }
+    }
+
     const insts = instancesById.get(node.id) ?? [];
 
     // runOnly filter — skip nodes not in the cascade.
@@ -453,17 +542,69 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       }
 
       const cfg = buildRunnerConfig(inst, opts.projectDir, instancesById);
+      // For LLM runners: outputPath must be a node-specific path (one
+      // per instance) so collections don't all write to the same file.
+      // We derive it from outputs.pattern with item-context substitution
+      // and pass it into the config under the `outputPath` key the LLM
+      // runner expects.
+      if (node.runner.tool === 'llm.generate') {
+        const ctxVars = {
+          item_id: inst.itemId ?? '',
+          scene_id: inst.sceneNumber ? `scene_${inst.sceneNumber}` : '',
+          shot_id: inst.itemId ?? '',
+        };
+        (cfg as Record<string, unknown>)['outputPath'] = applyPattern(
+          node.outputs.pattern,
+          ctxVars,
+        );
+      }
       const runtimeNode: NodeDef = {
         ...node,
         runner: { ...node.runner, config: cfg },
       };
+
+      // Resolve ctx.inputs from upstream completed nodes. For each
+      // declared input, read the upstream's output file (markdown →
+      // string, json → parsed value) and key by the upstream node id.
+      // The llm.generate runner uses these to substitute {{node_id}}
+      // placeholders in its prompt template.
+      const resolvedInputs: Record<string, unknown> = {};
+      for (const inp of node.inputs) {
+        const upInsts = instancesById.get(inp.from) ?? [];
+        if (upInsts.length === 0) continue;
+        // For 'matching' scope on collections, pick the upstream
+        // instance with the same itemId. Otherwise concatenate /
+        // pick first.
+        const matching =
+          inst.itemId
+            ? upInsts.find((u) => u.itemId === inst.itemId) ?? upInsts[0]
+            : upInsts[0];
+        if (!matching?.outputRel) continue;
+        const upAbs = resolve(opts.projectDir, matching.outputRel);
+        if (!existsSync(upAbs)) continue;
+        try {
+          const raw = readFileSync(upAbs, 'utf-8');
+          // If JSON, parse; else keep as string.
+          let value: unknown = raw;
+          if (matching.outputRel.endsWith('.json')) {
+            try {
+              value = JSON.parse(raw);
+            } catch {
+              // keep raw
+            }
+          }
+          resolvedInputs[inp.from] = value;
+        } catch {
+          // skip; runner will fail at substitution if it needs this
+        }
+      }
 
       const ctx: RunnerContext = {
         projectDir: opts.projectDir,
         ...(opts.bundleDir ? { bundleDir: opts.bundleDir } : {}),
         node: runtimeNode,
         ...(inst.itemId !== undefined && { itemId: inst.itemId }),
-        inputs: {},
+        inputs: resolvedInputs,
         ...(opts.signal ? { signal: opts.signal } : {}),
         log: (m) => log(`  ${m}`),
       };
