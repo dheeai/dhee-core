@@ -68,7 +68,38 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
   if (!existsSync(projectJsonPath)) {
     throw new Error(`project.json not found in ${projectDir}`);
   }
-  const project = JSON.parse(readFileSync(projectJsonPath, 'utf-8')) as GenericProjectFile;
+  const project = JSON.parse(readFileSync(projectJsonPath, 'utf-8')) as GenericProjectFile & {
+    bundleSource?: string;
+  };
+
+  // ── Bundle dispatch (Phase 5) ─────────────────────────────────────
+  // If project.json declares a bundleSource, route through the new
+  // bundle architecture (walker + runners). The legacy executor /
+  // runProjectInProcess path is reserved for projects without a
+  // bundleSource. No mix-and-match.
+  if (project.bundleSource) {
+    ctx.hooks.onNotification({
+      level: 'info',
+      message: `dispatch via bundle: ${project.bundleSource}`,
+    });
+    const { runProjectViaBundle } = await import('./runProjectViaBundle.js');
+    const result = await runProjectViaBundle({
+      projectDir,
+      ...(params.stage ? { stopAt: params.stage } : {}),
+      signal: ctx.signal,
+      log: (m) => ctx.hooks.onNotification({ level: 'info', message: m }),
+    });
+    if (!result.ok) {
+      throw new Error(result.error ?? 'bundle run failed');
+    }
+    if (result.finalVideoAbs) {
+      ctx.hooks.onNotification({
+        level: 'info',
+        message: `bundle complete. Final video: ${result.finalVideoAbs}`,
+      });
+    }
+    return;
+  }
 
   let resolvedTarget: { stage?: string; nodeId?: string };
   const classified = classifyRunTarget(params.stage ?? null);
