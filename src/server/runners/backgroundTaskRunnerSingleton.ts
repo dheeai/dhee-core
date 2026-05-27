@@ -20,8 +20,6 @@ import {
   type ExecutorCancelled,
   type TaskExecutionContext,
 } from './BackgroundTaskRunner.js';
-import { runProjectInProcess } from './runProjectInProcess.js';
-import { getProjectRenderMethod } from '../../core/project/renderMethods.js';
 import { resolveProjectDir } from '../../agent/pi/tools/resolveProjectDir.js';
 import { getProjectsDir } from '../../agent/pi/paths.js';
 import { existsSync, readFileSync } from 'node:fs';
@@ -151,66 +149,41 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
   // directly (gates 1+2 of `runSupervisorInvocation`). Nothing here
   // needs to plumb a snapshot any more.
 
-  // Dispatch through runProjectInProcess so the project's renderMethod
-  // field (set by the wizard or dhee_set_render_method) actually drives
-  // routing. For shot_by_shot projects this is a thin pass-through to
-  // runExecutor; for prompt_relay it gates the executor at shot_image
-  // and then dispatches the DAG bundle for the video stage.
-  //
-  // Note on caller-supplied stage gates: when params.stage is set the
-  // user is asking to pause mid-pipeline (e.g. /run-to scene). For
-  // prompt_relay projects this skips the bundle dispatch (caller wants
-  // upstream-only). The dispatcher handles this; we just pass the
-  // resolved target through.
-  const declaredMethod = getProjectRenderMethod(
-    project as unknown as Record<string, unknown>,
-  );
-  const dispatch = await runProjectInProcess({
-    projectDir,
+  // Legacy executor path (project has no bundleSource). Calls
+  // runExecutor directly — the runProjectInProcess "dispatcher" that
+  // used to live between has been removed as part of the bundle
+  // migration (Phase 6). Mix-and-match routing is gone; for any
+  // non-bundle project this is a thin pass-through to the executor.
+  const { runExecutor } = await import('./runExecutor.js');
+  const result = await runExecutor({
     project,
-    runExecutorExtras: {
-      target: {
-        ...resolvedTarget,
-        ...(params.skip_media ? { skipMedia: true } : {}),
-        ...(runOnly ? { runOnly } : {}),
-      },
-      signal: ctx.signal,
-      name: 'task-runner-run-to',
-      onTool: (info) => ctx.hooks.onTool(info),
-      onResult: (info) => ctx.hooks.onResult(info),
-      onNotification: (info) => ctx.hooks.onNotification(info),
-      ...(ctx.hooks.onAsset
-        ? {
-            onAsset: (event) => {
-              ctx.hooks.onAsset?.({
-                kind: event.kind,
-                filePath: event.filePath,
-                ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
-                ...(event.nodeId !== undefined ? { nodeId: event.nodeId } : {}),
-              });
-            },
-          }
-        : {}),
-    } as Parameters<typeof runProjectInProcess>[0]['runExecutorExtras'],
-    log: (msg) => ctx.hooks.onNotification({ level: 'info', message: msg }),
+    projectDir,
+    target: {
+      ...resolvedTarget,
+      ...(params.skip_media ? { skipMedia: true } : {}),
+      ...(runOnly ? { runOnly } : {}),
+    },
+    signal: ctx.signal,
+    name: 'task-runner-run-to',
+    onTool: (info) => ctx.hooks.onTool(info),
+    onResult: (info) => ctx.hooks.onResult(info),
+    onNotification: (info) => ctx.hooks.onNotification(info),
+    ...(ctx.hooks.onAsset
+      ? {
+          onAsset: (event) => {
+            ctx.hooks.onAsset?.({
+              kind: event.kind,
+              filePath: event.filePath,
+              ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
+              ...(event.nodeId !== undefined ? { nodeId: event.nodeId } : {}),
+            });
+          },
+        }
+      : {}),
   });
 
-  // Adapt the unified result back to the executeRunTo contract. The
-  // legacy contract expects: throw on failure, return undefined on
-  // success, return {cancelled:true} on cancellation. runProjectInProcess
-  // returns {ok, error, executor}; the executor.status discriminator
-  // is the source of truth for the cancellation case.
-  const result = dispatch.executor;
-  if (dispatch.ok) {
-    ctx.hooks.onNotification({
-      level: 'info',
-      message:
-        declaredMethod === 'prompt_relay'
-          ? `dispatch: method=prompt_relay → executor (gated at shot_image) + DAG bundle. Final video: ${dispatch.finalVideoAbs ?? 'unknown'}`
-          : `dispatch: method=${declaredMethod} → executor end-to-end. Final video: ${dispatch.finalVideoAbs ?? 'unknown'}`,
-    });
-  } else if (result.status === 'failed') {
-    throw new Error(dispatch.error ?? result.error ?? 'run_to failed');
+  if (result.status === 'failed') {
+    throw new Error(result.error ?? 'run_to failed');
   }
   // Cancellation can come from two paths:
   //   - AbortController.abort() (set by `runner.cancel()` from the host)
