@@ -90,10 +90,29 @@ export interface NodeDef {
   };
 }
 
+export interface BundleDependencies {
+  /**
+   * Required runners, keyed by tool name, valued by a semver range.
+   * The walker validates against the RunnerRegistry before running the
+   * bundle — declared runners must be registered AND their installed
+   * version must satisfy the declared range.
+   */
+  runners?: Record<string, string>;
+}
+
 export interface DagBundle {
   id: string;
   version: string;
   description?: string;
+  /**
+   * Range of kshana engine versions this bundle is known to work
+   * against (semver range). Future-facing — the engine doesn't enforce
+   * this yet in v1, but bundle authors should declare it so future
+   * cutovers (e.g. when the engine moves to v2) can warn or refuse.
+   */
+  engineCompat?: string;
+  /** Required runners (and their version ranges). See BundleDependencies. */
+  dependencies?: BundleDependencies;
   /** Terminal node — what the walker tries to produce. */
   goal: string;
   nodes: NodeDef[];
