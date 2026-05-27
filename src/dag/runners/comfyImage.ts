@@ -113,13 +113,26 @@ function defaultClientFactory(opts: { baseUrl?: string; outputDir: string }): Co
       return { name: r.name };
     },
     async queueAndWait(workflow, signal) {
-      const { outputs } = await client.queueAndWaitWS(
+      const { outputs, promptId } = await client.queueAndWaitWS(
         workflow,
         undefined,
         signal ? { signal } : {},
       );
+      // When the run completes via HTTP-polling fallback (cloud
+      // cold-start, WS-quiet), `outputs` is empty because nothing
+      // arrived over the WS channel. Fall back to the history API
+      // to recover the actual output filenames.
+      let resolved = outputs;
+      if (resolved.length === 0 && promptId) {
+        try {
+          const hist = await client.getOutputImages(promptId);
+          resolved = hist;
+        } catch {
+          // keep empty; runner will surface "no outputs"
+        }
+      }
       return {
-        outputs: outputs.map((o) => ({
+        outputs: resolved.map((o) => ({
           filename: o.filename,
           subfolder: o.subfolder,
         })),
