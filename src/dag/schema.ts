@@ -100,6 +100,21 @@ export interface BundleDependencies {
   runners?: Record<string, string>;
 }
 
+/**
+ * Bundle-level input declaration — values made available to every
+ * node's ctx.inputs from outside the DAG. Typically the user-supplied
+ * story text, the project's target duration, the style preset, etc.
+ *
+ * `kind: 'file'` — read the file at `path` (relative to projectDir).
+ *                  Content is the resolved value (string for .md, parsed
+ *                  for .json).
+ * `kind: 'project'` — read a field from project.json. `field` is a
+ *                  dot-path (e.g. 'targetDuration', 'goal.targetDuration').
+ */
+export type BundleInputDecl =
+  | { id: string; kind: 'file'; path: string; required?: boolean }
+  | { id: string; kind: 'project'; field: string; default?: unknown; required?: boolean };
+
 export interface DagBundle {
   id: string;
   version: string;
@@ -113,6 +128,11 @@ export interface DagBundle {
   engineCompat?: string;
   /** Required runners (and their version ranges). See BundleDependencies. */
   dependencies?: BundleDependencies;
+  /**
+   * Bundle-level inputs (e.g. user story text, project metadata).
+   * Resolved once at walk start, available to every node via ctx.inputs.
+   */
+  inputs?: BundleInputDecl[];
   /** Terminal node — what the walker tries to produce. */
   goal: string;
   nodes: NodeDef[];

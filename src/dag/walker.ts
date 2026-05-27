@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { DagBundle, NodeDef, RunnerContext, RunnerResult } from './schema.js';
+import type { BundleInputDecl } from './schema.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
@@ -267,6 +268,73 @@ function applyPattern(pattern: string, ctx: Record<string, string>): string {
   return pattern.replace(/\{\{(\w+)\}\}/g, (_, k) => ctx[k] ?? `{{${k}}}`);
 }
 
+function getByDotPath(obj: unknown, path: string): unknown {
+  let cur: unknown = obj;
+  for (const part of path.split('.')) {
+    if (cur && typeof cur === 'object' && part in (cur as Record<string, unknown>)) {
+      cur = (cur as Record<string, unknown>)[part];
+    } else return undefined;
+  }
+  return cur;
+}
+
+/**
+ * Resolve bundle-level inputs (BundleInputDecl[]) into a flat
+ * Record<id, value> ready to merge into every node's ctx.inputs.
+ * Throws on missing required inputs.
+ */
+function resolveBundleInputs(
+  decls: BundleInputDecl[] | undefined,
+  projectDir: string,
+): Record<string, unknown> {
+  if (!decls || decls.length === 0) return {};
+  const out: Record<string, unknown> = {};
+  const projectJsonPath = resolve(projectDir, 'project.json');
+  let projectJson: Record<string, unknown> | undefined;
+  if (existsSync(projectJsonPath)) {
+    try {
+      projectJson = JSON.parse(readFileSync(projectJsonPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      projectJson = undefined;
+    }
+  }
+  for (const d of decls) {
+    if (d.kind === 'file') {
+      const p = resolve(projectDir, d.path);
+      if (!existsSync(p)) {
+        if (d.required !== false) {
+          throw new Error(`bundle input '${d.id}' missing: file not found at ${p}`);
+        }
+        continue;
+      }
+      const raw = readFileSync(p, 'utf-8');
+      out[d.id] = d.path.endsWith('.json')
+        ? (() => {
+            try { return JSON.parse(raw); } catch { return raw; }
+          })()
+        : raw;
+    } else if (d.kind === 'project') {
+      if (!projectJson) {
+        if (d.required !== false && d.default === undefined) {
+          throw new Error(`bundle input '${d.id}' requires project.json field '${d.field}' but project.json is missing/unreadable`);
+        }
+        if (d.default !== undefined) out[d.id] = d.default;
+        continue;
+      }
+      const v = getByDotPath(projectJson, d.field);
+      if (v === undefined) {
+        if (d.default !== undefined) out[d.id] = d.default;
+        else if (d.required !== false) {
+          throw new Error(`bundle input '${d.id}' requires project.json field '${d.field}' but it is not set`);
+        }
+      } else {
+        out[d.id] = v;
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Build the runner config by merging the bundle's static config with
  * runtime-resolved inputs (artifacts read from disk, paths from
@@ -409,6 +477,18 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
 
   const ordered = topoFromGoal(opts.bundle);
   log(`walker: bundle '${opts.bundle.id}' v${opts.bundle.version}, ${ordered.length} reachable nodes`);
+
+  // Resolve bundle-level inputs (project files + project.json fields)
+  // once at startup. Merged into every node's ctx.inputs below.
+  let bundleInputs: Record<string, unknown>;
+  try {
+    bundleInputs = resolveBundleInputs(opts.bundle.inputs, opts.projectDir);
+  } catch (e) {
+    return { ok: false, error: (e as Error).message, instances: [] };
+  }
+  if (Object.keys(bundleInputs).length > 0) {
+    log(`walker: resolved ${Object.keys(bundleInputs).length} bundle inputs: ${Object.keys(bundleInputs).join(', ')}`);
+  }
 
   // walkState: load + prune stale entries from previous bundles.
   let state: WalkState | null = null;
@@ -567,8 +647,9 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       // declared input, read the upstream's output file (markdown →
       // string, json → parsed value) and key by the upstream node id.
       // The llm.generate runner uses these to substitute {{node_id}}
-      // placeholders in its prompt template.
-      const resolvedInputs: Record<string, unknown> = {};
+      // placeholders in its prompt template. Bundle-level inputs are
+      // merged in first so node-level inputs can override.
+      const resolvedInputs: Record<string, unknown> = { ...bundleInputs };
       for (const inp of node.inputs) {
         const upInsts = instancesById.get(inp.from) ?? [];
         if (upInsts.length === 0) continue;
