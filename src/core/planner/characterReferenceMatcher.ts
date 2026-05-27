@@ -2,7 +2,13 @@ import { existsSync } from 'fs';
 import { basename, extname, isAbsolute, join, relative } from 'path';
 import type { ProjectInput } from '../../tasks/video/workflow/types.js';
 
-export type CharacterReferenceMatchStrategy = 'metadata' | 'filename' | 'ordered_fallback';
+export type ReferenceMatchStrategy =
+  | 'metadata'
+  | 'filename'
+  | 'ordered_fallback'
+  | 'single_auto';
+export type ReferenceTargetKind = 'character' | 'setting';
+export type CharacterReferenceMatchStrategy = ReferenceMatchStrategy;
 
 export interface CharacterReferenceTarget {
   id: string;
@@ -10,13 +16,24 @@ export interface CharacterReferenceTarget {
   displayName?: string;
 }
 
-export interface UploadedCharacterReferenceMatch {
+export interface UploadedReferenceTarget extends CharacterReferenceTarget {
+  kind: ReferenceTargetKind;
+}
+
+export interface UploadedReferenceMatch {
   input: ProjectInput;
   relativePath: string;
   originalFilename: string;
+  targetId: string;
+  targetName: string;
+  targetKind: ReferenceTargetKind;
+  matchStrategy: ReferenceMatchStrategy;
+}
+
+export interface UploadedCharacterReferenceMatch extends UploadedReferenceMatch {
   characterId: string;
   characterName: string;
-  matchStrategy: CharacterReferenceMatchStrategy;
+  targetKind: 'character';
 }
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
@@ -28,14 +45,14 @@ export function normalizeCharacterReferenceKey(value: string): string {
     .replace(/[^a-z0-9]+/g, '');
 }
 
-function characterIdForTarget(target: CharacterReferenceTarget): string | null {
+function targetItemId(target: CharacterReferenceTarget): string | null {
   return target.itemId ?? target.id.split(':')[1] ?? null;
 }
 
-function characterNameForTarget(target: CharacterReferenceTarget): string {
+function targetDisplayName(target: CharacterReferenceTarget): string {
   const suffix = target.displayName?.split(': ').pop()?.trim();
   if (suffix && suffix !== target.displayName) return suffix;
-  const itemId = characterIdForTarget(target) ?? target.id;
+  const itemId = targetItemId(target) ?? target.id;
   return itemId
     .split('_')
     .filter(Boolean)
@@ -45,12 +62,10 @@ function characterNameForTarget(target: CharacterReferenceTarget): string {
 
 function keysForTarget(target: CharacterReferenceTarget): Set<string> {
   const keys = new Set<string>();
-  const characterId = characterIdForTarget(target);
-  if (characterId) keys.add(normalizeCharacterReferenceKey(characterId));
-  const name = characterNameForTarget(target);
+  const itemId = targetItemId(target);
+  if (itemId) keys.add(normalizeCharacterReferenceKey(itemId));
+  const name = targetDisplayName(target);
   if (name) keys.add(normalizeCharacterReferenceKey(name));
-  keys.add(normalizeCharacterReferenceKey(target.id));
-  if (target.displayName) keys.add(normalizeCharacterReferenceKey(target.displayName));
   keys.delete('');
   return keys;
 }
@@ -71,12 +86,20 @@ interface Candidate {
   relativePath: string;
   originalFilename: string;
   filenameKey: string;
-  explicitKeys: Set<string>;
+  purpose: ProjectInput['purpose'];
+  explicitCharacterKeys: Set<string>;
+  explicitSettingKeys: Set<string>;
 }
 
 function eligibleCandidates(projectDir: string, inputs: ProjectInput[] | undefined): Candidate[] {
   return (inputs ?? []).flatMap((input) => {
-    if (input.purpose !== 'character_ref') return [];
+    if (
+      input.purpose !== 'character_ref' &&
+      input.purpose !== 'setting_ref' &&
+      input.purpose !== 'reference_general'
+    ) {
+      return [];
+    }
     if (input.mediaType !== 'image') return [];
     if (input.processing.status !== 'completed') return [];
 
@@ -89,13 +112,25 @@ function eligibleCandidates(projectDir: string, inputs: ProjectInput[] | undefin
     const metadata = input.metadata as ProjectInput['metadata'] & {
       characterId?: string;
       characterName?: string;
+      settingId?: string;
+      settingName?: string;
     };
-    const explicitKeys = new Set(
+    const explicitCharacterKeys = new Set(
       [
         metadata.matchedCharacterId,
         metadata.matchedCharacterName,
         metadata.characterId,
         metadata.characterName,
+      ]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map(normalizeCharacterReferenceKey),
+    );
+    const explicitSettingKeys = new Set(
+      [
+        metadata.matchedSettingId,
+        metadata.matchedSettingName,
+        metadata.settingId,
+        metadata.settingName,
       ]
         .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
         .map(normalizeCharacterReferenceKey),
@@ -106,45 +141,87 @@ function eligibleCandidates(projectDir: string, inputs: ProjectInput[] | undefin
       relativePath,
       originalFilename,
       filenameKey: normalizeCharacterReferenceKey(basename(originalFilename, extname(originalFilename))),
-      explicitKeys,
+      purpose: input.purpose,
+      explicitCharacterKeys,
+      explicitSettingKeys,
     }];
   });
 }
 
-function buildMatch(
-  target: CharacterReferenceTarget,
+function candidateCanMatchTarget(
   candidate: Candidate,
-  matchStrategy: CharacterReferenceMatchStrategy,
-): UploadedCharacterReferenceMatch | null {
-  const characterId = characterIdForTarget(target);
-  if (!characterId) return null;
+  target: UploadedReferenceTarget,
+): boolean {
+  if (target.kind === 'character') {
+    return candidate.purpose === 'character_ref' || candidate.purpose === 'reference_general';
+  }
+  return candidate.purpose === 'setting_ref' || candidate.purpose === 'reference_general';
+}
+
+function candidateIsTypedForTarget(
+  candidate: Candidate,
+  target: UploadedReferenceTarget,
+): boolean {
+  if (target.kind === 'character') return candidate.purpose === 'character_ref';
+  return candidate.purpose === 'setting_ref';
+}
+
+function explicitKeysForTargetKind(
+  candidate: Candidate,
+  target: UploadedReferenceTarget,
+): Set<string> {
+  return target.kind === 'character'
+    ? candidate.explicitCharacterKeys
+    : candidate.explicitSettingKeys;
+}
+
+function filenameMatchesTarget(candidate: Candidate, target: UploadedReferenceTarget): boolean {
+  if (candidate.filenameKey.length === 0) return false;
+  const targetKeys = keysForTarget(target);
+  return [...targetKeys].some(
+    (key) =>
+      candidate.filenameKey === key ||
+      (candidate.filenameKey.length >= 3 &&
+        (candidate.filenameKey.includes(key) || key.includes(candidate.filenameKey))),
+  );
+}
+
+function buildReferenceMatch(
+  target: UploadedReferenceTarget,
+  candidate: Candidate,
+  matchStrategy: ReferenceMatchStrategy,
+): UploadedReferenceMatch | null {
+  const id = targetItemId(target);
+  if (!id) return null;
   return {
     input: candidate.input,
     relativePath: candidate.relativePath,
     originalFilename: candidate.originalFilename,
-    characterId,
-    characterName: characterNameForTarget(target),
+    targetId: id,
+    targetName: targetDisplayName(target),
+    targetKind: target.kind,
     matchStrategy,
   };
 }
 
-export function matchUploadedCharacterReferences(args: {
+export function matchUploadedReferences(args: {
   projectDir: string;
   inputs?: ProjectInput[];
-  targets: CharacterReferenceTarget[];
-}): Map<string, UploadedCharacterReferenceMatch> {
-  const targets = args.targets.filter((target) => characterIdForTarget(target));
+  targets: UploadedReferenceTarget[];
+}): Map<string, UploadedReferenceMatch> {
+  const targets = args.targets.filter((target) => targetItemId(target));
   const candidates = eligibleCandidates(args.projectDir, args.inputs);
-  const assignments = new Map<string, UploadedCharacterReferenceMatch>();
+  const assignments = new Map<string, UploadedReferenceMatch>();
   const assignedInputs = new Set<string>();
 
   const assign = (
-    target: CharacterReferenceTarget,
+    target: UploadedReferenceTarget,
     candidate: Candidate | undefined,
-    strategy: CharacterReferenceMatchStrategy,
+    strategy: ReferenceMatchStrategy,
   ): void => {
     if (!candidate || assignments.has(target.id) || assignedInputs.has(candidate.input.id)) return;
-    const match = buildMatch(target, candidate, strategy);
+    if (!candidateCanMatchTarget(candidate, target)) return;
+    const match = buildReferenceMatch(target, candidate, strategy);
     if (!match) return;
     assignments.set(target.id, match);
     assignedInputs.add(candidate.input.id);
@@ -154,30 +231,25 @@ export function matchUploadedCharacterReferences(args: {
     const targetKeys = keysForTarget(target);
     assign(
       target,
-      candidates.find(
-        (candidate) =>
-          !assignedInputs.has(candidate.input.id) &&
-          candidate.explicitKeys.size > 0 &&
-          [...candidate.explicitKeys].some((key) => targetKeys.has(key)),
-      ),
+      candidates.find((candidate) => {
+        if (assignedInputs.has(candidate.input.id)) return false;
+        const explicitKeys = explicitKeysForTargetKind(candidate, target);
+        return (
+          explicitKeys.size > 0 &&
+          [...explicitKeys].some((key) => targetKeys.has(key))
+        );
+      }),
       'metadata',
     );
   }
 
   for (const target of targets) {
-    const targetKeys = keysForTarget(target);
     assign(
       target,
       candidates.find(
         (candidate) =>
           !assignedInputs.has(candidate.input.id) &&
-          candidate.filenameKey.length > 0 &&
-          [...targetKeys].some(
-            (key) =>
-              candidate.filenameKey === key ||
-              (candidate.filenameKey.length >= 3 &&
-                (candidate.filenameKey.includes(key) || key.includes(candidate.filenameKey))),
-          ),
+          filenameMatchesTarget(candidate, target),
       ),
       'filename',
     );
@@ -186,12 +258,69 @@ export function matchUploadedCharacterReferences(args: {
   for (const target of targets) {
     assign(
       target,
-      candidates.find((candidate) => !assignedInputs.has(candidate.input.id)),
+      candidates.find(
+        (candidate) =>
+          !assignedInputs.has(candidate.input.id) &&
+          candidateIsTypedForTarget(candidate, target),
+      ),
       'ordered_fallback',
     );
   }
 
+  for (const candidate of candidates) {
+    if (assignedInputs.has(candidate.input.id)) continue;
+    if (candidate.purpose !== 'reference_general') continue;
+    const plausibleTargets = targets.filter(
+      (target) =>
+        !assignments.has(target.id) &&
+        candidateCanMatchTarget(candidate, target),
+    );
+    if (plausibleTargets.length === 1) {
+      assign(plausibleTargets[0]!, candidate, 'single_auto');
+    }
+  }
+
   return assignments;
+}
+
+export function matchUploadedReferenceForTarget(args: {
+  projectDir: string;
+  inputs?: ProjectInput[];
+  targets: UploadedReferenceTarget[];
+  target: UploadedReferenceTarget;
+}): UploadedReferenceMatch | null {
+  return matchUploadedReferences(args).get(args.target.id) ?? null;
+}
+
+function asCharacterMatch(match: UploadedReferenceMatch | undefined): UploadedCharacterReferenceMatch | null {
+  if (!match || match.targetKind !== 'character') return null;
+  return {
+    ...match,
+    targetKind: 'character',
+    characterId: match.targetId,
+    characterName: match.targetName,
+  };
+}
+
+export function matchUploadedCharacterReferences(args: {
+  projectDir: string;
+  inputs?: ProjectInput[];
+  targets: CharacterReferenceTarget[];
+}): Map<string, UploadedCharacterReferenceMatch> {
+  const matches = matchUploadedReferences({
+    projectDir: args.projectDir,
+    inputs: args.inputs,
+    targets: args.targets.map((target) => ({
+      ...target,
+      kind: 'character',
+    })),
+  });
+  const characterMatches = new Map<string, UploadedCharacterReferenceMatch>();
+  for (const [targetId, match] of matches) {
+    const characterMatch = asCharacterMatch(match);
+    if (characterMatch) characterMatches.set(targetId, characterMatch);
+  }
+  return characterMatches;
 }
 
 export function matchUploadedCharacterReferenceForTarget(args: {
@@ -200,5 +329,18 @@ export function matchUploadedCharacterReferenceForTarget(args: {
   targets: CharacterReferenceTarget[];
   target: CharacterReferenceTarget;
 }): UploadedCharacterReferenceMatch | null {
-  return matchUploadedCharacterReferences(args).get(args.target.id) ?? null;
+  return asCharacterMatch(
+    matchUploadedReferenceForTarget({
+      projectDir: args.projectDir,
+      inputs: args.inputs,
+      targets: args.targets.map((target) => ({
+        ...target,
+        kind: 'character',
+      })),
+      target: {
+        ...args.target,
+        kind: 'character',
+      },
+    }) ?? undefined,
+  );
 }

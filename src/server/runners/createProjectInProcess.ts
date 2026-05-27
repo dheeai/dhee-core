@@ -25,10 +25,13 @@ import { initializeTemplates } from '../../templates/index.js';
 import type { ProjectFile } from '../../tasks/video/workflow/types.js';
 import type { InputType } from '../../tasks/video/workflow/types.js';
 import {
-  addProjectLocalCharacterReferenceInputs,
-  appendCharacterReferenceImagesToContent,
-  normalizeProjectLocalCharacterReferenceImages,
+  addProjectLocalReferenceInputs,
+  appendReferenceImagesToContent,
+  normalizeProjectLocalReferenceImages,
+  roleForReferencePurpose,
   type ProjectLocalCharacterReferenceImage,
+  type ProjectLocalReferenceImage,
+  type ProjectReferenceImageRole,
 } from '../characterReferenceUploads.js';
 
 /**
@@ -87,6 +90,11 @@ export interface CreateProjectInProcessOpts {
    * embedding host such as dhee-desktop.
    */
   characterReferenceImages?: ProjectLocalCharacterReferenceImage[] | undefined;
+  /**
+   * Project-local reference images already copied by an embedding host.
+   * Supports character, setting, and unclassified reference roles.
+   */
+  referenceImages?: ProjectLocalReferenceImage[] | undefined;
 }
 
 export interface CreateProjectInProcessResult {
@@ -101,6 +109,30 @@ export class CreateProjectError extends Error {
     super(message);
     this.name = 'CreateProjectError';
   }
+}
+
+function inferReferenceRoleFromRelativePath(
+  relativePath: string,
+): ProjectReferenceImageRole {
+  const normalized = relativePath.replace(/\\/g, '/').toLowerCase();
+  if (normalized.includes('/settings/')) return 'setting';
+  if (normalized.includes('/references/')) return 'auto';
+  return 'character';
+}
+
+function legacyCharacterReferenceToReferenceImage(
+  image: ProjectLocalCharacterReferenceImage,
+): ProjectLocalReferenceImage {
+  const raw = image as ProjectLocalReferenceImage;
+  const referenceRole =
+    raw.referenceRole ??
+    (raw.purpose
+      ? roleForReferencePurpose(raw.purpose)
+      : inferReferenceRoleFromRelativePath(image.relativePath));
+  return {
+    ...raw,
+    referenceRole,
+  };
 }
 
 /**
@@ -157,14 +189,20 @@ export function createProjectInProcess(
   setActiveProjectDir(projectDir);
 
   mkdirSync(projectDir, { recursive: true });
-  const characterReferenceImages =
-    normalizeProjectLocalCharacterReferenceImages({
+  const referenceImagesInput: ProjectLocalReferenceImage[] = [
+    ...(opts.characterReferenceImages ?? []).map(
+      legacyCharacterReferenceToReferenceImage,
+    ),
+    ...(opts.referenceImages ?? []),
+  ];
+  const referenceImages =
+    normalizeProjectLocalReferenceImages({
       projectDir,
-      images: opts.characterReferenceImages,
+      images: referenceImagesInput,
     });
-  const inputWithReferences = appendCharacterReferenceImagesToContent(
+  const inputWithReferences = appendReferenceImagesToContent(
     opts.input,
-    characterReferenceImages,
+    referenceImages,
   );
   // Write the canonical input file. createProject will also write it
   // (via writeProjectText) but we want it present even if createProject
@@ -180,10 +218,10 @@ export function createProjectInProcess(
     opts.templateId,
   );
 
-  if (characterReferenceImages.length > 0) {
-    const addedInputs = addProjectLocalCharacterReferenceInputs({
+  if (referenceImages.length > 0) {
+    const addedInputs = addProjectLocalReferenceInputs({
       projectDir,
-      images: characterReferenceImages,
+      images: referenceImages,
       notes: 'Uploaded with the initial project prompt.',
     });
     project.inputs = [...(project.inputs ?? []), ...addedInputs];

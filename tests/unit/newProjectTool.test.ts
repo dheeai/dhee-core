@@ -308,6 +308,46 @@ describe('pi-agent dheeNew tool', () => {
       ]);
     });
 
+    it('forwards generic referenceImages into project creation', async () => {
+      const desktopDir = join(projectsDir, 'with_setting_refs');
+      mkdirSync(join(desktopDir, 'assets/uploads/settings'), { recursive: true });
+      writeFileSync(join(desktopDir, 'assets/uploads/settings/field.png'), 'field');
+
+      const r = await executeNew({
+        name: 'with_setting_refs',
+        input: 'A game on a field.',
+        style: 'live',
+        duration: 30,
+        existingDir: desktopDir,
+        referenceImages: [{
+          name: 'field.png',
+          relativePath: 'assets/uploads/settings/field.png',
+          sourcePath: '/Users/me/Desktop/field.png',
+          originalFilename: 'field.png',
+          mimeType: 'image/png',
+          size: 5,
+          referenceRole: 'setting',
+        }],
+      });
+
+      expect((r.details as { status: string }).status).toBe('completed');
+      expect(readFileSync(join(desktopDir, 'original_input.md'), 'utf8')).toContain(
+        'Attached setting reference images:',
+      );
+
+      const project = JSON.parse(
+        readFileSync(join(desktopDir, 'project.json'), 'utf8'),
+      ) as { inputs?: Array<{ purpose?: string; source?: { value?: string } }> };
+      expect(project.inputs).toEqual([
+        expect.objectContaining({
+          purpose: 'setting_ref',
+          source: expect.objectContaining({
+            value: 'assets/uploads/settings/field.png',
+          }),
+        }),
+      ]);
+    });
+
     it('overwrites the desktop-stub project.json with v2.0 schema', async () => {
       const desktopDir = join(projectsDir, 'overwrite_stub');
       mkdirSync(desktopDir, { recursive: true });

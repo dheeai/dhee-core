@@ -3,10 +3,15 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  appendReferenceImagesToContent,
   appendCharacterReferenceImagesToContent,
   addProjectLocalCharacterReferenceInputs,
+  addProjectLocalReferenceInputs,
+  buildReferenceImageProjectInputs,
   buildCharacterReferenceProjectInputs,
+  copyReferenceImagesToProject,
   copyCharacterReferenceImagesToProject,
+  normalizeProjectLocalReferenceImages,
   normalizeProjectLocalCharacterReferenceImages,
 } from '../../src/server/characterReferenceUploads.js';
 
@@ -18,6 +23,8 @@ function makeTempProject(): { root: string; uploadsDir: string; projectDir: stri
   const projectDir = join(tempDir, 'demo.dhee');
   mkdirSync(uploadsDir, { recursive: true });
   mkdirSync(join(projectDir, 'assets/uploads/characters'), { recursive: true });
+  mkdirSync(join(projectDir, 'assets/uploads/settings'), { recursive: true });
+  mkdirSync(join(projectDir, 'assets/uploads/references'), { recursive: true });
   return { root: tempDir, uploadsDir, projectDir };
 }
 
@@ -86,6 +93,71 @@ describe('character reference uploads', () => {
     })]);
   });
 
+  it('copies and formats setting and auto reference images separately', () => {
+    const { uploadsDir, projectDir } = makeTempProject();
+    const fieldPath = join(uploadsDir, 'field.png');
+    const genericPath = join(uploadsDir, 'image.png');
+    writeFileSync(fieldPath, 'field');
+    writeFileSync(genericPath, 'generic');
+
+    const copied = copyReferenceImagesToProject({
+      projectDir,
+      uploadsDir,
+      stagedUploads: [
+        {
+          name: 'field.png',
+          path: fieldPath,
+          referenceRole: 'setting',
+          mimeType: 'image/png',
+        },
+        {
+          name: 'image.png',
+          path: genericPath,
+          referenceRole: 'auto',
+          mimeType: 'image/png',
+        },
+      ],
+    });
+
+    expect(copied).toEqual([
+      expect.objectContaining({
+        relativePath: 'assets/uploads/settings/field.png',
+        purpose: 'setting_ref',
+        referenceRole: 'setting',
+      }),
+      expect.objectContaining({
+        relativePath: 'assets/uploads/references/image.png',
+        purpose: 'reference_general',
+        referenceRole: 'auto',
+      }),
+    ]);
+
+    expect(appendReferenceImagesToContent('A story prompt', copied)).toBe(
+      [
+        'A story prompt',
+        '',
+        'Attached setting reference images:',
+        '- field.png: assets/uploads/settings/field.png',
+        '',
+        'Attached reference images:',
+        '- image.png: assets/uploads/references/image.png',
+      ].join('\n'),
+    );
+
+    expect(buildReferenceImageProjectInputs(copied, 123)).toEqual([
+      expect.objectContaining({
+        id: 'setting-ref-123-1',
+        purpose: 'setting_ref',
+        metadata: expect.objectContaining({ referenceRole: 'setting' }),
+      }),
+      expect.objectContaining({
+        id: 'reference-image-123-2',
+        purpose: 'reference_general',
+        metadata: expect.objectContaining({ referenceRole: 'auto' }),
+      }),
+    ]);
+  });
+
   it('normalizes project-local images and appends inputs without duplicates', () => {
     const { projectDir } = makeTempProject();
     const imagePath = join(projectDir, 'assets/uploads/characters/hero.png');
@@ -137,6 +209,64 @@ describe('character reference uploads', () => {
       }),
       metadata: expect.objectContaining({
         originalFilename: 'Hero Portrait.png',
+      }),
+    }));
+  });
+
+  it('normalizes project-local setting images and appends inputs without duplicates', () => {
+    const { projectDir } = makeTempProject();
+    const imagePath = join(projectDir, 'assets/uploads/settings/field.png');
+    writeFileSync(imagePath, 'field');
+    writeFileSync(join(projectDir, 'project.json'), JSON.stringify({
+      title: 'demo',
+      inputs: [],
+    }, null, 2));
+
+    const normalized = normalizeProjectLocalReferenceImages({
+      projectDir,
+      images: [{
+        name: 'field.png',
+        relativePath: 'assets/uploads/settings/field.png',
+        sourcePath: '/Users/me/Desktop/field.png',
+        originalFilename: 'Field.png',
+        mimeType: 'image/png',
+        referenceRole: 'setting',
+      }],
+    });
+
+    expect(normalized).toEqual([expect.objectContaining({
+      purpose: 'setting_ref',
+      referenceRole: 'setting',
+      relativePath: 'assets/uploads/settings/field.png',
+    })]);
+
+    const first = addProjectLocalReferenceInputs({
+      projectDir,
+      images: normalized,
+      now: 456,
+      notes: 'Added from desktop chat.',
+    });
+    const second = addProjectLocalReferenceInputs({
+      projectDir,
+      images: normalized,
+      now: 789,
+    });
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(0);
+    const project = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf-8'));
+    expect(project.inputs).toHaveLength(1);
+    expect(project.inputs[0]).toEqual(expect.objectContaining({
+      id: 'setting-ref-456-1',
+      purpose: 'setting_ref',
+      notes: 'Added from desktop chat.',
+      source: expect.objectContaining({
+        value: 'assets/uploads/settings/field.png',
+        originalValue: '/Users/me/Desktop/field.png',
+      }),
+      metadata: expect.objectContaining({
+        originalFilename: 'Field.png',
+        referenceRole: 'setting',
       }),
     }));
   });

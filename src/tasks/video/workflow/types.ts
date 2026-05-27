@@ -146,7 +146,13 @@ export interface ProjectInput {
     /** Character display name this reference image was bound to by the executor */
     matchedCharacterName?: string;
     /** How the executor matched this reference to a character */
-    matchStrategy?: 'metadata' | 'filename' | 'ordered_fallback';
+    matchStrategy?: 'metadata' | 'filename' | 'ordered_fallback' | 'single_auto';
+    /** Setting ID this reference image was bound to by the executor */
+    matchedSettingId?: string;
+    /** Setting display name this reference image was bound to by the executor */
+    matchedSettingName?: string;
+    /** Reference role selected by the user or host UI */
+    referenceRole?: 'auto' | 'character' | 'setting';
   };
 
   /** Processing results */

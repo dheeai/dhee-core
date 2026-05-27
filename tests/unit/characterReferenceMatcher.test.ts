@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  matchUploadedReferences,
   matchUploadedCharacterReferences,
   type CharacterReferenceTarget,
 } from '../../src/core/planner/characterReferenceMatcher.js';
@@ -13,18 +14,26 @@ let tempDir: string | null = null;
 function makeProject(): string {
   tempDir = mkdtempSync(join(tmpdir(), 'dhee-character-ref-matcher-'));
   mkdirSync(join(tempDir, 'assets/uploads/characters'), { recursive: true });
+  mkdirSync(join(tempDir, 'assets/uploads/settings'), { recursive: true });
+  mkdirSync(join(tempDir, 'assets/uploads/references'), { recursive: true });
   return tempDir;
 }
 
-function imageInput(id: string, filename: string, metadata: Partial<ProjectInput['metadata']> = {}): ProjectInput {
+function imageInput(
+  id: string,
+  filename: string,
+  metadata: Partial<ProjectInput['metadata']> = {},
+  purpose: ProjectInput['purpose'] = 'character_ref',
+  directory = 'assets/uploads/characters',
+): ProjectInput {
   return {
     id,
     source: {
       type: 'local_path',
-      value: `assets/uploads/characters/${filename}`,
+      value: `${directory}/${filename}`,
     },
     mediaType: 'image',
-    purpose: 'character_ref',
+    purpose,
     metadata: {
       originalFilename: filename,
       addedAt: 1,
@@ -32,7 +41,7 @@ function imageInput(id: string, filename: string, metadata: Partial<ProjectInput
     },
     processing: {
       status: 'completed',
-      localPath: `assets/uploads/characters/${filename}`,
+      localPath: `${directory}/${filename}`,
     },
   };
 }
@@ -128,5 +137,114 @@ describe('character reference matcher', () => {
     });
 
     expect(assignments.size).toBe(0);
+  });
+
+  it('maps an explicit setting upload to a setting_image node', () => {
+    const projectDir = makeProject();
+    writeFileSync(join(projectDir, 'assets/uploads/settings/field.png'), 'image');
+
+    const assignments = matchUploadedReferences({
+      projectDir,
+      inputs: [
+        imageInput(
+          'input-field',
+          'field.png',
+          { matchedSettingId: 'football_field' },
+          'setting_ref',
+          'assets/uploads/settings',
+        ),
+      ],
+      targets: [
+        { id: 'character_image:leo', itemId: 'leo', displayName: 'Character Reference Images: Leo', kind: 'character' },
+        { id: 'setting_image:football_field', itemId: 'football_field', displayName: 'Setting Reference Images: football field', kind: 'setting' },
+      ],
+    });
+
+    expect(assignments.get('setting_image:football_field')).toEqual(expect.objectContaining({
+      relativePath: 'assets/uploads/settings/field.png',
+      targetKind: 'setting',
+      matchStrategy: 'metadata',
+    }));
+    expect(assignments.has('character_image:leo')).toBe(false);
+  });
+
+  it('matches an auto filename to a setting node without falling back to a character', () => {
+    const projectDir = makeProject();
+    writeFileSync(join(projectDir, 'assets/uploads/references/field.png'), 'image');
+
+    const assignments = matchUploadedReferences({
+      projectDir,
+      inputs: [
+        imageInput(
+          'input-field',
+          'field.png',
+          {},
+          'reference_general',
+          'assets/uploads/references',
+        ),
+      ],
+      targets: [
+        { id: 'character_image:leo', itemId: 'leo', displayName: 'Character Reference Images: Leo', kind: 'character' },
+        { id: 'setting_image:field', itemId: 'field', displayName: 'Setting Reference Images: field', kind: 'setting' },
+      ],
+    });
+
+    expect(assignments.get('setting_image:field')).toEqual(expect.objectContaining({
+      relativePath: 'assets/uploads/references/field.png',
+      targetKind: 'setting',
+      matchStrategy: 'filename',
+    }));
+    expect(assignments.has('character_image:leo')).toBe(false);
+  });
+
+  it('does not ordered-fallback an ambiguous auto upload', () => {
+    const projectDir = makeProject();
+    writeFileSync(join(projectDir, 'assets/uploads/references/image.png'), 'image');
+
+    const assignments = matchUploadedReferences({
+      projectDir,
+      inputs: [
+        imageInput(
+          'input-auto',
+          'image.png',
+          {},
+          'reference_general',
+          'assets/uploads/references',
+        ),
+      ],
+      targets: [
+        { id: 'character_image:leo', itemId: 'leo', displayName: 'Character Reference Images: Leo', kind: 'character' },
+        { id: 'setting_image:field', itemId: 'field', displayName: 'Setting Reference Images: field', kind: 'setting' },
+      ],
+    });
+
+    expect(assignments.size).toBe(0);
+  });
+
+  it('single-fallbacks an auto upload only when one graph target is plausible', () => {
+    const projectDir = makeProject();
+    writeFileSync(join(projectDir, 'assets/uploads/references/image.png'), 'image');
+
+    const assignments = matchUploadedReferences({
+      projectDir,
+      inputs: [
+        imageInput(
+          'input-auto',
+          'image.png',
+          {},
+          'reference_general',
+          'assets/uploads/references',
+        ),
+      ],
+      targets: [
+        { id: 'setting_image:field', itemId: 'field', displayName: 'Setting Reference Images: field', kind: 'setting' },
+      ],
+    });
+
+    expect(assignments.get('setting_image:field')).toEqual(expect.objectContaining({
+      relativePath: 'assets/uploads/references/image.png',
+      targetKind: 'setting',
+      matchStrategy: 'single_auto',
+    }));
   });
 });

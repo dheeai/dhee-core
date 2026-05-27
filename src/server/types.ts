@@ -352,6 +352,16 @@ export interface CreateProjectData {
     mimeType?: string;
     size?: number;
   }>;
+  /** Staged reference images uploaded with the initial prompt */
+  referenceImages?: Array<{
+    name: string;
+    path: string;
+    url?: string;
+    mimeType?: string;
+    size?: number;
+    purpose?: 'character_ref' | 'setting_ref' | 'reference_general';
+    referenceRole?: 'auto' | 'character' | 'setting';
+  }>;
   /** Video resolution preset (e.g., '480p', '720p', '1080p', '4k') */
   resolution?: string;
   /** Video width in pixels */

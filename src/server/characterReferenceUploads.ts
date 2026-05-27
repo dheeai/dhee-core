@@ -3,6 +3,12 @@ import { basename, extname, isAbsolute, join, relative, resolve } from 'path';
 import { atomicWriteFileSync } from '../utils/atomicWrite.js';
 import type { ProjectInput } from '../tasks/video/workflow/types.js';
 
+export type ProjectReferenceImagePurpose =
+  | 'character_ref'
+  | 'setting_ref'
+  | 'reference_general';
+export type ProjectReferenceImageRole = 'auto' | 'character' | 'setting';
+
 export interface StagedCharacterReferenceImage {
   name: string;
   path: string;
@@ -11,22 +17,36 @@ export interface StagedCharacterReferenceImage {
   size?: number;
 }
 
-export interface CopiedCharacterReferenceImage {
+export interface StagedReferenceImage extends StagedCharacterReferenceImage {
+  purpose?: ProjectReferenceImagePurpose;
+  referenceRole?: ProjectReferenceImageRole;
+}
+
+export interface CopiedReferenceImage {
   /** Final project-local filename after sanitization/collision handling. */
   name: string;
   /** User-selected filename before any sanitization/collision handling. */
   originalFilename?: string;
   sourcePath: string;
   relativePath: string;
+  purpose: ProjectReferenceImagePurpose;
+  referenceRole: ProjectReferenceImageRole;
   mimeType?: string;
   size: number;
 }
 
-export interface ProjectLocalCharacterReferenceImage {
+export interface CopiedCharacterReferenceImage extends CopiedReferenceImage {
+  purpose: 'character_ref';
+  referenceRole: 'character';
+}
+
+export interface ProjectLocalReferenceImage {
   /** Final project-local filename to show in prompts. */
   name: string;
-  /** Durable project-relative path, e.g. assets/uploads/characters/hero.png. */
+  /** Durable project-relative path, e.g. assets/uploads/settings/field.png. */
   relativePath: string;
+  purpose?: ProjectReferenceImagePurpose;
+  referenceRole?: ProjectReferenceImageRole;
   /** Original user-selected absolute path, when available. */
   sourcePath?: string;
   /** User-selected filename before any sanitization/collision handling. */
@@ -35,10 +55,24 @@ export interface ProjectLocalCharacterReferenceImage {
   size?: number;
 }
 
+export type ProjectLocalCharacterReferenceImage = Omit<
+  ProjectLocalReferenceImage,
+  'purpose' | 'referenceRole'
+> & {
+  purpose?: 'character_ref';
+  referenceRole?: 'character';
+};
+
 const ALLOWED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 const CHARACTER_UPLOAD_DIR = 'assets/uploads/characters';
+const SETTING_UPLOAD_DIR = 'assets/uploads/settings';
+const GENERAL_REFERENCE_UPLOAD_DIR = 'assets/uploads/references';
 
 export function isAllowedCharacterImageFilename(filename: string): boolean {
+  return isAllowedReferenceImageFilename(filename);
+}
+
+export function isAllowedReferenceImageFilename(filename: string): boolean {
   return ALLOWED_IMAGE_EXTENSIONS.has(extname(filename).toLowerCase());
 }
 
@@ -67,30 +101,89 @@ function isInsideDirectory(parent: string, child: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
-export function copyCharacterReferenceImagesToProject(args: {
+function isReferenceRole(value: unknown): value is ProjectReferenceImageRole {
+  return value === 'auto' || value === 'character' || value === 'setting';
+}
+
+function isReferencePurpose(value: unknown): value is ProjectReferenceImagePurpose {
+  return (
+    value === 'character_ref' ||
+    value === 'setting_ref' ||
+    value === 'reference_general'
+  );
+}
+
+export function purposeForReferenceRole(
+  role: ProjectReferenceImageRole,
+): ProjectReferenceImagePurpose {
+  if (role === 'character') return 'character_ref';
+  if (role === 'setting') return 'setting_ref';
+  return 'reference_general';
+}
+
+export function roleForReferencePurpose(
+  purpose: ProjectReferenceImagePurpose | undefined,
+): ProjectReferenceImageRole {
+  if (purpose === 'character_ref') return 'character';
+  if (purpose === 'setting_ref') return 'setting';
+  return 'auto';
+}
+
+function normalizeReferenceRole(
+  image: { purpose?: unknown; referenceRole?: unknown },
+  fallback: ProjectReferenceImageRole = 'auto',
+): ProjectReferenceImageRole {
+  if (isReferenceRole(image.referenceRole)) return image.referenceRole;
+  if (isReferencePurpose(image.purpose)) return roleForReferencePurpose(image.purpose);
+  return fallback;
+}
+
+function uploadDirForRole(role: ProjectReferenceImageRole): string {
+  if (role === 'character') return CHARACTER_UPLOAD_DIR;
+  if (role === 'setting') return SETTING_UPLOAD_DIR;
+  return GENERAL_REFERENCE_UPLOAD_DIR;
+}
+
+function sectionForPurpose(purpose: ProjectReferenceImagePurpose): string {
+  if (purpose === 'character_ref') return 'Attached character reference images:';
+  if (purpose === 'setting_ref') return 'Attached setting reference images:';
+  return 'Attached reference images:';
+}
+
+function inputIdPrefixForPurpose(purpose: ProjectReferenceImagePurpose): string {
+  if (purpose === 'character_ref') return 'character-ref';
+  if (purpose === 'setting_ref') return 'setting-ref';
+  return 'reference-image';
+}
+
+export function copyReferenceImagesToProject(args: {
   projectDir: string;
-  stagedUploads?: StagedCharacterReferenceImage[];
+  stagedUploads?: StagedReferenceImage[];
   uploadsDir?: string;
-}): CopiedCharacterReferenceImage[] {
+}): CopiedReferenceImage[] {
   const uploads = args.stagedUploads ?? [];
   if (uploads.length === 0) return [];
 
   const uploadsDir = resolve(args.uploadsDir ?? join(process.cwd(), 'uploads'));
-  const targetDir = join(args.projectDir, CHARACTER_UPLOAD_DIR);
-  if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
 
   return uploads.map((upload) => {
-    if (!isAllowedCharacterImageFilename(upload.name)) {
-      throw new Error(`Unsupported character reference image type: ${upload.name}`);
+    if (!isAllowedReferenceImageFilename(upload.name)) {
+      throw new Error(`Unsupported reference image type: ${upload.name}`);
     }
 
     const sourcePath = resolve(upload.path);
     if (!isInsideDirectory(uploadsDir, sourcePath)) {
-      throw new Error(`Character reference image is not in the upload staging directory: ${upload.name}`);
+      throw new Error(`Reference image is not in the upload staging directory: ${upload.name}`);
     }
     if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
-      throw new Error(`Character reference image upload not found: ${upload.name}`);
+      throw new Error(`Reference image upload not found: ${upload.name}`);
     }
+
+    const referenceRole = normalizeReferenceRole(upload);
+    const purpose = purposeForReferenceRole(referenceRole);
+    const uploadDir = uploadDirForRole(referenceRole);
+    const targetDir = join(args.projectDir, uploadDir);
+    if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
 
     const finalName = uniqueFilename(targetDir, upload.name);
     const destPath = join(targetDir, finalName);
@@ -101,23 +194,42 @@ export function copyCharacterReferenceImagesToProject(args: {
       name: finalName,
       originalFilename: upload.name,
       sourcePath,
-      relativePath: `${CHARACTER_UPLOAD_DIR}/${finalName}`,
+      relativePath: `${uploadDir}/${finalName}`,
+      purpose,
+      referenceRole,
       ...(upload.mimeType ? { mimeType: upload.mimeType } : {}),
       size: upload.size ?? stat.size,
     };
   });
 }
 
-function assertProjectLocalCharacterReference(
+export function copyCharacterReferenceImagesToProject(args: {
+  projectDir: string;
+  stagedUploads?: StagedCharacterReferenceImage[];
+  uploadsDir?: string;
+}): CopiedCharacterReferenceImage[] {
+  return copyReferenceImagesToProject({
+    projectDir: args.projectDir,
+    uploadsDir: args.uploadsDir,
+    stagedUploads: (args.stagedUploads ?? []).map((upload) => ({
+      ...upload,
+      purpose: 'character_ref',
+      referenceRole: 'character',
+    })),
+  }) as CopiedCharacterReferenceImage[];
+}
+
+function assertProjectLocalReference(
   projectDir: string,
-  image: ProjectLocalCharacterReferenceImage,
-): CopiedCharacterReferenceImage {
+  image: ProjectLocalReferenceImage,
+  fallbackRole: ProjectReferenceImageRole = 'auto',
+): CopiedReferenceImage {
   if (
-    !isAllowedCharacterImageFilename(image.name) ||
-    !isAllowedCharacterImageFilename(image.relativePath)
+    !isAllowedReferenceImageFilename(image.name) ||
+    !isAllowedReferenceImageFilename(image.relativePath)
   ) {
     throw new Error(
-      `Unsupported character reference image type: ${image.name || image.relativePath}`,
+      `Unsupported reference image type: ${image.name || image.relativePath}`,
     );
   }
 
@@ -125,24 +237,36 @@ function assertProjectLocalCharacterReference(
   const rel = relative(resolve(projectDir), absolutePath);
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(
-      `Character reference image must be inside the project: ${image.relativePath}`,
+      `Reference image must be inside the project: ${image.relativePath}`,
     );
   }
   if (!existsSync(absolutePath) || !statSync(absolutePath).isFile()) {
     throw new Error(
-      `Character reference image not found in project: ${image.relativePath}`,
+      `Reference image not found in project: ${image.relativePath}`,
     );
   }
 
+  const referenceRole = normalizeReferenceRole(image, fallbackRole);
   const stat = statSync(absolutePath);
   return {
     name: basename(image.relativePath),
     originalFilename: image.originalFilename ?? image.name,
     sourcePath: image.sourcePath ?? absolutePath,
     relativePath: image.relativePath.replace(/\\/g, '/'),
+    purpose: purposeForReferenceRole(referenceRole),
+    referenceRole,
     ...(image.mimeType ? { mimeType: image.mimeType } : {}),
     size: image.size ?? stat.size,
   };
+}
+
+export function normalizeProjectLocalReferenceImages(args: {
+  projectDir: string;
+  images?: ProjectLocalReferenceImage[];
+}): CopiedReferenceImage[] {
+  return (args.images ?? []).map((image) =>
+    assertProjectLocalReference(args.projectDir, image),
+  );
 }
 
 export function normalizeProjectLocalCharacterReferenceImages(args: {
@@ -150,37 +274,65 @@ export function normalizeProjectLocalCharacterReferenceImages(args: {
   images?: ProjectLocalCharacterReferenceImage[];
 }): CopiedCharacterReferenceImage[] {
   return (args.images ?? []).map((image) =>
-    assertProjectLocalCharacterReference(args.projectDir, image),
-  );
+    assertProjectLocalReference(
+      args.projectDir,
+      { ...image, purpose: 'character_ref', referenceRole: 'character' },
+      'character',
+    ),
+  ) as CopiedCharacterReferenceImage[];
+}
+
+export function appendReferenceImagesToContent(
+  content: string,
+  images: CopiedReferenceImage[],
+): string {
+  if (images.length === 0) return content;
+
+  const sections: string[] = [];
+  const orderedPurposes: ProjectReferenceImagePurpose[] = [
+    'character_ref',
+    'setting_ref',
+    'reference_general',
+  ];
+  for (const purpose of orderedPurposes) {
+    const purposeImages = images.filter((image) => image.purpose === purpose);
+    if (purposeImages.length === 0) continue;
+    sections.push([
+      sectionForPurpose(purpose),
+      ...purposeImages.map((image) => `- ${image.name}: ${image.relativePath}`),
+    ].join('\n'));
+  }
+
+  return `${content.trimEnd()}\n\n${sections.join('\n\n')}`;
 }
 
 export function appendCharacterReferenceImagesToContent(
   content: string,
   images: CopiedCharacterReferenceImage[],
 ): string {
-  if (images.length === 0) return content;
-
-  const lines = [
-    'Attached character reference images:',
-    ...images.map((image) => `- ${image.name}: ${image.relativePath}`),
-  ];
-
-  return `${content.trimEnd()}\n\n${lines.join('\n')}`;
+  return appendReferenceImagesToContent(
+    content,
+    images.map((image) => ({
+      ...image,
+      purpose: 'character_ref',
+      referenceRole: 'character',
+    })),
+  );
 }
 
-export function buildCharacterReferenceProjectInputs(
-  images: CopiedCharacterReferenceImage[],
+export function buildReferenceImageProjectInputs(
+  images: CopiedReferenceImage[],
   now: number = Date.now(),
 ): ProjectInput[] {
   return images.map((image, index) => ({
-    id: `character-ref-${now}-${index + 1}`,
+    id: `${inputIdPrefixForPurpose(image.purpose)}-${now}-${index + 1}`,
     source: {
       type: 'local_path',
       value: image.relativePath,
       originalValue: image.sourcePath,
     },
     mediaType: 'image',
-    purpose: 'character_ref',
+    purpose: image.purpose,
     metadata: {
       originalFilename: image.name,
       ...(image.originalFilename
@@ -190,6 +342,7 @@ export function buildCharacterReferenceProjectInputs(
       fileSize: image.size,
       addedAt: now,
       processedAt: now,
+      referenceRole: image.referenceRole,
     },
     processing: {
       status: 'completed',
@@ -199,13 +352,27 @@ export function buildCharacterReferenceProjectInputs(
   }));
 }
 
-export function addProjectLocalCharacterReferenceInputs(args: {
+export function buildCharacterReferenceProjectInputs(
+  images: CopiedCharacterReferenceImage[],
+  now: number = Date.now(),
+): ProjectInput[] {
+  return buildReferenceImageProjectInputs(
+    images.map((image) => ({
+      ...image,
+      purpose: 'character_ref',
+      referenceRole: 'character',
+    })),
+    now,
+  );
+}
+
+export function addProjectLocalReferenceInputs(args: {
   projectDir: string;
-  images?: ProjectLocalCharacterReferenceImage[];
+  images?: ProjectLocalReferenceImage[];
   now?: number;
   notes?: string;
 }): ProjectInput[] {
-  const images = normalizeProjectLocalCharacterReferenceImages({
+  const images = normalizeProjectLocalReferenceImages({
     projectDir: args.projectDir,
     images: args.images,
   });
@@ -236,7 +403,7 @@ export function addProjectLocalCharacterReferenceInputs(args: {
   );
   if (uniqueImages.length === 0) return [];
 
-  const added = buildCharacterReferenceProjectInputs(
+  const added = buildReferenceImageProjectInputs(
     uniqueImages,
     args.now,
   ).map((input) => ({
@@ -248,4 +415,20 @@ export function addProjectLocalCharacterReferenceInputs(args: {
   project.updatedAt = args.now ?? Date.now();
   atomicWriteFileSync(projectJsonPath, JSON.stringify(project, null, 2));
   return added;
+}
+
+export function addProjectLocalCharacterReferenceInputs(args: {
+  projectDir: string;
+  images?: ProjectLocalCharacterReferenceImage[];
+  now?: number;
+  notes?: string;
+}): ProjectInput[] {
+  return addProjectLocalReferenceInputs({
+    ...args,
+    images: (args.images ?? []).map((image) => ({
+      ...image,
+      purpose: 'character_ref',
+      referenceRole: 'character',
+    })),
+  });
 }

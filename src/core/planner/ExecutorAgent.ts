@@ -87,8 +87,9 @@ import { buildShotAudioBlock } from './buildShotAudioBlock.js';
 import { buildShotNarrationDirective } from './buildShotNarrationDirective.js';
 import { skipEmptyCollectionAndDependents } from './skipEmptyCollection.js';
 import {
-  matchUploadedCharacterReferenceForTarget,
-  type CharacterReferenceMatchStrategy,
+  matchUploadedReferenceForTarget,
+  type ReferenceMatchStrategy,
+  type ReferenceTargetKind,
 } from './characterReferenceMatcher.js';
 import {
   expectedShotNumberFromItemId,
@@ -3043,7 +3044,10 @@ export class ExecutorAgent extends TypedEventEmitter {
               }
               finalOutputPath = assemblyResult;
             } else {
-              if (node.typeId === 'character_image' && this.completeCharacterImageFromUpload(node, toolCallId, agentName)) {
+              if (
+                (node.typeId === 'character_image' || node.typeId === 'setting_image') &&
+                this.completeReferenceImageFromUpload(node, toolCallId, agentName)
+              ) {
                 return;
               }
 
@@ -6134,31 +6138,45 @@ Examples of common failure modes to avoid:
     return null;
   }
 
-  private completeCharacterImageFromUpload(
+  private completeReferenceImageFromUpload(
     node: ExecutionNode,
     toolCallId: string,
     agentName: string,
   ): boolean {
-    if (node.typeId !== 'character_image' || !node.itemId) return false;
+    if (
+      (node.typeId !== 'character_image' && node.typeId !== 'setting_image') ||
+      !node.itemId
+    ) {
+      return false;
+    }
+
+    const targetKind: ReferenceTargetKind =
+      node.typeId === 'setting_image' ? 'setting' : 'character';
 
     const projectWithInputs = this.config.project as typeof this.config.project & {
       inputs?: ProjectInput[];
     };
-    const match = matchUploadedCharacterReferenceForTarget({
+    const match = matchUploadedReferenceForTarget({
       projectDir: this.config.projectDir,
       inputs: projectWithInputs.inputs,
       targets: this.executor
         .getAllNodes()
-        .filter((candidate) => candidate.typeId === 'character_image' && candidate.itemId)
+        .filter(
+          (candidate) =>
+            (candidate.typeId === 'character_image' || candidate.typeId === 'setting_image') &&
+            candidate.itemId,
+        )
         .map((candidate) => ({
           id: candidate.id,
           itemId: candidate.itemId,
           displayName: candidate.displayName,
+          kind: candidate.typeId === 'setting_image' ? 'setting' : 'character',
         })),
       target: {
         id: node.id,
         itemId: node.itemId,
         displayName: node.displayName,
+        kind: targetKind,
       },
     });
     if (!match) return false;
@@ -6166,11 +6184,11 @@ Examples of common failure modes to avoid:
     const fullPath = join(this.config.projectDir, match.relativePath);
     if (!existsSync(fullPath)) return false;
 
-    const assetId = this.uploadedCharacterAssetId(node.itemId, match.input.id);
+    const assetId = this.uploadedReferenceAssetId(targetKind, node.itemId, match.input.id);
     const createdAt = Date.now();
     const asset: AssetInfo = {
       id: assetId,
-      type: 'character_ref',
+      type: targetKind === 'setting' ? 'setting_ref' : 'character_ref',
       path: match.relativePath,
       version: 1,
       createdAt,
@@ -6183,21 +6201,28 @@ Examples of common failure modes to avoid:
       },
     };
 
-    this.markCharacterReferenceInputMatched(
+    this.markReferenceInputMatched(
       match.input.id,
-      match.characterId,
-      match.characterName,
+      targetKind,
+      match.targetId,
+      match.targetName,
       match.matchStrategy,
     );
     this.upsertManifestAsset(asset);
-    this.mirrorCharacterReferenceAssetToProject(asset, match.characterId, match.characterName);
+    this.mirrorReferenceAssetToProject(asset, targetKind, match.targetId, match.targetName);
+
+    const label = targetKind === 'setting' ? 'setting' : 'character';
+    const toolName =
+      targetKind === 'setting'
+        ? 'use_uploaded_setting_reference'
+        : 'use_uploaded_character_reference';
 
     this.emit({
       type: 'tool_call',
       toolCallId,
-      toolName: 'use_uploaded_character_reference',
+      toolName,
       arguments: {
-        character: match.characterName,
+        [label]: match.targetName,
         file: match.relativePath,
         matchStrategy: match.matchStrategy,
       },
@@ -6206,7 +6231,7 @@ Examples of common failure modes to avoid:
     this.emit({
       type: 'tool_result',
       toolCallId,
-      toolName: 'use_uploaded_character_reference',
+      toolName,
       result: {
         status: 'completed',
         file_path: match.relativePath,
@@ -6224,21 +6249,27 @@ Examples of common failure modes to avoid:
     this.executor.markCompleted(node.id, match.relativePath, assetId);
     this.persistState();
     this.emitTodoUpdate();
-    this.log(`  COMPLETED from uploaded character reference: ${node.id} → ${match.relativePath}`);
+    this.log(`  COMPLETED from uploaded ${label} reference: ${node.id} → ${match.relativePath}`);
     return true;
   }
 
-  private uploadedCharacterAssetId(characterId: string, inputId: string): string {
-    const safeCharacterId = characterId.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  private uploadedReferenceAssetId(
+    targetKind: ReferenceTargetKind,
+    targetId: string,
+    inputId: string,
+  ): string {
+    const safeTargetId = targetId.replace(/[^a-zA-Z0-9_-]+/g, '_');
     const safeInputId = inputId.replace(/[^a-zA-Z0-9_-]+/g, '_');
-    return `uploaded_charref_${safeCharacterId}_${safeInputId}`;
+    const prefix = targetKind === 'setting' ? 'uploaded_settingref' : 'uploaded_charref';
+    return `${prefix}_${safeTargetId}_${safeInputId}`;
   }
 
-  private markCharacterReferenceInputMatched(
+  private markReferenceInputMatched(
     inputId: string,
-    characterId: string,
-    characterName: string,
-    matchStrategy: CharacterReferenceMatchStrategy,
+    targetKind: ReferenceTargetKind,
+    targetId: string,
+    targetName: string,
+    matchStrategy: ReferenceMatchStrategy,
   ): void {
     const projectWithInputs = this.config.project as typeof this.config.project & {
       inputs?: ProjectInput[];
@@ -6248,8 +6279,15 @@ Examples of common failure modes to avoid:
 
     input.metadata = {
       ...input.metadata,
-      matchedCharacterId: characterId,
-      matchedCharacterName: characterName,
+      ...(targetKind === 'setting'
+        ? {
+            matchedSettingId: targetId,
+            matchedSettingName: targetName,
+          }
+        : {
+            matchedCharacterId: targetId,
+            matchedCharacterName: targetName,
+          }),
       matchStrategy,
     };
   }
@@ -6280,28 +6318,32 @@ Examples of common failure modes to avoid:
     atomicWriteFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
   }
 
-  private mirrorCharacterReferenceAssetToProject(
+  private mirrorReferenceAssetToProject(
     asset: AssetInfo,
-    characterId: string,
-    characterName: string,
+    targetKind: ReferenceTargetKind,
+    targetId: string,
+    targetName: string,
   ): void {
     const project = this.config.project as typeof this.config.project & {
       assets?: string[];
       characters?: Array<Record<string, unknown>>;
+      settings?: Array<Record<string, unknown>>;
     };
 
     if (!Array.isArray(project.assets)) project.assets = [];
     if (!project.assets.includes(asset.id)) project.assets.push(asset.id);
 
-    if (!Array.isArray(project.characters)) project.characters = [];
-    let character = project.characters.find((entry) => {
-      const id = typeof entry['id'] === 'string' ? entry['id'] : undefined;
-      const name = typeof entry['name'] === 'string' ? entry['name'] : undefined;
-      return id === characterId || name === characterName || name === characterId;
+    const collectionKey = targetKind === 'setting' ? 'settings' : 'characters';
+    if (!Array.isArray(project[collectionKey])) project[collectionKey] = [];
+    const collection = project[collectionKey] as Array<Record<string, unknown>>;
+    let entry = collection.find((candidate) => {
+      const id = typeof candidate['id'] === 'string' ? candidate['id'] : undefined;
+      const name = typeof candidate['name'] === 'string' ? candidate['name'] : undefined;
+      return id === targetId || name === targetName || name === targetId;
     });
-    if (!character) {
-      character = { id: characterId, name: characterName };
-      project.characters.push(character);
+    if (!entry) {
+      entry = { id: targetId, name: targetName };
+      collection.push(entry);
     }
 
     const referenceImage = {
@@ -6309,11 +6351,11 @@ Examples of common failure modes to avoid:
       createdAt: asset.createdAt,
       ...(asset.metadata ? { metadata: asset.metadata } : {}),
     };
-    character['id'] = typeof character['id'] === 'string' ? character['id'] : characterId;
-    character['name'] = typeof character['name'] === 'string' ? character['name'] : characterName;
-    character['referenceImage'] = referenceImage;
-    character['referenceImageId'] = asset.id;
-    character['referenceImagePath'] = asset.path;
+    entry['id'] = typeof entry['id'] === 'string' ? entry['id'] : targetId;
+    entry['name'] = typeof entry['name'] === 'string' ? entry['name'] : targetName;
+    entry['referenceImage'] = referenceImage;
+    entry['referenceImageId'] = asset.id;
+    entry['referenceImagePath'] = asset.path;
   }
 
   /**

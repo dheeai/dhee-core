@@ -52,6 +52,45 @@ const Params = Type.Object({
       }),
     ),
   ),
+  referenceImages: Type.Optional(
+    Type.Array(
+      Type.Object({
+        name: Type.String({
+          description: "Final project-local filename, e.g. field.png",
+        }),
+        relativePath: Type.String({
+          description:
+            "Project-relative copied image path, e.g. assets/uploads/settings/field.png",
+        }),
+        purpose: Type.Optional(
+          Type.Union([
+            Type.Literal("character_ref"),
+            Type.Literal("setting_ref"),
+            Type.Literal("reference_general"),
+          ]),
+        ),
+        referenceRole: Type.Optional(
+          Type.Union([
+            Type.Literal("auto"),
+            Type.Literal("character"),
+            Type.Literal("setting"),
+          ]),
+        ),
+        sourcePath: Type.Optional(
+          Type.String({
+            description: "Original absolute file path selected by the user.",
+          }),
+        ),
+        originalFilename: Type.Optional(
+          Type.String({
+            description: "Original user-selected filename before collision handling.",
+          }),
+        ),
+        mimeType: Type.Optional(Type.String()),
+        size: Type.Optional(Type.Number()),
+      }),
+    ),
+  ),
 });
 
 export interface NewProjectDetails {
@@ -107,6 +146,9 @@ export const dheeNew = defineTool({
         ...(params.existingDir ? { existingDir: params.existingDir } : {}),
         ...(params.characterReferenceImages
           ? { characterReferenceImages: params.characterReferenceImages }
+          : {}),
+        ...(params.referenceImages
+          ? { referenceImages: params.referenceImages }
           : {}),
       });
 

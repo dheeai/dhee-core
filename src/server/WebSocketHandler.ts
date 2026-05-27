@@ -61,9 +61,9 @@ import {
   type DesktopSessionCapabilities,
 } from '../core/remote/DesktopAssemblyBroker.js';
 import {
-  appendCharacterReferenceImagesToContent,
-  buildCharacterReferenceProjectInputs,
-  copyCharacterReferenceImagesToProject,
+  appendReferenceImagesToContent,
+  buildReferenceImageProjectInputs,
+  copyReferenceImagesToProject,
 } from './characterReferenceUploads.js';
 
 interface ConnectionState {
@@ -806,21 +806,29 @@ export class WebSocketHandler {
       const { atomicWriteFileSync } = await import('../utils/atomicWrite.js');
       const projectDir = join(process.cwd(), projectDirName);
       const projFile = join(projectDir, 'project.json');
-      const copiedCharacterRefs = copyCharacterReferenceImagesToProject({
+      const stagedReferenceImages = [
+        ...(data.characterReferenceImages ?? []).map((image) => ({
+          ...image,
+          purpose: 'character_ref' as const,
+          referenceRole: 'character' as const,
+        })),
+        ...(data.referenceImages ?? []),
+      ];
+      const copiedReferenceImages = copyReferenceImagesToProject({
         projectDir,
-        stagedUploads: data.characterReferenceImages,
+        stagedUploads: stagedReferenceImages,
       });
 
-      if (copiedCharacterRefs.length > 0) {
-        const contentWithReferences = appendCharacterReferenceImagesToContent(
+      if (copiedReferenceImages.length > 0) {
+        const contentWithReferences = appendReferenceImagesToContent(
           data.content,
-          copiedCharacterRefs,
+          copiedReferenceImages,
         );
         atomicWriteFileSync(join(projectDir, 'original_input.md'), contentWithReferences);
       }
 
       // Store resolution and durable character-reference input metadata in project.json.
-      if (data.resolution || data.resolutionWidth || copiedCharacterRefs.length > 0) {
+      if (data.resolution || data.resolutionWidth || copiedReferenceImages.length > 0) {
         try {
           const projData = JSON.parse(readFileSync(projFile, 'utf-8'));
           let dirty = false;
@@ -830,11 +838,11 @@ export class WebSocketHandler {
           projData.resolutionHeight = data.resolutionHeight || 480;
           dirty = true;
 
-          if (copiedCharacterRefs.length > 0) {
+          if (copiedReferenceImages.length > 0) {
             const existingInputs = Array.isArray(projData.inputs) ? projData.inputs : [];
             projData.inputs = [
               ...existingInputs,
-              ...buildCharacterReferenceProjectInputs(copiedCharacterRefs),
+              ...buildReferenceImageProjectInputs(copiedReferenceImages),
             ];
             projData.updatedAt = Date.now();
             dirty = true;
@@ -844,7 +852,7 @@ export class WebSocketHandler {
             atomicWriteFileSync(projFile, JSON.stringify(projData, null, 2));
           }
         } catch (err) {
-          if (copiedCharacterRefs.length > 0) throw err;
+          if (copiedReferenceImages.length > 0) throw err;
           // Resolution persistence is non-fatal for older behavior.
         }
       }

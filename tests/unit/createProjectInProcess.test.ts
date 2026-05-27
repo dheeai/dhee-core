@@ -133,6 +133,135 @@ describe('createProjectInProcess', () => {
     ]);
   });
 
+  it('stores project-local setting and auto references in original_input.md and project.inputs', () => {
+    const projectDir = join(basePath, 'with-setting-ref.dhee');
+    mkdirSync(join(projectDir, 'assets/uploads/settings'), { recursive: true });
+    mkdirSync(join(projectDir, 'assets/uploads/references'), { recursive: true });
+    writeFileSync(join(projectDir, 'assets/uploads/settings/field.png'), 'field');
+    writeFileSync(join(projectDir, 'assets/uploads/references/mood.png'), 'mood');
+
+    const result = createProjectInProcess({
+      name: 'with-setting-ref',
+      input: 'A match starts on a field.',
+      style: 'live',
+      duration: 60,
+      basePath,
+      existingDir: projectDir,
+      referenceImages: [
+        {
+          name: 'field.png',
+          relativePath: 'assets/uploads/settings/field.png',
+          sourcePath: '/Users/me/Desktop/Field.png',
+          originalFilename: 'Field.png',
+          mimeType: 'image/png',
+          size: 5,
+          referenceRole: 'setting',
+        },
+        {
+          name: 'mood.png',
+          relativePath: 'assets/uploads/references/mood.png',
+          sourcePath: '/Users/me/Desktop/Mood.png',
+          originalFilename: 'Mood.png',
+          mimeType: 'image/png',
+          size: 4,
+          referenceRole: 'auto',
+        },
+      ],
+    });
+
+    expect(readFileSync(join(projectDir, 'original_input.md'), 'utf8')).toBe(
+      [
+        'A match starts on a field.',
+        '',
+        'Attached setting reference images:',
+        '- field.png: assets/uploads/settings/field.png',
+        '',
+        'Attached reference images:',
+        '- mood.png: assets/uploads/references/mood.png',
+      ].join('\n'),
+    );
+
+    const raw = readFileSync(join(result.projectDir, 'project.json'), 'utf8');
+    const project = JSON.parse(raw) as {
+      inputs?: Array<{
+        source: { value: string; originalValue?: string };
+        purpose: string;
+        metadata: { originalFilename?: string; referenceRole?: string };
+      }>;
+    };
+    expect(project.inputs).toEqual([
+      expect.objectContaining({
+        source: expect.objectContaining({
+          value: 'assets/uploads/settings/field.png',
+          originalValue: '/Users/me/Desktop/Field.png',
+        }),
+        purpose: 'setting_ref',
+        metadata: expect.objectContaining({
+          originalFilename: 'Field.png',
+          referenceRole: 'setting',
+        }),
+      }),
+      expect.objectContaining({
+        source: expect.objectContaining({
+          value: 'assets/uploads/references/mood.png',
+          originalValue: '/Users/me/Desktop/Mood.png',
+        }),
+        purpose: 'reference_general',
+        metadata: expect.objectContaining({
+          originalFilename: 'Mood.png',
+          referenceRole: 'auto',
+        }),
+      }),
+    ]);
+  });
+
+  it('infers setting role when a legacy characterReferenceImages payload contains a settings upload path', () => {
+    const projectDir = join(basePath, 'legacy-setting-ref.dhee');
+    mkdirSync(join(projectDir, 'assets/uploads/settings'), { recursive: true });
+    writeFileSync(join(projectDir, 'assets/uploads/settings/Sky.png'), 'sky');
+
+    const result = createProjectInProcess({
+      name: 'legacy-setting-ref',
+      input: 'A sky over the seaside.',
+      style: 'live',
+      duration: 60,
+      basePath,
+      existingDir: projectDir,
+      characterReferenceImages: [{
+        name: 'Sky.png',
+        relativePath: 'assets/uploads/settings/Sky.png',
+        sourcePath: '/Users/me/Desktop/Sky.png',
+        originalFilename: 'Sky.png',
+        mimeType: 'image/png',
+        size: 3,
+      }],
+    });
+
+    expect(readFileSync(join(projectDir, 'original_input.md'), 'utf8')).toBe(
+      'A sky over the seaside.\n\nAttached setting reference images:\n- Sky.png: assets/uploads/settings/Sky.png',
+    );
+
+    const raw = readFileSync(join(result.projectDir, 'project.json'), 'utf8');
+    const project = JSON.parse(raw) as {
+      inputs?: Array<{
+        source: { value: string };
+        purpose: string;
+        metadata: { referenceRole?: string };
+      }>;
+    };
+    expect(project.inputs).toEqual([
+      expect.objectContaining({
+        source: expect.objectContaining({
+          value: 'assets/uploads/settings/Sky.png',
+        }),
+        purpose: 'setting_ref',
+        metadata: expect.objectContaining({
+          referenceRole: 'setting',
+        }),
+      }),
+    ]);
+  });
+
   it('writes project.json with the requested style + duration + name as title', () => {
     const result = createProjectInProcess({
       name: 'fight-scene',

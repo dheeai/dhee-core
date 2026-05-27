@@ -23,6 +23,15 @@ const template = {
       dependencies: [],
       filePattern: 'prompts/images/characters/{{name}}.json',
     },
+    setting_image: {
+      id: 'setting_image',
+      displayName: 'Setting Reference Image',
+      category: 'visual_ref',
+      isCollection: true,
+      isExpensive: true,
+      dependencies: [],
+      filePattern: 'prompts/images/settings/{{name}}.json',
+    },
     shot_image: {
       id: 'shot_image',
       displayName: 'Shot Image',
@@ -52,6 +61,7 @@ class ThrowingLLM {
 function makeProjectDir(): string {
   tempDir = mkdtempSync(join(tmpdir(), 'dhee-uploaded-charref-executor-'));
   mkdirSync(join(tempDir, 'assets/uploads/characters'), { recursive: true });
+  mkdirSync(join(tempDir, 'assets/uploads/settings'), { recursive: true });
   mkdirSync(join(tempDir, 'logs'), { recursive: true });
   return tempDir;
 }
@@ -102,6 +112,28 @@ function characterInput(filename: string): ProjectInput {
   };
 }
 
+function settingInput(filename: string): ProjectInput {
+  return {
+    id: 'input-field',
+    source: {
+      type: 'local_path',
+      value: `assets/uploads/settings/${filename}`,
+    },
+    mediaType: 'image',
+    purpose: 'setting_ref',
+    metadata: {
+      originalFilename: filename,
+      addedAt: 1,
+      processedAt: 1,
+      referenceRole: 'setting',
+    },
+    processing: {
+      status: 'completed',
+      localPath: `assets/uploads/settings/${filename}`,
+    },
+  };
+}
+
 function makeAgent(projectDir: string, state: ExecutorState, inputs: ProjectInput[], llm: ThrowingLLM): ExecutorAgent {
   return new ExecutorAgent(llm as any, {
     template,
@@ -118,6 +150,7 @@ function makeAgent(projectDir: string, state: ExecutorState, inputs: ProjectInpu
       artifacts: {},
       assets: [],
       contextStore: {},
+      settings: [],
       inputs,
       executorState: state,
     } as any,
@@ -216,6 +249,59 @@ describe('uploaded character references in executor graph', () => {
     expect(llm.calls).toBe(0);
   });
 
+  it('uses an uploaded setting image to complete a pending setting_image node', async () => {
+    const projectDir = makeProjectDir();
+    writeFileSync(join(projectDir, 'assets/uploads/settings/field.png'), 'image');
+    const llm = new ThrowingLLM();
+
+    const agent = makeAgent(projectDir, makeState({
+      'setting_image:football_field': {
+        typeId: 'setting_image',
+        itemId: 'football_field',
+        displayName: 'Setting Reference Images: football field',
+        status: 'pending',
+        isCollection: true,
+        isExpensive: true,
+      },
+    }), [settingInput('field.png')], llm);
+
+    const result = await agent.run('');
+
+    expect(result.status).toBe('completed');
+    expect(llm.calls).toBe(0);
+
+    const project = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf-8'));
+    const node = project.executorState.nodes['setting_image:football_field'];
+    expect(node.status).toBe('completed');
+    expect(node.outputPath).toBe('assets/uploads/settings/field.png');
+    expect(node.artifactId).toBe('uploaded_settingref_football_field_input-field');
+    expect(project.inputs[0].metadata).toEqual(expect.objectContaining({
+      matchedSettingId: 'football_field',
+      matchedSettingName: 'football field',
+      matchStrategy: 'filename',
+    }));
+    expect(project.settings[0]).toEqual(expect.objectContaining({
+      id: 'football_field',
+      referenceImagePath: 'assets/uploads/settings/field.png',
+    }));
+
+    const manifest = JSON.parse(readFileSync(join(projectDir, 'assets/manifest.json'), 'utf-8'));
+    expect(manifest.assets).toEqual([
+      expect.objectContaining({
+        id: 'uploaded_settingref_football_field_input-field',
+        type: 'setting_ref',
+        path: 'assets/uploads/settings/field.png',
+        nodeId: 'setting_image:football_field',
+        metadata: expect.objectContaining({
+          source: 'user_upload',
+          inputId: 'input-field',
+          originalFilename: 'field.png',
+          matchStrategy: 'filename',
+        }),
+      }),
+    ]);
+  });
+
   it('lets downstream shot inputs resolve the uploaded character path through the graph', () => {
     const projectDir = makeProjectDir();
     writeFileSync(join(projectDir, 'assets/uploads/characters/boy.png'), 'image');
@@ -247,6 +333,41 @@ describe('uploaded character references in executor graph', () => {
         name: 'leo',
         path: 'assets/uploads/characters/boy.png',
         type: 'character',
+      },
+    ]);
+  });
+
+  it('lets downstream shot inputs resolve the uploaded setting path through the graph', () => {
+    const projectDir = makeProjectDir();
+    writeFileSync(join(projectDir, 'assets/uploads/settings/field.png'), 'image');
+
+    const executor = DependencyGraphExecutor.fromState(makeState({
+      'setting_image:field': {
+        typeId: 'setting_image',
+        itemId: 'field',
+        displayName: 'Setting Reference Images: field',
+        status: 'completed',
+        outputPath: 'assets/uploads/settings/field.png',
+      },
+      'shot_image:scene_1_shot_1': {
+        typeId: 'shot_image',
+        itemId: 'scene_1_shot_1',
+        displayName: 'Shot Images: S1 Shot 1',
+        status: 'pending',
+        dependencies: ['setting_image:field'],
+      },
+    }), template);
+
+    const shotNode = executor.getNode('shot_image:scene_1_shot_1');
+    expect(shotNode).toBeDefined();
+    const inputs = resolveInputs(shotNode!, executor, projectDir);
+
+    expect(existsSync(join(projectDir, inputs.referenceImages[0]!.path))).toBe(true);
+    expect(inputs.referenceImages).toEqual([
+      {
+        name: 'field',
+        path: 'assets/uploads/settings/field.png',
+        type: 'setting',
       },
     ]);
   });
