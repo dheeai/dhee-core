@@ -197,15 +197,14 @@ export function createProjectInProcess(
   const resolvedRenderMethod =
     resolveRenderMethod(typeof opts.renderMethod === 'string' ? opts.renderMethod : undefined) ??
     DEFAULT_RENDER_METHOD;
-  // Derive bundleSource from renderMethod for the migrated paths.
-  // Today only prompt_relay has a fully-authored bundle
-  // (built-in:ltx_prompt_relay); shot_by_shot stays on the legacy
-  // executor (no bundleSource) until narrative_classic ships as a
-  // bundle. When set, executeRunTo dispatches the entire project
-  // through the bundle architecture (walker + runners); when absent,
-  // it falls back to runExecutor. No mix-and-match within a project.
-  const bundleSource: string | undefined =
-    resolvedRenderMethod === 'prompt_relay' ? 'built-in:ltx_prompt_relay' : undefined;
+  // Derive bundleSource from renderMethod. Both methods have
+  // dedicated, end-to-end-verified bundles. Legacy executor path
+  // has been removed — every project runs entirely through the
+  // bundle architecture.
+  const bundleSource: string =
+    resolvedRenderMethod === 'prompt_relay'
+      ? 'built-in:narrative_prompt_relay'
+      : 'built-in:narrative_shot_by_shot';
 
   if (existsSync(projectJsonPath)) {
     try {
@@ -213,9 +212,7 @@ export function createProjectInProcess(
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       parsed['title'] = opts.name;
       parsed['renderMethod'] = resolvedRenderMethod;
-      if (bundleSource) {
-        parsed['bundleSource'] = bundleSource;
-      }
+      parsed['bundleSource'] = bundleSource;
       const existingFeatures = (parsed['features'] as Record<string, unknown> | undefined) ?? {};
       parsed['features'] = {
         skipHoldingBeatLF: false,
@@ -224,9 +221,7 @@ export function createProjectInProcess(
       writeFileSync(projectJsonPath, JSON.stringify(parsed, null, 2));
       project.title = opts.name;
       (project as unknown as { renderMethod?: string }).renderMethod = resolvedRenderMethod;
-      if (bundleSource) {
-        (project as unknown as { bundleSource?: string }).bundleSource = bundleSource;
-      }
+      (project as unknown as { bundleSource?: string }).bundleSource = bundleSource;
     } catch {
       // Title + features + renderMethod + bundleSource rewrite is
       // cosmetic; project still works without it (interpretation

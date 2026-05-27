@@ -24,8 +24,6 @@ import { resolveProjectDir } from '../../agent/pi/tools/resolveProjectDir.js';
 import { getProjectsDir } from '../../agent/pi/paths.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { classifyRunTarget } from './classifyRunTarget.js';
-import { resolveNodeId, type ExecutorState } from '../../core/project/projectTypes.js';
 import type { GenericProjectFile } from '../../core/templates/types.js';
 import { clearStaleStopFile } from './preflightStopFile.js';
 
@@ -70,131 +68,36 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
     bundleSource?: string;
   };
 
-  // ── Bundle dispatch (Phase 5) ─────────────────────────────────────
-  // If project.json declares a bundleSource, route through the new
-  // bundle architecture (walker + runners). The legacy executor /
-  // runProjectInProcess path is reserved for projects without a
-  // bundleSource. No mix-and-match.
-  if (project.bundleSource) {
-    ctx.hooks.onNotification({
-      level: 'info',
-      message: `dispatch via bundle: ${project.bundleSource}`,
-    });
-    const { runProjectViaBundle } = await import('./runProjectViaBundle.js');
-    const result = await runProjectViaBundle({
-      projectDir,
-      ...(params.stage ? { stopAt: params.stage } : {}),
-      signal: ctx.signal,
-      log: (m) => ctx.hooks.onNotification({ level: 'info', message: m }),
-    });
-    if (!result.ok) {
-      throw new Error(result.error ?? 'bundle run failed');
-    }
-    if (result.finalVideoAbs) {
-      ctx.hooks.onNotification({
-        level: 'info',
-        message: `bundle complete. Final video: ${result.finalVideoAbs}`,
-      });
-    }
-    return;
+  // Every project runs through the bundle architecture. project.json
+  // MUST declare a bundleSource; without one we fail loudly rather
+  // than silently fall through to a legacy path that no longer exists.
+  if (!project.bundleSource) {
+    throw new Error(
+      `Project at ${projectDir} has no bundleSource in project.json. ` +
+      `All projects now run through the bundle architecture. Set ` +
+      `'bundleSource' to 'built-in:narrative_prompt_relay' or ` +
+      `'built-in:narrative_shot_by_shot'.`,
+    );
   }
-
-  let resolvedTarget: { stage?: string; nodeId?: string };
-  const classified = classifyRunTarget(params.stage ?? null);
-  if (classified.alias) {
-    const state = (project as unknown as { executorState?: ExecutorState })
-      .executorState;
-    if (!state) {
-      throw new Error(
-        `Cannot resolve alias '${classified.alias}' — project has no executorState yet. Run dhee_run_to without a target first to bootstrap.`,
-      );
-    }
-    const resolved = resolveNodeId(state, classified.alias);
-    if (!resolved) {
-      throw new Error(`Unknown alias: '${classified.alias}'.`);
-    }
-    resolvedTarget = { nodeId: resolved };
-  } else {
-    resolvedTarget = {
-      ...(classified.stage ? { stage: classified.stage } : {}),
-      ...(classified.nodeId ? { nodeId: classified.nodeId } : {}),
-    };
-  }
-
-  // Last-invalidated whitelist: read on dispatch (not lazy) so a
-  // concurrent invalidate can't slip a stale list in mid-run. Empty
-  // list when scope='last_invalidated' but nothing was previously
-  // invalidated — the executor will exit immediately rather than
-  // silently fall through to "run everything", which would surprise
-  // the user.
-  let runOnly: string[] | undefined;
-  if (params.scope === 'last_invalidated') {
-    const state = (project as unknown as {
-      executorState?: { lastInvalidatedIds?: string[] };
-    }).executorState;
-    runOnly = state?.lastInvalidatedIds ?? [];
-    ctx.hooks.onNotification({
-      level: 'info',
-      message:
-        runOnly.length === 0
-          ? 'scope=last_invalidated, but no nodes were previously invalidated — nothing to run.'
-          : `scope=last_invalidated — running ONLY the ${runOnly.length} previously-invalidated node(s).`,
-    });
-  }
-
-  // The legacy in-executor VLM-review gate (consumer of vlmEnabledForRun)
-  // has been removed — semantic image judgment is now ConversationManager's
-  // supervisor path (asset event → describeImageWithVLM → pi-agent turn).
-  // The `piOversight`/`vlmJudge` runtime constraint is enforced there
-  // directly (gates 1+2 of `runSupervisorInvocation`). Nothing here
-  // needs to plumb a snapshot any more.
-
-  // Legacy executor path (project has no bundleSource). Calls
-  // runExecutor directly — the runProjectInProcess "dispatcher" that
-  // used to live between has been removed as part of the bundle
-  // migration (Phase 6). Mix-and-match routing is gone; for any
-  // non-bundle project this is a thin pass-through to the executor.
-  const { runExecutor } = await import('./runExecutor.js');
-  const result = await runExecutor({
-    project,
-    projectDir,
-    target: {
-      ...resolvedTarget,
-      ...(params.skip_media ? { skipMedia: true } : {}),
-      ...(runOnly ? { runOnly } : {}),
-    },
-    signal: ctx.signal,
-    name: 'task-runner-run-to',
-    onTool: (info) => ctx.hooks.onTool(info),
-    onResult: (info) => ctx.hooks.onResult(info),
-    onNotification: (info) => ctx.hooks.onNotification(info),
-    ...(ctx.hooks.onAsset
-      ? {
-          onAsset: (event) => {
-            ctx.hooks.onAsset?.({
-              kind: event.kind,
-              filePath: event.filePath,
-              ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
-              ...(event.nodeId !== undefined ? { nodeId: event.nodeId } : {}),
-            });
-          },
-        }
-      : {}),
+  ctx.hooks.onNotification({
+    level: 'info',
+    message: `dispatch via bundle: ${project.bundleSource}`,
   });
-
-  if (result.status === 'failed') {
-    throw new Error(result.error ?? 'run_to failed');
+  const { runProjectViaBundle } = await import('./runProjectViaBundle.js');
+  const result = await runProjectViaBundle({
+    projectDir,
+    ...(params.stage ? { stopAt: params.stage } : {}),
+    signal: ctx.signal,
+    log: (m) => ctx.hooks.onNotification({ level: 'info', message: m }),
+  });
+  if (!result.ok) {
+    throw new Error(result.error ?? 'bundle run failed');
   }
-  // Cancellation can come from two paths:
-  //   - AbortController.abort() (set by `runner.cancel()` from the host)
-  //     — the runner sees `signal.aborted` and emits 'cancelled'
-  //   - `.executor.stop` sentinel consumed by ExecutorAgent — runExecutor
-  //     returns `status: 'cancelled'` but the AbortController was never
-  //     tripped. Without the explicit return below, runActive() would
-  //     classify the task as 'completed' and the chat session would
-  //     never see the cancellation, even though no work happened.
-  if (result.status === 'cancelled') {
-    return { cancelled: true };
+  if (result.finalVideoAbs) {
+    ctx.hooks.onNotification({
+      level: 'info',
+      message: `bundle complete. Final video: ${result.finalVideoAbs}`,
+    });
   }
   return;
 }
