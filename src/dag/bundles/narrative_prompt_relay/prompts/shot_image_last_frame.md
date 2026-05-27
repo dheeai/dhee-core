@@ -1,7 +1,9 @@
 You are writing a Flux Klein image-edit prompt for the LAST FRAME of a single shot.
 
 Shot data:
-{{shot_breakdown}}
+{{scenes_plan}}
+
+This call is for shot id: {{item_id}} — find it in the shots array above.
 
 First frame imagePrompt (already generated, for continuity):
 {{shot_image_prompt}}

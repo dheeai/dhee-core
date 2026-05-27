@@ -208,17 +208,21 @@ function materializeCollection(
         );
       }
       const raw = JSON.parse(readFileSync(upstreamPath, 'utf-8')) as unknown;
-      // Accept either: top-level array, or { items: [...] }, or a
-      // map of the right shape under a node-specific key (e.g.
-      // story.characters[], scene.shots[]).
+      // Accept: top-level array, or { itemKey: [...] } (when
+      // node.itemKey is declared), or { items: [...] }, or first
+      // array-valued property as a last resort. Honoring itemKey
+      // first is critical when the upstream emits multiple arrays
+      // (e.g. scenes_plan: {scenes, shots}).
       let items: Array<{ id?: string; name?: string } | string> = [];
       if (Array.isArray(raw)) {
         items = raw as Array<{ id?: string; name?: string } | string>;
       } else if (raw && typeof raw === 'object') {
         const obj = raw as Record<string, unknown>;
-        // Try `items`, then any top-level array property.
-        if (Array.isArray(obj['items'])) items = obj['items'] as Array<{ id?: string; name?: string } | string>;
-        else {
+        if (node.itemKey && Array.isArray(obj[node.itemKey])) {
+          items = obj[node.itemKey] as Array<{ id?: string; name?: string } | string>;
+        } else if (Array.isArray(obj['items'])) {
+          items = obj['items'] as Array<{ id?: string; name?: string } | string>;
+        } else {
           for (const v of Object.values(obj)) {
             if (Array.isArray(v)) {
               items = v as Array<{ id?: string; name?: string } | string>;

@@ -57,3 +57,37 @@ prompted the migration are documented in the commit history of the
   - The `scripts/probe-ltx-director.ts` / `scripts/probe-ltx-director-chain.ts` probes — should be re-run to confirm the chain workflow worked at all in the probe.
 - **Test:** `tests/dag/bundle-paths.test.ts` — "BUG-001 regression — bundle points at the non-chain director workflow (first-chunk safe)". Pins both the workflowPath choice AND independently asserts the on-disk workflow contains zero VHS_LoadVideo nodes (so a future workflow-file edit can't reintroduce the dependency without failing the test).
 - **Fix commit:** the bundle's `scene_clip.runner.config.workflowPath` reverted from `ltx23_director_chain_local.json` back to `ltx23_director_local.json`. The chain workflow is reserved for future per-instance multi-chunk continuation work (manifestation (b) above); BUG-001 (b) and (c) remain as known follow-up but the canonical single-chunk case is verified working end-to-end on The Cup (assets/videos/final/dag_relay_final.mp4, 3.6 MB).
+
+---
+
+### BUG-002 — Walker collection materializer picks the wrong array when upstream JSON has multiple
+- **Status:** fixed
+- **Discovered:** 2026-05-27 (live during narrative_prompt_relay smoke on /tmp/bundle-e2e-smoke)
+- **Reporter:** claude
+- **Symptom:** `scenes_plan` LLM output is `{scenes: [...], shots: [...]}`. Both shot_image_prompt and scene_clip were sourced from scenes_plan, but only ONE instance of shot_image_prompt was created (with itemId='scene_1'), not one per shot. The materializer was picking the first array property (`scenes`, length 1) instead of `shots` (length 6).
+- **Evidence:** "shot_image_prompt[scene_1] via llm.generate" appeared once instead of 6 times in run output.
+- **Suspected root cause:** materializer used `Object.values(obj).find(Array.isArray)` which is order-dependent and ambiguous when multiple arrays exist.
+- **Manifestations to test:** (a) upstream emits a single array — pick it (works today); (b) upstream emits two arrays, bundle specifies itemKey — pick the named one; (c) upstream emits two arrays, bundle does NOT specify itemKey — fall back to first array property (back-compat); (d) itemKey names a property that isn't an array — should fail clearly, not silently fall through.
+- **Test:** `tests/dag/walkerCollectionItemKey.test.ts` (added with this fix).
+- **Fix commit:** NodeDef gains `itemKey?: string`. Walker materializer checks `obj[itemKey]` first when set. Bundle declares `itemKey: 'shots'` on shot-fanout nodes, `itemKey: 'scenes'` on scene_clip, etc.
+
+### BUG-003 — Walker did not inject ctx.itemId as a template variable
+- **Status:** fixed
+- **Discovered:** 2026-05-27 (during the same smoke run)
+- **Reporter:** claude
+- **Symptom:** Prompts that needed to know which shot they were operating on couldn't access the item id. The shot_image_prompt template was originally written with `{{shot_breakdown}}` (intended to be per-shot data); when re-pointed at `{{scenes_plan}}` (the whole JSON), it also needed `{{item_id}}` so the LLM could locate "the shot I'm working on" in the full scenes array.
+- **Evidence:** "prompt template references variable(s) that were not provided: shot_breakdown" — the prompt was looking for a key that didn't exist; once renamed, the prompt also needs ctx.itemId.
+- **Suspected root cause:** llm.generate runner's template substitution only fed `ctx.inputs`; ctx.itemId was not auto-injected.
+- **Manifestations to test:** (a) item_id is exposed as {{item_id}} for collection instances; (b) item_id is not over-written when an upstream input is also keyed "item_id" (precedence); (c) stage nodes (no itemId) — {{item_id}} reference fails clearly with the "not provided" error.
+- **Test:** `tests/dag/runners/llmGenerate.test.ts` — new case "exposes ctx.itemId as {{item_id}} for collection instances".
+- **Fix commit:** llmGenerate runner now seeds `inputsWithItemId = { ...ctx.inputs, item_id: ctx.itemId }` before substitution.
+
+### BUG-004 — Walker bundle-input file loader could not consume `inputs/story.md` style root paths
+- **Status:** fixed
+- **Discovered:** 2026-05-27 (during the same smoke run)
+- **Reporter:** claude
+- **Symptom:** When a fresh bundle project was set up with `inputs/story.md` and bundle.json declared `{kind:'file', path:'inputs/story.md'}`, the prompt successfully received {{story_input}}. Originally the walker had no concept of bundle-level inputs and could not have consumed file content this way.
+- **Suspected root cause:** missing feature — bundles must be able to declare "root inputs" coming from project files / project.json fields.
+- **Manifestations to test:** (a) file kind with present file → resolved as string; (b) file kind with missing file + required=false → silently absent; (c) file kind with missing file + required=true → error names the file; (d) project kind with present field via dot-path → resolved; (e) project kind with missing field + default → uses default; (f) project kind with missing field + no default + required → error names the field.
+- **Test:** `tests/dag/walkerBundleInputs.test.ts` (added with this fix).
+- **Fix commit:** walker.ts gains `resolveBundleInputs()`; schema gains `BundleInputDecl[]`.

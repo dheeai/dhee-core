@@ -75,6 +75,14 @@ export interface NodeDef {
   /** For collections: upstream id whose items we fan out over. */
   itemSource?: string;
   /**
+   * For collections sourced from an upstream that emits a JSON object
+   * with multiple arrays (e.g. scenes_plan emits both `scenes` and
+   * `shots`): which key to fan out over. Without this, the walker
+   * picks the first array property — which is ambiguous when more
+   * than one array exists. Set to e.g. 'shots' or 'characters'.
+   */
+  itemKey?: string;
+  /**
    * For collections that may need to subdivide their items to fit
    * runner constraints. The walker calls a chunker matching this spec
    * during materialization and produces one node instance per chunk.

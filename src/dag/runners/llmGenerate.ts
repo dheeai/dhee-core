@@ -37,6 +37,7 @@ import * as ajvFormatsNs from 'ajv-formats';
 import type { Runner, RunnerContext, RunnerResult, RunnerDescription } from '../schema.js';
 import type { LLMPurpose, LLMTier } from '../../core/llm/purposes.js';
 import { LLMRouter } from '../../core/llm/router.js';
+import { getLLMConfig } from '../../core/llm/config.js';
 
 // Pull the actual constructor from whichever export shape ajv ships.
 type AjvInstance = { compile: (schema: unknown) => (data: unknown) => boolean; errors?: Array<{ instancePath?: string; message?: string }> | null };
@@ -104,8 +105,11 @@ const TIER_REPRESENTATIVE_PURPOSE: Record<LLMTier, LLMPurpose> = {
 };
 
 function defaultClientFactory(tier: LLMTier, purpose?: LLMPurpose): LlmGenerateClient {
-  // LLMRouter requires routing config; pass {} for env-driven defaults.
-  const router = new LLMRouter({});
+  // Read env-based default LLM config (LLM_PROVIDER + per-provider vars).
+  // Without this, the router uses hardcoded LM Studio defaults which
+  // require a local server running.
+  const envDefault = getLLMConfig();
+  const router = new LLMRouter(envDefault, {}, false);
   const eff = purpose ?? TIER_REPRESENTATIVE_PURPOSE[tier];
   const client = router.getClient(eff);
   return {
@@ -278,6 +282,15 @@ export function createLlmGenerateRunner(opts?: {
       };
     }
 
+    // Per-instance template vars: itemId is exposed as {{item_id}}.
+    // Walker doesn't populate this in ctx.inputs but the runner has it
+    // via ctx.itemId. Inject so prompts can address the specific
+    // instance.
+    const inputsWithItemId: Record<string, unknown> = { ...ctx.inputs };
+    if (ctx.itemId !== undefined && inputsWithItemId['item_id'] === undefined) {
+      inputsWithItemId['item_id'] = ctx.itemId;
+    }
+
     // 2. Skip-if-output-exists (cache hit).
     const outAbs = resolve(ctx.projectDir, cfg.outputPath);
     if (!cfg.forceRerun && existsSync(outAbs)) {
@@ -301,7 +314,7 @@ export function createLlmGenerateRunner(opts?: {
       };
     }
     const template = readFileSync(tmplAbs, 'utf-8');
-    const sub = substituteTemplate(template, ctx.inputs);
+    const sub = substituteTemplate(template, inputsWithItemId);
     if (!sub.ok) return { ok: false, error: sub.error };
 
     // 4. Call LLM (with retries + abort).

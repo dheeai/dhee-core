@@ -1,0 +1,127 @@
+{
+  "id": "flux2_klein_edit_local",
+  "displayName": "FLUX 2 Klein Edit (Local)",
+  "pipeline": "image_editing",
+  "llmDescription": "Cloud-based image editing using FLUX 2 Klein. Supports up to 4 reference images.",
+  "selectionCriteria": "Shot image generation with character/setting references on ComfyUI Cloud.",
+  "outputType": "image",
+  "priority": 8,
+  "inputRequirements": [
+    {
+      "id": "prompt",
+      "type": "text",
+      "source": "llm",
+      "required": true
+    },
+    {
+      "id": "base_image",
+      "type": "image",
+      "source": "shot_image",
+      "required": true
+    },
+    {
+      "id": "reference_image_1",
+      "type": "image",
+      "source": "shot_image",
+      "required": false
+    },
+    {
+      "id": "reference_image_2",
+      "type": "image",
+      "source": "shot_image",
+      "required": false
+    },
+    {
+      "id": "reference_image_3",
+      "type": "image",
+      "source": "shot_image",
+      "required": false
+    },
+    {
+      "id": "seed",
+      "type": "number",
+      "source": "system",
+      "required": false
+    },
+    {
+      "id": "filenamePrefix",
+      "type": "text",
+      "source": "system",
+      "required": false
+    },
+    {
+      "id": "width",
+      "type": "number",
+      "source": "system",
+      "required": false
+    },
+    {
+      "id": "height",
+      "type": "number",
+      "source": "system",
+      "required": false
+    }
+  ],
+  "workflowFile": "flux2_klein_edit_local.json",
+  "format": "api",
+  "parameterMappings": [
+    {
+      "input": "prompt",
+      "nodeId": "109",
+      "field": "text"
+    },
+    {
+      "input": "base_image",
+      "nodeId": "76",
+      "field": "image"
+    },
+    {
+      "input": "reference_image_1",
+      "nodeId": "81",
+      "field": "image"
+    },
+    {
+      "input": "reference_image_2",
+      "nodeId": "82",
+      "field": "image"
+    },
+    {
+      "input": "reference_image_3",
+      "nodeId": "83",
+      "field": "image"
+    },
+    {
+      "input": "seed",
+      "nodeId": "92:73",
+      "field": "noise_seed"
+    },
+    {
+      "input": "filenamePrefix",
+      "nodeId": "94",
+      "field": "filename_prefix"
+    },
+    {
+      "input": "width",
+      "nodeId": "92:66",
+      "field": "width"
+    },
+    {
+      "input": "height",
+      "nodeId": "92:66",
+      "field": "height"
+    },
+    {
+      "input": "width",
+      "nodeId": "92:62",
+      "field": "width"
+    },
+    {
+      "input": "height",
+      "nodeId": "92:62",
+      "field": "height"
+    }
+  ],
+  "builtIn": true,
+  "active": true,
+  "mode": "local"
+}

@@ -12,9 +12,24 @@
     }
   },
   "inputs": [
-    { "id": "story_input", "kind": "file", "path": "inputs/story.md", "required": true },
-    { "id": "targetDuration", "kind": "project", "field": "targetDuration", "default": 25 },
-    { "id": "style", "kind": "project", "field": "style", "default": "cinematic_realism" }
+    {
+      "id": "story_input",
+      "kind": "file",
+      "path": "inputs/story.md",
+      "required": true
+    },
+    {
+      "id": "targetDuration",
+      "kind": "project",
+      "field": "targetDuration",
+      "default": 25
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "cinematic_realism"
+    }
   ],
   "goal": "final_video",
   "nodes": [
@@ -22,7 +37,10 @@
       "id": "plot",
       "kind": "stage",
       "inputs": [],
-      "outputs": { "format": "md", "pattern": "plans/plot.md" },
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/plot.md"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -35,8 +53,16 @@
     {
       "id": "story",
       "kind": "stage",
-      "inputs": [{ "from": "plot", "usage": "context" }],
-      "outputs": { "format": "md", "pattern": "plans/story.md" },
+      "inputs": [
+        {
+          "from": "plot",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/story.md"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -49,8 +75,16 @@
     {
       "id": "story_essence",
       "kind": "stage",
-      "inputs": [{ "from": "story", "usage": "context" }],
-      "outputs": { "format": "json", "pattern": "plans/story_essence.json" },
+      "inputs": [
+        {
+          "from": "story",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/story_essence.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -65,10 +99,19 @@
       "id": "world_style",
       "kind": "stage",
       "inputs": [
-        { "from": "story", "usage": "context" },
-        { "from": "story_essence", "usage": "context" }
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "story_essence",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "md", "pattern": "plans/world_style.md" },
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/world_style.md"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -82,10 +125,19 @@
       "id": "characters_plan",
       "kind": "stage",
       "inputs": [
-        { "from": "story", "usage": "context" },
-        { "from": "world_style", "usage": "context" }
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "json", "pattern": "plans/characters_plan.json" },
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/characters_plan.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -101,10 +153,20 @@
       "kind": "collection",
       "itemSource": "characters_plan",
       "inputs": [
-        { "from": "characters_plan", "usage": "input", "scope": "matching" },
-        { "from": "world_style", "usage": "context" }
+        {
+          "from": "characters_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "json", "pattern": "prompts/character_images/{{item_id}}.json" },
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/character_images/{{item_id}}.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -112,16 +174,52 @@
           "tier": "medium",
           "outputFormat": "json"
         }
+      },
+      "itemKey": "characters"
+    },
+    {
+      "id": "character_image",
+      "kind": "collection",
+      "itemSource": "character_image_prompt",
+      "inputs": [
+        {
+          "from": "character_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/characters/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.image",
+        "config": {
+          "workflowPath": "workflows/klein.json",
+          "manifestPath": "workflows/klein.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1024,
+          "height": 1024
+        }
       }
     },
     {
       "id": "settings_plan",
       "kind": "stage",
       "inputs": [
-        { "from": "story", "usage": "context" },
-        { "from": "world_style", "usage": "context" }
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "json", "pattern": "plans/settings_plan.json" },
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/settings_plan.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -137,10 +235,20 @@
       "kind": "collection",
       "itemSource": "settings_plan",
       "inputs": [
-        { "from": "settings_plan", "usage": "input", "scope": "matching" },
-        { "from": "world_style", "usage": "context" }
+        {
+          "from": "settings_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "json", "pattern": "prompts/setting_images/{{item_id}}.json" },
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/setting_images/{{item_id}}.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -148,16 +256,52 @@
           "tier": "medium",
           "outputFormat": "json"
         }
+      },
+      "itemKey": "settings"
+    },
+    {
+      "id": "setting_image",
+      "kind": "collection",
+      "itemSource": "setting_image_prompt",
+      "inputs": [
+        {
+          "from": "setting_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/settings/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.image",
+        "config": {
+          "workflowPath": "workflows/klein.json",
+          "manifestPath": "workflows/klein.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1920,
+          "height": 1080
+        }
       }
     },
     {
       "id": "scenes_plan",
       "kind": "stage",
       "inputs": [
-        { "from": "story", "usage": "context" },
-        { "from": "story_essence", "usage": "context" }
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "story_essence",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "json", "pattern": "plans/scenes_plan.json" },
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/scenes_plan.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -174,12 +318,28 @@
       "kind": "collection",
       "itemSource": "scenes_plan",
       "inputs": [
-        { "from": "scenes_plan", "usage": "input", "scope": "matching" },
-        { "from": "world_style", "usage": "context" },
-        { "from": "characters_plan", "usage": "context" },
-        { "from": "settings_plan", "usage": "context" }
+        {
+          "from": "scenes_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        },
+        {
+          "from": "characters_plan",
+          "usage": "context"
+        },
+        {
+          "from": "settings_plan",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "json", "pattern": "prompts/shot_image/{{item_id}}.json" },
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/shot_image/{{item_id}}.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -188,6 +348,107 @@
           "tier": "heavy",
           "outputFormat": "json"
         }
+      },
+      "itemKey": "shots"
+    },
+    {
+      "id": "shot_image",
+      "kind": "collection",
+      "itemSource": "shot_image_prompt",
+      "inputs": [
+        {
+          "from": "shot_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "character_image",
+          "usage": "reference",
+          "scope": "all"
+        },
+        {
+          "from": "setting_image",
+          "usage": "reference",
+          "scope": "all"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/shots/{{item_id}}_first.png"
+      },
+      "runner": {
+        "tool": "comfy.image",
+        "config": {
+          "workflowPath": "workflows/klein.json",
+          "manifestPath": "workflows/klein.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1920,
+          "height": 1080
+        }
+      }
+    },
+    {
+      "id": "shot_image_last_frame_prompt",
+      "kind": "collection",
+      "itemSource": "shot_image_prompt",
+      "inputs": [
+        {
+          "from": "shot_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "scenes_plan",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/shot_image_last_frame/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/shot_image_last_frame.md",
+          "outputSchema": "schemas/shot_image_prompt.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json"
+        }
+      }
+    },
+    {
+      "id": "shot_image_last_frame",
+      "kind": "collection",
+      "itemSource": "shot_image_last_frame_prompt",
+      "inputs": [
+        {
+          "from": "shot_image_last_frame_prompt",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "shot_image",
+          "usage": "reference",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/shots/{{item_id}}_last.png"
+      },
+      "runner": {
+        "tool": "comfy.image",
+        "config": {
+          "workflowPath": "workflows/klein.json",
+          "manifestPath": "workflows/klein.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1920,
+          "height": 1080
+        }
       }
     },
     {
@@ -195,10 +456,20 @@
       "kind": "collection",
       "itemSource": "scenes_plan",
       "inputs": [
-        { "from": "scenes_plan", "usage": "input", "scope": "matching" },
-        { "from": "world_style", "usage": "context" }
+        {
+          "from": "scenes_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "json", "pattern": "prompts/motion/{{item_id}}.json" },
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/motion/{{item_id}}.json"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -206,17 +477,30 @@
           "tier": "medium",
           "outputFormat": "json"
         }
-      }
+      },
+      "itemKey": "shots"
     },
     {
       "id": "scene_video_prompt",
       "kind": "stage",
       "inputs": [
-        { "from": "scenes_plan", "usage": "input" },
-        { "from": "story_essence", "usage": "context" },
-        { "from": "world_style", "usage": "context" }
+        {
+          "from": "scenes_plan",
+          "usage": "input"
+        },
+        {
+          "from": "story_essence",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "md", "pattern": "prompts/scene_video_prompt.md" },
+      "outputs": {
+        "format": "md",
+        "pattern": "prompts/scene_video_prompt.md"
+      },
       "runner": {
         "tool": "llm.generate",
         "config": {
@@ -229,7 +513,7 @@
     {
       "id": "scene_clip",
       "kind": "collection",
-      "itemSource": "scene",
+      "itemSource": "scenes_plan",
       "chunkBy": {
         "constraint": "max_frames",
         "limit": 1000,
@@ -237,11 +521,25 @@
         "firstSegmentPlusOne": true
       },
       "inputs": [
-        { "from": "shot_image_prompt", "usage": "input", "scope": "all" },
-        { "from": "shot_motion_directive", "usage": "input", "scope": "all" },
-        { "from": "scene_video_prompt", "usage": "context" }
+        {
+          "from": "shot_image_prompt",
+          "usage": "input",
+          "scope": "all"
+        },
+        {
+          "from": "shot_motion_directive",
+          "usage": "input",
+          "scope": "all"
+        },
+        {
+          "from": "scene_video_prompt",
+          "usage": "context"
+        }
       ],
-      "outputs": { "format": "video", "pattern": "assets/videos/dag_relay/{{scene_id}}_{{chunk_id}}.mp4" },
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/dag_relay/{{scene_id}}_{{chunk_id}}.mp4"
+      },
       "runner": {
         "tool": "comfy.ltx_director",
         "config": {
@@ -251,14 +549,27 @@
           "width": 854,
           "height": 480
         }
-      }
+      },
+      "itemKey": "scenes"
     },
     {
       "id": "final_video",
       "kind": "stage",
-      "inputs": [{ "from": "scene_clip", "usage": "input", "scope": "all" }],
-      "outputs": { "format": "video", "pattern": "assets/videos/final/final_video.mp4" },
-      "runner": { "tool": "ffmpeg.concat", "config": {} }
+      "inputs": [
+        {
+          "from": "scene_clip",
+          "usage": "input",
+          "scope": "all"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/final/final_video.mp4"
+      },
+      "runner": {
+        "tool": "ffmpeg.concat",
+        "config": {}
+      }
     }
   ]
 }

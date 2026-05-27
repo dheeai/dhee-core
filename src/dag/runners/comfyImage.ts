@@ -228,7 +228,49 @@ export function createComfyImageRunner(opts?: {
       return { ok: false, error: 'comfy.image: ctx.bundleDir is required; walker must populate it' };
     }
 
-    const v = validateConfig(ctx.node.runner.config);
+    // Merge config with upstream-provided prompt/refs. The bundle's
+    // shot_image_prompt LLM node (and friends) outputs JSON like
+    // {imagePrompt, references: [{id, type}]}. The walker put that
+    // parsed JSON on ctx.inputs keyed by the upstream node id. We
+    // look across all ctx.inputs for entries that look like
+    // image-prompt JSON and adopt them when config doesn't have prompt.
+    const baseCfg = ctx.node.runner.config as Record<string, unknown>;
+    const cfgWithUpstream: Record<string, unknown> = { ...baseCfg };
+    if (!cfgWithUpstream['prompt']) {
+      for (const v of Object.values(ctx.inputs)) {
+        if (v && typeof v === 'object' && 'imagePrompt' in (v as Record<string, unknown>)) {
+          const p = v as { imagePrompt?: string; references?: Array<{ id: string; type: string }>; aspectRatio?: string };
+          if (typeof p.imagePrompt === 'string') {
+            cfgWithUpstream['prompt'] = p.imagePrompt;
+            // Resolve references against character_image / setting_image
+            // outputs already produced. We look up the upstream node by
+            // ref.id and ref.type to find the rendered image path.
+            if (Array.isArray(p.references) && p.references.length > 0) {
+              const refPaths: string[] = [];
+              for (const ref of p.references) {
+                const refKey = ref.type === 'character'
+                  ? `character_image:${ref.id}`
+                  : ref.type === 'setting'
+                  ? `setting_image:${ref.id}`
+                  : null;
+                if (refKey && ctx.inputs[refKey]) {
+                  // ctx.inputs stores parsed content for json; for
+                  // png we'd need a path resolver. For now skip —
+                  // the runner can also be passed referenceImages
+                  // in config directly.
+                }
+              }
+              if (refPaths.length > 0) cfgWithUpstream['referenceImages'] = refPaths;
+            }
+            if (p.aspectRatio && !cfgWithUpstream['aspectRatio']) {
+              cfgWithUpstream['aspectRatio'] = p.aspectRatio;
+            }
+            break;
+          }
+        }
+      }
+    }
+    const v = validateConfig(cfgWithUpstream);
     if (!v.ok) return { ok: false, error: v.error };
     const cfg = v.cfg;
 

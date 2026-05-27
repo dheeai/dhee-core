@@ -439,6 +439,66 @@ describe('llm.generate runner', () => {
     });
   });
 
+  // BUG-003 regression: ctx.itemId must be exposed as {{item_id}}.
+  describe('BUG-003 — ctx.itemId injection', () => {
+    it('exposes ctx.itemId as {{item_id}} for collection instances', async () => {
+      writeFileSync(
+        join(bundleDir, 'prompts/p.md'),
+        'Write about shot {{item_id}}. Context: {{scenes_plan}}.',
+      );
+      let receivedPrompt = '';
+      const client = makeStubClient({
+        respond: async (req) => {
+          receivedPrompt = req.messages[0]!.content;
+          return { content: 'result' };
+        },
+      });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+      const ctx = makeCtx({
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'out.md',
+          tier: 'heavy',
+          outputFormat: 'markdown',
+        },
+        inputs: { scenes_plan: 'JSON-here' },
+      });
+      // Inject itemId on the constructed context (collection instance).
+      (ctx as { itemId?: string }).itemId = 'scene_1_shot_3';
+
+      const result = await runner.run(ctx);
+      expect(result.ok).toBe(true);
+      expect(receivedPrompt).toContain('Write about shot scene_1_shot_3.');
+      expect(receivedPrompt).toContain('Context: JSON-here.');
+    });
+
+    it("doesn't overwrite an upstream input that happens to be named 'item_id'", async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), '{{item_id}}');
+      let received = '';
+      const client = makeStubClient({
+        respond: async (req) => {
+          received = req.messages[0]!.content;
+          return { content: 'x' };
+        },
+      });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+      const ctx = makeCtx({
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'out.md',
+          tier: 'heavy',
+          outputFormat: 'markdown',
+        },
+        inputs: { item_id: 'from-input' },
+      });
+      (ctx as { itemId?: string }).itemId = 'from-ctx';
+      await runner.run(ctx);
+      // Upstream wins on conflict — precedence is explicit so the bundle
+      // author can override via an upstream node that emits item_id.
+      expect(received).toBe('from-input');
+    });
+  });
+
   // Failure mode #10 — empty LLM response
   describe('empty LLM response', () => {
     it('fails loudly when the LLM returns empty content', async () => {

@@ -3,7 +3,9 @@ for a video-generation model on what should happen visually between
 the first frame and the last frame.
 
 Shot data:
-{{shot_breakdown}}
+{{scenes_plan}}
+
+This call is for shot id: {{item_id}} — find it in the shots array above.
 
 World style:
 {{world_style}}
