@@ -8,6 +8,7 @@
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';
+import { comfyImageRunner } from './comfyImage.js';
 import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { llmGenerateRunner } from './llmGenerate.js';
@@ -48,6 +49,21 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Universal LLM runner. Renders a prompt template with variable substitution, calls the routed LLM at the declared tier, and writes markdown or schema-validated JSON to the output path.',
     },
     runner: llmGenerateRunner,
+  },
+  {
+    manifest: {
+      tool: 'comfy.image',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      // Same as comfy.ltx_director — endpoint URL is resolved at
+      // runner.run() time from ENDPOINT_<name> env, validated with an
+      // actionable error pointing at the desktop Settings UI.
+      credentials: [],
+      displayName: 'Comfy Image',
+      description:
+        'Generates a single image via a ComfyUI workflow (Flux 2 Klein or compatible). Handles uploads, parameter injection from bundle config + manifest, and output download.',
+    },
+    runner: comfyImageRunner,
   },
   {
     manifest: {
