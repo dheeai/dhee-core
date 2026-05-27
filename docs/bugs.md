@@ -91,3 +91,23 @@ prompted the migration are documented in the commit history of the
 - **Manifestations to test:** (a) file kind with present file → resolved as string; (b) file kind with missing file + required=false → silently absent; (c) file kind with missing file + required=true → error names the file; (d) project kind with present field via dot-path → resolved; (e) project kind with missing field + default → uses default; (f) project kind with missing field + no default + required → error names the field.
 - **Test:** `tests/dag/walkerBundleInputs.test.ts` (added with this fix).
 - **Fix commit:** walker.ts gains `resolveBundleInputs()`; schema gains `BundleInputDecl[]`.
+
+### BUG-005 — Walker stopAt didn't restrict to ancestors; processed independent topo branches
+- **Status:** fixed
+- **Discovered:** 2026-05-27 (live during narrative_prompt_relay smoke; `--stopAt character_image_prompt` tried to also run scene_clip because both are ancestors of final_video and scene_clip happened to appear earlier in the linear topo)
+- **Reporter:** claude
+- **Symptom:** `pnpm tsx scripts/run-project-via-bundle.ts <dir> --stopAt character_image_prompt` errored with "comfy.ltx_director: instance missing sceneNumber/shotRange" — i.e. the walker attempted to run scene_clip even though the user asked to halt at character_image_prompt.
+- **Suspected root cause:** stopAt was implemented as "break after the target node runs," which is correct only when the linear topo order matches the user's intent. Independent topo branches (character_image_prompt and scene_clip both descend from final_video but neither is ancestor of the other) can appear in any order; the walker happily processes the wrong one.
+- **Manifestations to test:** (a) stopAt at a node X — only ancestors of X (transitively, including X itself) run; (b) two independent branches — running one with stopAt does not touch the other; (c) stopAt at the goal — equivalent to no stopAt (everything ancestral to the goal runs); (d) stopAt at a node with no ancestors (root) — only that node runs.
+- **Test:** `tests/dag/walkerStopAtAncestors.test.ts` (added with this fix).
+- **Fix commit:** walker computes the ancestor set of stopAt via reverse-DFS through bundle.inputs and filters the linear topo to that set.
+
+### BUG-006 — scene_clip instance materialized from scenes_plan was missing sceneNumber
+- **Status:** fixed
+- **Discovered:** 2026-05-27 (live, same run; surfaced after BUG-005's stopAt fix narrowed scope)
+- **Reporter:** claude
+- **Symptom:** scene_clip materialized with itemId='scene_1' but no sceneNumber on the instance. buildRunnerConfig's comfy.ltx_director branch threw "instance missing sceneNumber/shotRange" trying to call resolveRelayInputs.
+- **Suspected root cause:** the new upstream-driven materializer (BUG-002 fix) didn't extract scene metadata from item ids — it only set itemId. The legacy 'scene' itemSource path DID set sceneNumber because it took numbers from cli.sceneIds.
+- **Manifestations to test:** (a) item id like 'scene_3' → sceneNumber=3; (b) item id like 'scene_3_shot_2' → sceneNumber=3 (parsed from prefix); (c) item id with no scene prefix → sceneNumber undefined (won't cause an error unless a runner consumes it; runners that need it should error clearly).
+- **Test:** `tests/dag/walkerSceneNumberDerive.test.ts` (added with this fix).
+- **Fix commit:** materializer regex `^scene_(\d+)` on itemId to derive sceneNumber when present.

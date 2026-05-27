@@ -3,7 +3,7 @@ video synthesis. The relay model (LTX Director) reads this once for
 the entire scene and uses per-shot prompts for local nuance.
 
 Scene data:
-{{scene}}
+{{scenes_plan}}
 
 Story essence:
 {{story_essence}}

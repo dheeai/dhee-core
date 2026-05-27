@@ -246,7 +246,17 @@ function materializeCollection(
             `materializeCollection: item in '${node.itemSource}' has no id or name`,
           );
         }
-        return { def: node, itemId, status: 'pending' as const };
+        // Derive sceneNumber from scene-shaped ids ("scene_3" or
+        // "scene_3_shot_2") — needed by the relay runner's
+        // buildRunnerConfig path.
+        const sceneMatch = itemId.match(/^scene_(\d+)/);
+        const sceneNumber = sceneMatch ? parseInt(sceneMatch[1]!, 10) : undefined;
+        return {
+          def: node,
+          itemId,
+          ...(sceneNumber !== undefined ? { sceneNumber } : {}),
+          status: 'pending' as const,
+        };
       });
     }
     // For collection upstreams (e.g. shot_breakdown is one-per-shot,
@@ -479,8 +489,29 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
     }
   }
 
-  const ordered = topoFromGoal(opts.bundle);
-  log(`walker: bundle '${opts.bundle.id}' v${opts.bundle.version}, ${ordered.length} reachable nodes`);
+  const fullOrder = topoFromGoal(opts.bundle);
+  // When stopAt is set, narrow the topo to ANCESTORS of stopAt (plus
+  // stopAt itself) — nodes that aren't on the path back from stopAt
+  // shouldn't run. Without this filter, the walker processes every
+  // node before stopAt in the linear topo, including independent
+  // branches that the user isn't asking for.
+  let ordered: NodeDef[];
+  if (opts.stopAt) {
+    const byId = new Map(opts.bundle.nodes.map((n) => [n.id, n]));
+    const ancestors = new Set<string>();
+    const visit = (id: string): void => {
+      if (ancestors.has(id)) return;
+      ancestors.add(id);
+      const n = byId.get(id);
+      if (!n) return;
+      for (const i of n.inputs) visit(i.from);
+    };
+    visit(opts.stopAt);
+    ordered = fullOrder.filter((n) => ancestors.has(n.id));
+  } else {
+    ordered = fullOrder;
+  }
+  log(`walker: bundle '${opts.bundle.id}' v${opts.bundle.version}, ${ordered.length} reachable nodes${opts.stopAt ? ` (ancestors of '${opts.stopAt}')` : ''}`);
 
   // Resolve bundle-level inputs (project files + project.json fields)
   // once at startup. Merged into every node's ctx.inputs below.
