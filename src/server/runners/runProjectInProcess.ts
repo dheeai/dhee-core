@@ -110,15 +110,33 @@ export async function runProjectInProcess(opts: RunProjectOpts): Promise<RunProj
 
   // ── prompt_relay: executor (gated at shot_image) then bundle ─────
   if (method === 'prompt_relay') {
-    // Caller may have asked for an earlier stage gate. Use whichever
-    // comes first ("shot_image" or caller's stage) by hand — but for
-    // v1 we only support either "full upstream" (caller's gate <= shot_image)
-    // or "all the way" (no caller gate). If the caller provided a stage
-    // gate, honor it and skip the bundle (means they're iterating
-    // upstream, not producing a final).
+    // Caller-supplied stage gate handling:
+    //
+    //   - undefined / 'final_video' → run to completion (executor up to
+    //     shot_image, then bundle produces final video)
+    //   - 'shot_video' → semantically meaningless for prompt_relay
+    //     (relay produces the video, not per-shot FL2V). Without an
+    //     override, honoring this stage would route through the legacy
+    //     executor's per-shot FL2V path AND skip the relay bundle — the
+    //     exact mis-routing seen live when the chat agent picked this
+    //     stage from context. Rewrite to undefined (run-to-completion)
+    //     and emit a warning.
+    //   - upstream stage (story, scene, shot_image, etc.) → caller is
+    //     iterating; honor verbatim and skip bundle dispatch.
     const callerExtras = opts.runExecutorExtras ?? { target: {} };
-    const callerStage = callerExtras.target?.stage;
-    const callerWantsEarlierStage = callerStage && callerStage !== 'shot_image' && callerStage !== 'final_video';
+    let callerStage = callerExtras.target?.stage;
+    if (callerStage === 'shot_video') {
+      log(
+        `runProjectInProcess: ignoring stage='shot_video' — incompatible with prompt_relay (relay produces video, not per-shot FL2V). Running to completion via bundle.`,
+      );
+      callerStage = undefined;
+    } else if (callerStage === 'final_video') {
+      // Treat as "no gate" — final_video IS the project's terminal goal
+      // for both methods; the bundle dispatch produces it for relay.
+      callerStage = undefined;
+    }
+    const callerWantsEarlierStage =
+      callerStage && callerStage !== 'shot_image';
 
     const executor = await runExecutor({
       projectDir: opts.projectDir,
