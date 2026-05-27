@@ -253,21 +253,25 @@ export function createComfyImageRunner(opts?: {
             // outputs already produced. We look up the upstream node by
             // ref.id and ref.type to find the rendered image path.
             if (Array.isArray(p.references) && p.references.length > 0) {
+              // Walker exposes scope='all' collection inputs as
+              // { [itemId]: absolutePath } maps. Look up each ref's
+              // (id, type) in the appropriate map.
+              const charMap = (ctx.inputs['character_image'] as Record<string, string> | undefined) ?? {};
+              const setMap = (ctx.inputs['setting_image'] as Record<string, string> | undefined) ?? {};
               const refPaths: string[] = [];
               for (const ref of p.references) {
-                const refKey = ref.type === 'character'
-                  ? `character_image:${ref.id}`
-                  : ref.type === 'setting'
-                  ? `setting_image:${ref.id}`
-                  : null;
-                if (refKey && ctx.inputs[refKey]) {
-                  // ctx.inputs stores parsed content for json; for
-                  // png we'd need a path resolver. For now skip —
-                  // the runner can also be passed referenceImages
-                  // in config directly.
+                const path = ref.type === 'character' ? charMap[ref.id]
+                  : ref.type === 'setting' ? setMap[ref.id]
+                  : undefined;
+                if (path) refPaths.push(path);
+              }
+              if (refPaths.length > 0) {
+                // First ref becomes base_image; rest become reference_image_1..N
+                cfgWithUpstream['baseImage'] = refPaths[0];
+                if (refPaths.length > 1) {
+                  cfgWithUpstream['referenceImages'] = refPaths.slice(1, 4);
                 }
               }
-              if (refPaths.length > 0) cfgWithUpstream['referenceImages'] = refPaths;
             }
             if (p.aspectRatio && !cfgWithUpstream['aspectRatio']) {
               cfgWithUpstream['aspectRatio'] = p.aspectRatio;
@@ -382,6 +386,25 @@ export function createComfyImageRunner(opts?: {
     if (baseUploaded) valueMap['base_image'] = baseUploaded.name;
     for (let i = 0; i < refUploaded.length; i++) {
       valueMap[`reference_image_${i + 1}`] = refUploaded[i]!.name;
+    }
+    // Klein workflow has 4 LoadImage nodes (base + 3 refs); every
+    // slot must point at a real uploaded file or Comfy rejects with
+    // ImageDownloadError before the prompt even queues. When the
+    // bundle supplied fewer than 4 images, fill unused slots with the
+    // first available image (typically the base). This is a Klein
+    // structural requirement, not a creative choice — those slots
+    // affect generation per their LoRA weights, but using the base
+    // image is the closest to "no extra conditioning" we can do
+    // without restructuring the workflow.
+    const fallback =
+      (valueMap['base_image'] as string | undefined) ??
+      (refUploaded[0]?.name);
+    if (fallback) {
+      for (let i = 1; i <= KLEIN_MAX_REFS - 1; i++) {
+        const key = `reference_image_${i}`;
+        if (!valueMap[key]) valueMap[key] = fallback;
+      }
+      if (!valueMap['base_image']) valueMap['base_image'] = fallback;
     }
 
     for (const m of mappings) {

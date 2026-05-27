@@ -672,12 +672,11 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       }
 
       const cfg = buildRunnerConfig(inst, opts.projectDir, instancesById);
-      // For LLM runners: outputPath must be a node-specific path (one
-      // per instance) so collections don't all write to the same file.
-      // We derive it from outputs.pattern with item-context substitution
-      // and pass it into the config under the `outputPath` key the LLM
-      // runner expects.
-      if (node.runner.tool === 'llm.generate') {
+      // outputPath: render the bundle's outputs.pattern against
+      // item-context vars so per-instance writes don't collide. Every
+      // runner that writes a single output file expects an outputPath
+      // in config; we resolve it here once for everyone.
+      {
         const ctxVars = {
           item_id: inst.itemId ?? '',
           scene_id: inst.sceneNumber ? `scene_${inst.sceneNumber}` : '',
@@ -703,9 +702,25 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       for (const inp of node.inputs) {
         const upInsts = instancesById.get(inp.from) ?? [];
         if (upInsts.length === 0) continue;
-        // For 'matching' scope on collections, pick the upstream
-        // instance with the same itemId. Otherwise concatenate /
-        // pick first.
+
+        // scope='all' on a collection upstream → expose as
+        // { [itemId]: outputAbs } map so runners can resolve cross-
+        // collection references (e.g. shot_image references
+        // character_image:naia by id). The walker doesn't try to
+        // pick a "matching" instance here — the consumer decides.
+        if (inp.scope === 'all' && upInsts.some((u) => u.itemId !== undefined)) {
+          const pathsById: Record<string, string> = {};
+          for (const u of upInsts) {
+            if (!u.itemId || !u.outputRel) continue;
+            const abs = resolve(opts.projectDir, u.outputRel);
+            if (existsSync(abs)) pathsById[u.itemId] = abs;
+          }
+          resolvedInputs[inp.from] = pathsById;
+          continue;
+        }
+
+        // Otherwise: 'matching' picks the upstream instance with the
+        // same itemId; if no match (or upstream is a stage), pick first.
         const matching =
           inst.itemId
             ? upInsts.find((u) => u.itemId === inst.itemId) ?? upInsts[0]
@@ -715,14 +730,9 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
         if (!existsSync(upAbs)) continue;
         try {
           const raw = readFileSync(upAbs, 'utf-8');
-          // If JSON, parse; else keep as string.
           let value: unknown = raw;
           if (matching.outputRel.endsWith('.json')) {
-            try {
-              value = JSON.parse(raw);
-            } catch {
-              // keep raw
-            }
+            try { value = JSON.parse(raw); } catch { /* keep raw */ }
           }
           resolvedInputs[inp.from] = value;
         } catch {

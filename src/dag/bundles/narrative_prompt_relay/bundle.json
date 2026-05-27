@@ -195,8 +195,8 @@
       "runner": {
         "tool": "comfy.image",
         "config": {
-          "workflowPath": "workflows/klein.json",
-          "manifestPath": "workflows/klein.manifest.json",
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
           "endpoint": "public.cloud",
           "width": 1024,
           "height": 1024
@@ -277,8 +277,8 @@
       "runner": {
         "tool": "comfy.image",
         "config": {
-          "workflowPath": "workflows/klein.json",
-          "manifestPath": "workflows/klein.manifest.json",
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
           "endpoint": "public.cloud",
           "width": 1920,
           "height": 1080
@@ -404,6 +404,14 @@
         {
           "from": "world_style",
           "usage": "context"
+        },
+        {
+          "from": "characters_plan",
+          "usage": "context"
+        },
+        {
+          "from": "settings_plan",
+          "usage": "context"
         }
       ],
       "outputs": {
@@ -433,7 +441,17 @@
         {
           "from": "shot_image",
           "usage": "reference",
-          "scope": "matching"
+          "scope": "all"
+        },
+        {
+          "from": "character_image",
+          "usage": "reference",
+          "scope": "all"
+        },
+        {
+          "from": "setting_image",
+          "usage": "reference",
+          "scope": "all"
         }
       ],
       "outputs": {
