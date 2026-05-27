@@ -1,7 +1,9 @@
 You are writing a Flux Klein image-edit prompt to render a single character reference image.
 
 Character data:
-{{character}}
+{{characters_plan}}
+
+For character id: {{item_id}}
 
 World style:
 {{world_style}}

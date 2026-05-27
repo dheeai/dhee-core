@@ -144,7 +144,7 @@
   },
   "92:70": {
     "inputs": {
-      "unet_name": "flux-2-klein-9b-kv.safetensors",
+      "unet_name": "flux-2-klein-9b.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",

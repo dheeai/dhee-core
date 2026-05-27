@@ -199,7 +199,22 @@ function materializeCollection(
         `materializeCollection: itemSource '${node.itemSource}' has no instances (upstream not materialized yet)`,
       );
     }
-    // For single-stage upstreams, read its output file.
+    // If the upstream is itself a collection (has any instance with
+    // an itemId), mirror its instances one-to-one rather than trying
+    // to read an array out of any single output file. This is the
+    // "fan-through" case (e.g. character_image follows
+    // character_image_prompt with the same itemIds).
+    const upstreamHasItemIds = upstream.some((u) => u.itemId !== undefined);
+    if (upstreamHasItemIds) {
+      return upstream.map((u) => ({
+        def: node,
+        ...(u.itemId !== undefined ? { itemId: u.itemId } : {}),
+        ...(u.sceneNumber !== undefined ? { sceneNumber: u.sceneNumber } : {}),
+        status: 'pending' as const,
+      }));
+    }
+
+    // Stage upstream (single instance, no itemId) — read its output file.
     if (upstream.length === 1 && upstream[0]!.outputRel) {
       const upstreamPath = resolve(projectDir, upstream[0]!.outputRel);
       if (!existsSync(upstreamPath)) {

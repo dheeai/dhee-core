@@ -522,7 +522,12 @@
       },
       "inputs": [
         {
-          "from": "shot_image_prompt",
+          "from": "shot_image",
+          "usage": "input",
+          "scope": "all"
+        },
+        {
+          "from": "shot_image_last_frame",
           "usage": "input",
           "scope": "all"
         },

@@ -96,9 +96,16 @@ function resolveEndpointUrl(endpointName: string): string | null {
 // ── Default client factory (uses ComfyUIClient) ────────────────────────
 
 function defaultClientFactory(opts: { baseUrl?: string; outputDir: string }): ComfyImageClient {
+  // Auto-detect: when the resolved endpoint URL points at Comfy Cloud,
+  // thread the COMFY_CLOUD_API_KEY env var through to ComfyUIClient as
+  // the X-API-Key header. Otherwise the local-Comfy path doesn't need
+  // auth.
+  const isCloud = opts.baseUrl?.includes('cloud.comfy.org') ?? false;
+  const cloudKey = isCloud ? process.env['COMFY_CLOUD_API_KEY'] : undefined;
   const client = new ComfyUIClient({
     outputDir: opts.outputDir,
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+    ...(cloudKey ? { apiKey: cloudKey } : {}),
   });
   return {
     async uploadImage(filePath) {

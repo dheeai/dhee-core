@@ -1,7 +1,9 @@
 You are writing a Flux Klein image-edit prompt for a single setting reference image (no characters).
 
 Setting data:
-{{setting}}
+{{settings_plan}}
+
+For setting id: {{item_id}}
 
 World style:
 {{world_style}}

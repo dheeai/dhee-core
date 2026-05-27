@@ -1,11 +1,11 @@
 {
-  "id": "flux2_klein_edit_local",
-  "displayName": "FLUX 2 Klein Edit (Local)",
+  "id": "flux2_klein_edit_cloud",
+  "displayName": "FLUX 2 Klein Edit (Cloud)",
   "pipeline": "image_editing",
   "llmDescription": "Cloud-based image editing using FLUX 2 Klein. Supports up to 4 reference images.",
   "selectionCriteria": "Shot image generation with character/setting references on ComfyUI Cloud.",
   "outputType": "image",
-  "priority": 8,
+  "priority": 5,
   "inputRequirements": [
     {
       "id": "prompt",
@@ -62,7 +62,7 @@
       "required": false
     }
   ],
-  "workflowFile": "flux2_klein_edit_local.json",
+  "workflowFile": "flux2_klein_edit_cloud.json",
   "format": "api",
   "parameterMappings": [
     {
@@ -122,6 +122,5 @@
     }
   ],
   "builtIn": true,
-  "active": true,
-  "mode": "local"
+  "active": true
 }
