@@ -110,33 +110,42 @@ export async function runProjectInProcess(opts: RunProjectOpts): Promise<RunProj
 
   // ── prompt_relay: executor (gated at shot_image) then bundle ─────
   if (method === 'prompt_relay') {
-    // Caller-supplied stage gate handling:
+    // Caller-supplied stage gate handling. The executor's stage
+    // vocabulary (story...shot_image, shot_image_last_frame, shot_video,
+    // final_video) is NOT fully shared with the relay bundle — the
+    // bundle produces per-scene chunks ("scene_clip"), not per-shot
+    // videos. Mapping for prompt_relay:
     //
-    //   - undefined / 'final_video' → run to completion (executor up to
-    //     shot_image, then bundle produces final video)
-    //   - 'shot_video' → semantically meaningless for prompt_relay
-    //     (relay produces the video, not per-shot FL2V). Without an
-    //     override, honoring this stage would route through the legacy
-    //     executor's per-shot FL2V path AND skip the relay bundle — the
-    //     exact mis-routing seen live when the chat agent picked this
-    //     stage from context. Rewrite to undefined (run-to-completion)
-    //     and emit a warning.
-    //   - upstream stage (story, scene, shot_image, etc.) → caller is
-    //     iterating; honor verbatim and skip bundle dispatch.
+    //   - undefined / 'shot_image' / 'final_video' → run to completion.
+    //     Executor ALWAYS gates at shot_image (the relay owns
+    //     everything past shot_image regardless of how the caller named
+    //     the terminal). final_video is a shared terminal stage — both
+    //     methods produce one — but the executor's path to it for
+    //     prompt_relay is "stop at shot_image and let the bundle take
+    //     over," not "run the executor's final_video node."
+    //   - 'shot_video' → no analog in prompt_relay's production path
+    //     (relay has no per-shot video stage; its intermediate is
+    //     scene_clip, which the bundle doesn't currently expose for
+    //     partial walks). Rewrite to "run to completion" and warn —
+    //     the most charitable mapping of "stop at per-shot video" when
+    //     no such thing exists. Without this, gating here would run
+    //     the unused executor shot_video nodes AND skip the bundle —
+    //     the exact mis-routing seen live on The Cup.
+    //   - upstream stage (story, scene, character_image, etc.) → caller
+    //     is iterating; honor verbatim and skip bundle dispatch.
     const callerExtras = opts.runExecutorExtras ?? { target: {} };
     let callerStage = callerExtras.target?.stage;
     if (callerStage === 'shot_video') {
       log(
-        `runProjectInProcess: ignoring stage='shot_video' — incompatible with prompt_relay (relay produces video, not per-shot FL2V). Running to completion via bundle.`,
+        `runProjectInProcess: ignoring stage='shot_video' — prompt_relay has no per-shot video stage (relay produces per-scene chunks, not per-shot videos). Running to completion via bundle.`,
       );
       callerStage = undefined;
-    } else if (callerStage === 'final_video') {
-      // Treat as "no gate" — final_video IS the project's terminal goal
-      // for both methods; the bundle dispatch produces it for relay.
-      callerStage = undefined;
     }
-    const callerWantsEarlierStage =
-      callerStage && callerStage !== 'shot_image';
+    // Stages that mean "produce a final": no caller gate, or any of
+    // the shared terminal stages. For all of these the executor gates
+    // at shot_image and the bundle dispatches.
+    const isFullRun =
+      !callerStage || callerStage === 'shot_image' || callerStage === 'final_video';
 
     const executor = await runExecutor({
       projectDir: opts.projectDir,
@@ -144,7 +153,7 @@ export async function runProjectInProcess(opts: RunProjectOpts): Promise<RunProj
       ...callerExtras,
       target: {
         ...callerExtras.target,
-        stage: callerStage ?? 'shot_image',
+        stage: isFullRun ? 'shot_image' : callerStage,
       },
     });
     // runExecutor maps both real completion AND paused_at_stage to
@@ -158,8 +167,8 @@ export async function runProjectInProcess(opts: RunProjectOpts): Promise<RunProj
         executor,
       };
     }
-    if (callerWantsEarlierStage) {
-      log(`runProjectInProcess: caller requested early stage gate '${callerStage}' — skipping bundle dispatch`);
+    if (!isFullRun) {
+      log(`runProjectInProcess: caller requested upstream stage gate '${callerStage}' — skipping bundle dispatch`);
       return { method, ok: true, executor };
     }
 

@@ -111,11 +111,19 @@ describe('runProjectInProcess: stage-gate rewriting for prompt_relay', () => {
     expect(logs.some((l) => /ignoring stage='shot_video'/.test(l))).toBe(true);
   });
 
-  it("rewrites stage='final_video' to run-to-completion (terminal goal = bundle's job)", async () => {
+  it("honors stage='final_video' as a shared terminal stage (executor + bundle)", async () => {
+    // final_video is genuinely shared across methods — both produce
+    // one. For prompt_relay the executor still gates at shot_image
+    // (that's the relay's natural pause point), then the bundle
+    // produces the final. End-to-end behavior matches "run to
+    // completion." No rewrite, no warning — final_video is a
+    // legitimate gate request in either method.
+    const logs: string[] = [];
     await runProjectInProcess({
       projectDir,
       project: baseProject,
       runExecutorExtras: { target: { stage: 'final_video' } },
+      log: (m) => logs.push(m),
     });
 
     const executorOpts = runExecutorMock.mock.calls[0]![0] as {
@@ -123,6 +131,8 @@ describe('runProjectInProcess: stage-gate rewriting for prompt_relay', () => {
     };
     expect(executorOpts.target.stage).toBe('shot_image');
     expect(walkBundleMock).toHaveBeenCalledOnce();
+    // No "ignoring" warning — this stage is legitimate.
+    expect(logs.some((l) => /ignoring/.test(l))).toBe(false);
   });
 
   it("treats stage='shot_image' as the natural relay-gate point (executor + bundle)", async () => {
