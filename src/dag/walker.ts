@@ -374,6 +374,7 @@ function buildRunnerConfig(
   inst: NodeInstance,
   projectDir: string,
   instancesById: Map<string, NodeInstance[]>,
+  bundleDir?: string,
 ): Record<string, unknown> {
   const node = inst.def;
   const base = { ...node.runner.config };
@@ -386,14 +387,82 @@ function buildRunnerConfig(
 
   // Per-runner input resolution.
   if (node.runner.tool === 'comfy.ltx_director') {
-    // Instance carries chunk-specific scene + shotRange after materialization.
-    if (inst.sceneNumber === undefined || !inst.shotRange) {
-      throw new Error('comfy.ltx_director: instance missing sceneNumber/shotRange');
+    // Instance carries chunk-specific scene info after materialization.
+    if (inst.sceneNumber === undefined) {
+      throw new Error('comfy.ltx_director: instance missing sceneNumber');
     }
-    const resolved = resolveRelayInputs(projectDir, inst.sceneNumber, inst.shotRange);
-    base['shots'] = resolved.shots;
-    base['firstFrames'] = resolved.firstFrames;
-    base['globalPrompt'] = resolved.globalPrompt;
+    // Prefer NEW path: read shots from scenes_plan upstream, first-frame
+    // paths from shot_image's outputs, globalPrompt from
+    // scene_video_prompt's output. Falls back to legacy resolveRelayInputs
+    // (scene_*.json on disk) when scenes_plan upstream isn't present.
+    const scenesPlanInsts = instancesById.get('scenes_plan') ?? [];
+    const scenesPlanInst = scenesPlanInsts[0];
+    if (scenesPlanInst?.outputRel) {
+      const scenesPlanPath = resolve(projectDir, scenesPlanInst.outputRel);
+      if (existsSync(scenesPlanPath)) {
+        const plan = JSON.parse(readFileSync(scenesPlanPath, 'utf-8')) as {
+          scenes?: Array<{ id?: string }>;
+          shots?: Array<{ id?: string; scene?: number; shotNumber?: number; duration?: number; description?: string; cameraWork?: string }>;
+        };
+        const sceneShots = (plan.shots ?? []).filter((s) => s.scene === inst.sceneNumber);
+        if (sceneShots.length === 0) {
+          throw new Error(`comfy.ltx_director: scenes_plan has no shots for scene ${inst.sceneNumber}`);
+        }
+        // Honor shotRange when materializer set it (chunked); otherwise
+        // use all shots in the scene.
+        const filteredShots = inst.shotRange
+          ? sceneShots.filter((s) => (s.shotNumber ?? 0) >= inst.shotRange![0] && (s.shotNumber ?? 0) <= inst.shotRange![1])
+          : sceneShots;
+        // Match first frame paths against shot_image outputs by itemId.
+        const shotImageInsts = instancesById.get('shot_image') ?? [];
+        const shotImagePathById: Record<string, string> = {};
+        for (const u of shotImageInsts) {
+          if (u.itemId && u.outputRel) {
+            shotImagePathById[u.itemId] = resolve(projectDir, u.outputRel);
+          }
+        }
+        const firstFrames: string[] = [];
+        for (const s of filteredShots) {
+          const sid = s.id ?? `scene_${inst.sceneNumber}_shot_${s.shotNumber}`;
+          const path = shotImagePathById[sid];
+          if (!path || !existsSync(path)) {
+            throw new Error(`comfy.ltx_director: shot_image output missing for ${sid} (looked up: ${path ?? '<no upstream instance>'})`);
+          }
+          firstFrames.push(path);
+        }
+        // globalPrompt from scene_video_prompt's output, if present.
+        let globalPrompt = '';
+        const svpInsts = instancesById.get('scene_video_prompt') ?? [];
+        const svp = svpInsts[0];
+        if (svp?.outputRel) {
+          const svpPath = resolve(projectDir, svp.outputRel);
+          if (existsSync(svpPath)) globalPrompt = readFileSync(svpPath, 'utf-8');
+        }
+        base['shots'] = filteredShots.map((s) => ({
+          shotNumber: s.shotNumber ?? 0,
+          duration: s.duration ?? 3,
+          ...(s.description ? { description: s.description } : {}),
+          ...(s.cameraWork ? { cameraWork: s.cameraWork } : {}),
+        }));
+        base['firstFrames'] = firstFrames;
+        base['globalPrompt'] = globalPrompt || `Scene ${inst.sceneNumber}`;
+      } else {
+        // scenes_plan output file missing; fall back to legacy
+        const resolved = resolveRelayInputs(projectDir, inst.sceneNumber, inst.shotRange ?? [1, 999]);
+        base['shots'] = resolved.shots;
+        base['firstFrames'] = resolved.firstFrames;
+        base['globalPrompt'] = resolved.globalPrompt;
+      }
+    } else {
+      // No scenes_plan upstream — fall back to legacy disk-file path.
+      if (!inst.shotRange) {
+        throw new Error('comfy.ltx_director: instance missing shotRange (no scenes_plan upstream and no chunkBy materialization)');
+      }
+      const resolved = resolveRelayInputs(projectDir, inst.sceneNumber, inst.shotRange);
+      base['shots'] = resolved.shots;
+      base['firstFrames'] = resolved.firstFrames;
+      base['globalPrompt'] = resolved.globalPrompt;
+    }
     // workflowPath may already be in config; resolve relative paths
     // against the kshana-core package root (NOT process.cwd()), so the
     // bundle resolves correctly when kshana-core is loaded as a library
@@ -401,7 +470,12 @@ function buildRunnerConfig(
     // unrelated to where the workflow JSONs ship.
     const wfRaw = (base['workflowPath'] as string | undefined) ?? '';
     if (wfRaw && !wfRaw.startsWith('/')) {
-      base['workflowPath'] = resolve(REPO_ROOT, wfRaw);
+      // Prefer bundleDir when set (directory-layout bundles ship
+      // workflows in their own dir). Fall back to REPO_ROOT for
+      // legacy single-file bundles that referenced shared workflows.
+      const bundleRel = bundleDir ? resolve(bundleDir, wfRaw) : null;
+      base['workflowPath'] =
+        bundleRel && existsSync(bundleRel) ? bundleRel : resolve(REPO_ROOT, wfRaw);
     }
   } else if (node.runner.tool === 'ffmpeg.concat') {
     // Inputs come from upstream node outputs. Walk node.inputs and
@@ -671,7 +745,7 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
         return { ok: false, error: err, instances: allInstances };
       }
 
-      const cfg = buildRunnerConfig(inst, opts.projectDir, instancesById);
+      const cfg = buildRunnerConfig(inst, opts.projectDir, instancesById, opts.bundleDir);
       // outputPath: render the bundle's outputs.pattern against
       // item-context vars so per-instance writes don't collide. Every
       // runner that writes a single output file expects an outputPath
