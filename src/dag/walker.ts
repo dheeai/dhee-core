@@ -802,6 +802,15 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
         if (!matching?.outputRel) continue;
         const upAbs = resolve(opts.projectDir, matching.outputRel);
         if (!existsSync(upAbs)) continue;
+        // Binary files (images, videos, audio) → expose the absolute
+        // path on ctx.inputs[<upstream>]. Reading them as utf-8 would
+        // be useless. Text files (.md, .json) → expose the content
+        // (parsed for json).
+        const isBinary = /\.(png|jpg|jpeg|webp|gif|mp4|webm|mov|wav|mp3)$/i.test(matching.outputRel);
+        if (isBinary) {
+          resolvedInputs[inp.from] = upAbs;
+          continue;
+        }
         try {
           const raw = readFileSync(upAbs, 'utf-8');
           let value: unknown = raw;

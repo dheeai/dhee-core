@@ -241,8 +241,36 @@ export function createComfyImageRunner(opts?: {
     // parsed JSON on ctx.inputs keyed by the upstream node id. We
     // look across all ctx.inputs for entries that look like
     // image-prompt JSON and adopt them when config doesn't have prompt.
+    //
+    // Also: when running FL2V-style video workflows, derive prompt
+    // from shot_motion_directive's description field, and pull
+    // first_frame / last_frame paths from shot_image /
+    // shot_image_last_frame upstream output file paths.
     const baseCfg = ctx.node.runner.config as Record<string, unknown>;
     const cfgWithUpstream: Record<string, unknown> = { ...baseCfg };
+
+    // FL2V wiring: shot_motion_directive → prompt (description field).
+    // shot_image / shot_image_last_frame → first_frame / last_frame
+    // (walker exposes them as absolute paths since they're PNG files).
+    const mdInput = ctx.inputs['shot_motion_directive'];
+    if (mdInput && typeof mdInput === 'object' && 'description' in (mdInput as Record<string, unknown>)) {
+      if (!cfgWithUpstream['prompt']) {
+        cfgWithUpstream['prompt'] = (mdInput as { description: string }).description;
+      }
+    }
+    if (typeof ctx.inputs['shot_image'] === 'string' && !cfgWithUpstream['baseImage']) {
+      cfgWithUpstream['baseImage'] = ctx.inputs['shot_image'];
+    }
+    // FL2V workflow expects 'first_frame' and 'last_frame' as named
+    // inputs to its parameterMappings (not base_image/reference_image_N
+    // like Klein). Stash them under those names so the mapping
+    // applies them to the correct LoadImage nodes.
+    if (typeof ctx.inputs['shot_image'] === 'string') {
+      cfgWithUpstream['_fl2v_first_frame'] = ctx.inputs['shot_image'];
+    }
+    if (typeof ctx.inputs['shot_image_last_frame'] === 'string') {
+      cfgWithUpstream['_fl2v_last_frame'] = ctx.inputs['shot_image_last_frame'];
+    }
     if (!cfgWithUpstream['prompt']) {
       for (const v of Object.values(ctx.inputs)) {
         if (v && typeof v === 'object' && 'imagePrompt' in (v as Record<string, unknown>)) {
@@ -348,6 +376,28 @@ export function createComfyImageRunner(opts?: {
       }
     }
 
+    // FL2V additional uploads: first_frame + last_frame. These are
+    // separate from base_image / referenceImages because the FL2V
+    // workflow's manifest declares them as named inputs.
+    let fl2vFirstUploaded: { name: string } | undefined;
+    let fl2vLastUploaded: { name: string } | undefined;
+    const fl2vFirstPath = (cfgWithUpstream['_fl2v_first_frame'] as string | undefined);
+    const fl2vLastPath = (cfgWithUpstream['_fl2v_last_frame'] as string | undefined);
+    if (fl2vFirstPath && existsSync(fl2vFirstPath)) {
+      try {
+        fl2vFirstUploaded = await client.uploadImage(fl2vFirstPath);
+      } catch (err) {
+        return { ok: false, error: `comfy.image: FL2V first_frame upload failed for ${fl2vFirstPath}: ${(err as Error).message}` };
+      }
+    }
+    if (fl2vLastPath && existsSync(fl2vLastPath)) {
+      try {
+        fl2vLastUploaded = await client.uploadImage(fl2vLastPath);
+      } catch (err) {
+        return { ok: false, error: `comfy.image: FL2V last_frame upload failed for ${fl2vLastPath}: ${(err as Error).message}` };
+      }
+    }
+
     let baseUploaded: { name: string } | undefined;
     if (cfg.baseImage) {
       try {
@@ -386,6 +436,13 @@ export function createComfyImageRunner(opts?: {
     if (baseUploaded) valueMap['base_image'] = baseUploaded.name;
     for (let i = 0; i < refUploaded.length; i++) {
       valueMap[`reference_image_${i + 1}`] = refUploaded[i]!.name;
+    }
+    if (fl2vFirstUploaded) valueMap['first_frame'] = fl2vFirstUploaded.name;
+    if (fl2vLastUploaded) valueMap['last_frame'] = fl2vLastUploaded.name;
+    // FL2V durationSeconds — derive from motion directive's shot
+    // duration if the bundle node's config didn't supply it. Default 3s.
+    if (valueMap['durationSeconds'] === undefined) {
+      valueMap['durationSeconds'] = (cfg as { duration?: number }).duration ?? 3;
     }
     // Klein workflow has 4 LoadImage nodes (base + 3 refs); every
     // slot must point at a real uploaded file or Comfy rejects with
@@ -428,7 +485,7 @@ export function createComfyImageRunner(opts?: {
     }
 
     // ── Download first image output ──
-    const imageOut = queueResult.outputs.find((o) => /\.(png|jpg|jpeg|webp)$/i.test(o.filename))
+    const imageOut = queueResult.outputs.find((o) => /\.(png|jpg|jpeg|webp|mp4|webm|mov)$/i.test(o.filename))
       ?? queueResult.outputs[0]!;
     try {
       await client.downloadOutput(imageOut.filename, imageOut.subfolder, outAbs);
