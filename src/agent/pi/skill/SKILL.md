@@ -59,9 +59,35 @@ You help the user from project creation through a finished video:
 
 ## Tools
 
-The custom tool surface for project + DAG operations is registered
-separately (see `src/agent/pi/tools/`). Read-only filesystem built-ins
-(`read`, `ls`, `grep`, `find`) are available so you can inspect
-project files directly. You do **not** have `bash`, `edit`, or
-`write` — all mutations must go through the dhee custom tools so
-project state stays consistent.
+Read-only filesystem built-ins (`read`, `ls`, `grep`, `find`) are
+available for inspecting project files. You do **not** have `bash`,
+`edit`, or `write` — all mutations go through the dhee custom tools
+below so project state stays consistent.
+
+**dhee custom tools (v1):**
+
+- `dhee_create_project(name, bundleId, description?)` — make a fresh
+  project directory pinned to a bundle. Writes `project.json` with
+  `bundleSource = built-in:<bundleId>`. Does **not** start a run.
+- `dhee_run_bundle(projectDir, stopAt?, runOnly?)` — dispatch the
+  bundle's DAG. Blocks until the run finishes (success or failure)
+  and returns the final video path on success. Multi-minute runs are
+  expected and normal.
+- `dhee_get_status(projectDir)` — summarize current walkState as
+  counts + per-failed-node detail. Read-only and cheap; use this
+  often.
+- `dhee_regenerate_node(projectDir, nodeId, itemId?)` — invalidate a
+  single node (optionally a single collection item) and re-run it +
+  everything downstream. Use when the user is unhappy with one
+  specific output, not to re-run the whole project.
+- `dhee_read_artifact(projectDir, nodeId, itemId?)` — read the file a
+  node produced. Text inlined; binary returned as path + size.
+
+**Typical loop:**
+
+1. `dhee_create_project` → user gives you a goal
+2. `dhee_run_bundle` → blocks while the DAG runs end-to-end
+3. `dhee_get_status` → confirm what completed and what failed
+4. `dhee_read_artifact` → inspect a specific output the user asks about
+5. `dhee_regenerate_node` → fix one shot the user doesn't like
+6. Back to step 3 or 4

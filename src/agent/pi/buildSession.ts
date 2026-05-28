@@ -33,6 +33,7 @@ import {
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
 } from '@mariozechner/pi-coding-agent';
+import { DHEE_TOOL_NAMES, registerDheeTools } from './tools/index.js';
 
 /** The skill name (from the YAML frontmatter `name:` field) we inject. */
 export const DHEE_SKILL_NAME = 'dhee';
@@ -62,10 +63,17 @@ export interface BuildPiSessionOptions {
    */
   customToolNames?: string[];
   /**
-   * Extension factories — used to register custom dhee tools. Phase A
-   * leaves this empty. Phase B will provide the 5 tools v1.
+   * Extension factories — used to register custom dhee tools. The
+   * built-in dhee tool registry runs first by default; pass extras
+   * here to layer additional tools / event handlers on top.
    */
   extensionFactories?: ConstructorParameters<typeof DefaultResourceLoader>[0]['extensionFactories'];
+  /**
+   * Set false to skip registering the v1 dhee tool family. Useful
+   * for tests that want to inspect the config shape without pulling
+   * in the live tools. Defaults to true.
+   */
+  includeDefaultTools?: boolean;
 }
 
 /**
@@ -76,7 +84,15 @@ export async function buildPiSessionConfig(
   opts: BuildPiSessionOptions,
 ): Promise<CreateAgentSessionOptions> {
   const cwd = opts.cwd ?? process.cwd();
-  const customToolNames = opts.customToolNames ?? [];
+  // Default to the v1 dhee toolset; callers can override (e.g. to []
+  // for the unit-test "config shape" suite). Production callers
+  // shouldn't override — every dhee tool name must be in the allowlist
+  // or pi silently blocks it (Landmine 1).
+  const customToolNames = opts.customToolNames ?? [...DHEE_TOOL_NAMES];
+  const baseExtensionFactories = opts.extensionFactories ?? [];
+  const extensionFactories = opts.includeDefaultTools === false
+    ? baseExtensionFactories
+    : [registerDheeTools, ...baseExtensionFactories];
 
   // Load our packaged skill once and inject it via skillsOverride.
   // We disable default discovery (which would also scan cwd/.pi/skills
@@ -92,7 +108,7 @@ export async function buildPiSessionConfig(
     cwd,
     agentDir: getAgentDir(),
     skillsOverride: () => packagedSkills,
-    extensionFactories: opts.extensionFactories,
+    extensionFactories,
   });
   await resourceLoader.reload();
 

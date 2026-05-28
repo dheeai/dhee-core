@@ -50,6 +50,26 @@ describe('buildPiSessionConfig', () => {
     expect(cfg.tools).not.toContain('bash');
   });
 
+  it('includes the v1 dhee tool names in the allowlist by default', async () => {
+    const cfg = await buildPiSessionConfig({
+      sessionManager: SessionManager.inMemory(process.cwd()),
+    });
+    expect(cfg.tools).toContain('dhee_create_project');
+    expect(cfg.tools).toContain('dhee_run_bundle');
+    expect(cfg.tools).toContain('dhee_get_status');
+    expect(cfg.tools).toContain('dhee_regenerate_node');
+    expect(cfg.tools).toContain('dhee_read_artifact');
+  });
+
+  it('omits dhee custom tools when includeDefaultTools=false', async () => {
+    const cfg = await buildPiSessionConfig({
+      sessionManager: SessionManager.inMemory(process.cwd()),
+      customToolNames: [],
+      includeDefaultTools: false,
+    });
+    expect(cfg.tools).not.toContain('dhee_create_project');
+  });
+
   it('honors the sessionManager that was passed in', async () => {
     const sm = SessionManager.inMemory(process.cwd());
     const cfg = await buildPiSessionConfig({ sessionManager: sm });
