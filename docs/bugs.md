@@ -165,3 +165,125 @@ prompted the migration are documented in the commit history of the
 - **Fix:** Stage the SRT to /tmp/dag_subs_<hex>.srt (no special chars), reference that in the filter, unlink after the ffmpeg call.
 - **Test:** (not added yet) — should add a test that runs ffmpeg.concat with a projectDir whose path contains spaces+apostrophes.
 - **Fix commit:** src/dag/runners/ffmpegConcat.ts — stageSrtForFilter helper.
+
+### BUG-016 — Desktop loads dead `dhee-core/manager` barrel; whole IPC bridge fails to register
+- **Status:** stop-gap committed; architectural fix pending
+- **Discovered:** 2026-05-28 (Ruby V4 — empty Prompts tab + missing thumbnail)
+- **Reporter:** user
+- **Repo:** kshana-desktop ↔ kshana-core
+- **Symptom:** Desktop boots fine but every `dhee:*` IPC channel is unregistered. Renderer calls like `window.dhee.resolveBundle(...)` reject with `Error: No handler registered for 'dhee:resolveBundle'`. Knock-on effects: Prompts/Storyboard/Assets panels stay empty for bundle-era projects; landing tile shows no thumbnail/stats; chat panel can't dispatch.
+- **Evidence:** `/Users/ganaraj/Library/Logs/dhee-desktop/main.log` — `[dheeCoreManager] Package export import failed: Cannot find module '.../dhee-core/dist/server/manager.js'` followed by `Failed to start embedded engine: Cannot find module '.../dhee-core/dist/server/manager.js'`. `registerdheeIpcBridge` is gated on a successful `dheeCoreManager.start()` so the bridge never registers.
+- **Root cause:** Commit `d6f11bd` ("full legacy deletion — bundle architecture only") removed `src/server/manager.ts` (and the whole `ConversationManager` + pi-coding-agent stack) but left the `./manager` entry in `kshana-core` `package.json` `exports`. `tsup.config.ts` only builds 4 entries; the leftover `dist/server/manager.js` from a pre-deletion build was wiped on the next `pnpm tsup` (`clean: true`), making the missing-source visible. The desktop's `dheeCoreManager.ts` does an ESM `import('dhee-core/manager')` at startup to construct a `ConversationManager` it only uses for `.shutdown()`.
+- **Manifestations to test:**
+  - (a) Fresh `pnpm tsup` in kshana-core produces a working `dist/` that the desktop can import without a missing-module error.
+  - (b) The desktop registers all `dhee:*` IPC channels even when no ConversationManager-style chat backend exists.
+  - (c) A test renderer calling `window.dhee.resolveBundle(...)` against the running app returns `{ ok: true, bundle: {...} }` for `built-in:narrative_qwen_chain_relay`.
+  - (d) Restarting the desktop with `dhee-core/manager` deleted entirely (the proper end-state) still boots.
+- **Stop-gap (committed):** added a thin `src/server/manager.ts` exporting a no-op `ConversationManager` + the live analytics/loadDevEnv helpers; added `server/manager` to `tsup.config.ts` entries. Lets the desktop boot today.
+- **Proper fix:** split the desktop's `dheeCoreManager` into (i) an "engine" lifecycle that only initializes the bundle dispatcher + analytics + workflow registry (no `ConversationManager`), and (ii) remove the `./manager` export from `package.json`. Delete `dheeCoreManager`'s `cm` field, `shutdown()` call, all `dhee:runTask` / `dhee:cancelTask` / `dhee:redoNode` IPC channels that route through the dead facade.
+- **Tests to add:** `tests/main/dheeCoreManager.startsWithoutConversationManager.test.ts` (Red: assert `start()` resolves without importing `dhee-core/manager`); `tests/main/ipcBridge.registersDhee.test.ts` (Red: assert all `dhee:*` channels registered after `start()`).
+- **Fix commit:** stop-gap — `src/server/manager.ts`, `tsup.config.ts`; proper fix — pending.
+
+### BUG-017 — `backendProjectToDesktopManifest` crashes on bundle-era project.json (missing `updatedAt`)
+- **Status:** stop-gap committed; architectural fix pending
+- **Discovered:** 2026-05-28 (Ruby V4 — Prompts/thumbnail empty after BUG-016 unblocked)
+- **Reporter:** user
+- **Repo:** kshana-desktop
+- **Symptom:** With the IPC bridge registered (BUG-016 stop-gap), opening a bundle-era project surfaced `[ProjectContext] Failed to load project: Invalid time value`. ProjectContext set `error` and never wrote `isLoaded: true`, so every preview panel rendered the empty/loading state.
+- **Evidence:** `/Users/ganaraj/Library/Logs/dhee-desktop/main.log` — `[RendererConsole:error] [ProjectContext] Failed to load project: Invalid time value`. Trace: `backendProjectAdapter.ts:509` — `manifest.updated_at = new Date(project.updatedAt).toISOString();`. Ruby V4's `project.json` has `createdAt` as an ISO string and no `updatedAt`; `new Date(undefined).toISOString()` throws `RangeError: Invalid time value`.
+- **Root cause:** `BackendProjectFile` (kshana-desktop `src/renderer/services/project/backendProjectAdapter.ts:73`) is the legacy executor-era v2.0 schema (`version`, `phases`, `content`, `characters[]`, `settings[]`, `scenes[]`, `assets[]`, numeric `createdAt`/`updatedAt`). A bundle-era `project.json` is a different shape entirely — `{ id, name, createdAt, templateId, style, bundleSource, walkState }` — with no `updatedAt` and ISO-string `createdAt`. The adapter chain (`backendProjectToDesktopManifest`, `backendProjectToDesktopAgentState`, `desktopAgentStateToBackendProject`) is dead code for bundle projects but still on the load path.
+- **Manifestations to test:**
+  - (a) Bundle project with no `updatedAt`, ISO `createdAt` loads cleanly.
+  - (b) Bundle project with `createdAt` missing entirely loads cleanly (falls back to now).
+  - (c) Legacy executor project (numeric `createdAt`/`updatedAt`) still loads.
+  - (d) Project file with malformed `createdAt` ("not a date") doesn't crash; falls back gracefully.
+- **Stop-gap (committed):** `safeIsoDate` helper in `backendProjectAdapter.ts:512`; `updated_at` falls back to `created_at` which falls back to `Date.now()`.
+- **Proper fix:** delete `BackendProjectFile` for the bundle codepath entirely. `ProjectService.openProject` should detect `bundleSource` in `project.json` and return a `BundleProject` shape directly; renderer code consumes `walkState` via `bundleCapability` helpers, never an adapted v2.0 manifest. Adapter remains only for any genuinely legacy executor projects still on disk (or is deleted if there are none).
+- **Tests to add:** `src/renderer/services/project/backendProjectAdapter.test.ts` (Red: feed bundle-shape JSON missing `updatedAt`; assert no throw, `updated_at === created_at`); `src/renderer/services/project/ProjectService.bundle.test.ts` (Red: `openProject` on a bundle dir returns `{success:true}` without touching the adapter).
+- **Fix commit:** stop-gap — `src/renderer/services/project/backendProjectAdapter.ts`; proper fix — pending.
+
+### BUG-018 — `PromptsView` mixes capability API with hardcoded `shot_image_prompt:` node-id regex
+- **Status:** won't fix — component being deleted as part of BUG-020 (Inspector Canvas replaces PromptsView entirely)
+- **Discovered:** 2026-05-28 (Ruby V4 — Prompts tab populates only because qwen bundle happens to use the same node names as narrative_prompt_relay)
+- **Reporter:** AI (during BUG-016/017 debugging)
+- **Repo:** kshana-desktop
+- **Symptom:** PromptsView correctly resolves the bundle and queries `shot.prompt` / `shot.motion` via the capability API to build the work list — but the `completedShots` / `completedMotion` sets that gate the render loop are built by regex-matching node ids: `id.match(/^shot_image_prompt:(scene_\d+_shot_\d+)$/)` and `id.match(/^shot_motion_directive:(scene_\d+_shot_\d+)$/)`. Any bundle whose internal node names differ from those literals will render zero shots even when capability tags + walkState are correct. Violates the contract from `docs/display-capabilities.md` ("bundles can name nodes anything").
+- **Evidence:** `src/renderer/components/preview/PromptsView/PromptsView.tsx:694,701` — the regex match runs against raw `walkState.nodes` keys; nothing reads the bundle's `displayCapability` tags.
+- **Manifestations to test:**
+  - (a) Bundle that names the prompt node `shot_prompt` (no `_image_`) still renders shots in the Prompts tab.
+  - (b) Bundle that names the prompt node `image_prompt` (different ordering) still renders.
+  - (c) Bundle with no `shot.motion`-tagged node at all renders shots without motion blocks (doesn't 0-out the panel).
+  - (d) An invalidated capability instance (status: invalidated) is filtered out.
+- **Suspected root cause:** Half-finished migration to the capability API. The work-list now uses capability lookup, but the completion-gating sets were never migrated.
+- **Tests to add:** `src/renderer/components/preview/PromptsView/PromptsView.capability.test.tsx` (Red: render with a `shot_prompt`-named bundle, assert one tile per completed shot regardless of node id).
+- **Fix commit:** (pending) — replace `completedShots`/`completedMotion` regex derivation with `listCompletedItemIds(bundle, project, 'shot.prompt')` / `'shot.motion'`.
+
+### BUG-019 — PromptsView assumes a single prompt JSON schema (`frames.first_frame.imagePrompt`); other bundles render empty
+- **Status:** superseded by BUG-020 — the desktop's tab-per-artifact-shape architecture is the root issue, not this one schema mismatch. Inspector Canvas (BUG-020) renders artifacts by declared node `kind` + `headlineField` and obsoletes PromptsView entirely.
+- **Discovered:** 2026-05-28 (Ruby V4, after BUG-016+BUG-017 stop-gaps unblocked the load path)
+- **Reporter:** AI (diagnosed by inspecting the on-disk prompt JSON vs the component's interface)
+- **Repo:** kshana-desktop
+- **Symptom:** Prompts tab is empty for `narrative_qwen_chain_relay` projects even though `walkState` has 31 completed `shot_image_prompt:scene_N_shot_M` instances and the JSON files exist on disk and parse fine.
+- **Evidence:**
+  - On-disk schema (`prompts/shot_image/scene_1_shot_1.json` in Ruby V4): `{ "chosenBaseShotNumber": null, "chosenBaseReason": "...", "view": "front-left quarter view", "elevation": "eye-level shot", "distance": "wide shot", "deltaText": "..." }`.
+  - `src/renderer/components/preview/PromptsView/PromptsView.tsx:69-79` — `ShotPromptFile` interface expects `{ shotNumber, frames: { first_frame: { imagePrompt, ... }, last_frame, mid_frame }, negativePrompt, aspectRatio }`.
+  - `:1119` — `const ff = entry.prompts?.frames?.first_frame;` and `:1177` — `text={ff?.imagePrompt}`. With the qwen-chain bundle's flat schema, every `ff` is `undefined` and every text block renders empty. The number of tiles may even be zero depending on render gates.
+- **Root cause:** Every bundle produces its own prompt schema (prompt_relay → multi-frame, shot_by_shot → first+last, qwen_chain_relay → flat delta), but the desktop component hardcodes one schema. This violates the bundle ↔ desktop contract — the desktop should not assume what a bundle's prompt looks like.
+- **Manifestations to test:**
+  - (a) `narrative_qwen_chain_relay` project renders 31 tiles in Prompts tab with `deltaText` visible.
+  - (b) `narrative_shot_by_shot` project still renders first + last frame blocks per shot.
+  - (c) `narrative_prompt_relay` project still renders single-frame blocks per shot.
+  - (d) A future bundle producing `{ description, mood, lighting }` renders something readable without code changes (e.g. generic key/value display).
+- **Suspected architectural fix:**
+  - Add a `display.shot_prompt_fields` block to `bundle.json` declaring which JSON fields make up the "headline" / "details" of a shot prompt — e.g. `{ headline: "deltaText", details: ["view", "elevation", "distance"] }`.
+  - PromptsView reads that mapping from the resolved `BundleSnapshot.display` and renders accordingly. Falls back to a generic key/value table when nothing is declared.
+  - Delete `ShotPromptFile` / `FrameData` interfaces from the component.
+- **Tests to add:**
+  - `PromptsView.qwen_chain_schema.test.tsx` (Red: render with qwen-chain fixture project, assert 31 tiles + `deltaText` text node present).
+  - `PromptsView.prompt_relay_schema.test.tsx` (Red: assert per-frame blocks present for narrative_prompt_relay).
+  - `PromptsView.unknown_schema_graceful.test.tsx` (Red: bundle without `display.shot_prompt_fields`, prompt JSON has only `description` — assert generic key/value renders).
+- **Fix commit:** (pending).
+
+### BUG-020 — Project workspace must render the bundle DAG itself, not a fixed set of artifact-shape tabs
+- **Status:** open — Inspector Canvas implementation in progress (feat/dag-bundles)
+- **Discovered:** 2026-05-28 (after BUG-019 surfaced the per-tab schema-mismatch problem; user pushed to a deeper framing)
+- **Reporter:** user
+- **Repo:** kshana-desktop + kshana-core
+- **Symptom (framing, not a runtime bug):** The desktop workspace today is Prompts / Storyboard / Assets / Timeline / Video Library — each tab is a hardcoded reader for one specific subdirectory and one specific JSON schema. Every new bundle shape (qwen-chain's flat prompt schema, a future music bundle, a 3D bundle, anything) requires per-tab code. The bundle architecture made tabs obsolete; we hadn't realized it yet.
+- **Root architectural cause:** Three of the five tabs (Prompts, Storyboard, Assets) are all views over the same underlying graph — they just slice it by artifact directory. The honest view is the graph itself: nodes as cards, edges as drawn lines, per-item rails for collections. Per-node `kind` + `headlineField` lets the desktop render any artifact without bundle-specific code.
+- **Decision:** Replace Prompts + Storyboard + Assets tabs with a single **Inspector Canvas** view — pan/zoomable HTML+SVG canvas rendering the bundle DAG. Each card renders the artifact at its `outputPath` per the node's declared `kind` (image / text / md / json / video / audio). Collection nodes render as RAILS containing per-`item_id` tiles. Timeline tab stays separate (it's a sequencing UI, not an inspection one). Video Library stays for now.
+- **Constraints (per project memory):**
+  - Agent stays primary. Canvas is a *view*, not the only surface — the agent panel is always visible and onboarding leads with the agent.
+  - Default view is **outputs**, not the DAG — the canvas surfaces outputs prominently; upstream stage cards can be collapsed.
+  - Direct manipulation is allowed for targeted edits (regenerate a node, swap a runner, tweak a param) but the canvas is not a freeform graph editor.
+- **Schema additions (kshana-core):**
+  - `NodeDef.kind`: required, one of `image | text | md | json | video | audio` (with `text` covering plain string output, `md` for markdown).
+  - `NodeDef.headlineField`: optional, dot-path into the node's JSON output that names the headline field shown on the card (e.g. `deltaText` for qwen-chain shot prompts, `frames.first_frame.imagePrompt` for prompt-relay).
+  - All 3 built-in bundles tagged with kinds.
+- **Mockup:** `docs/mockups/inspector-canvas-v1.html` (reference design — palette, density, kind renderers).
+- **Manifestations to test:**
+  - (a) Bundle schema validates `kind` enum; unknown kind rejected with a clear error.
+  - (b) `headlineField` is optional; absent → tile shows the raw first scalar value or a generic key/value table.
+  - (c) `bundleToFlowGraph(bundle, walkState)` emits one React-Flow node per stage + one parent rail node per collection, with correct edges from `inputs[].from`.
+  - (d) `ImageNode` renders an `<img src>` pointing at `outputPath` (via Electron file protocol).
+  - (e) `JsonNode` renders the field at `headlineField` when present; falls back to a generic tree view otherwise.
+  - (f) `VideoNode` renders a poster frame from the artifact and a play overlay; clicking plays inline (or opens Timeline for `final_video`).
+  - (g) `AudioNode` renders an HTML5 `<audio>` element with custom transport.
+  - (h) `CollectionRail` virtualizes when item count > 12 (don't render 31 tiles inert).
+  - (i) Status overlays (running pulse, failed red border, invalidated stripe) reflect walkState in real time when project.json changes on disk.
+  - (j) Right-click "regenerate" on a tile dispatches `redoNode(nodeId, itemId)` via existing IPC (no IPC contract change).
+- **Tests to add (phased):**
+  - Phase 1 (kshana-core):
+    - `src/dag/schema.test.ts` — `NodeDef.kind` validation, all 3 built-in bundles parse cleanly with kinds tagged
+    - `src/dag/capabilities.test.ts` — capability instances surface `kind` from the bundle
+  - Phase 2 (kshana-desktop):
+    - `src/renderer/inspector/bundleToFlowGraph.test.ts` — pure transform
+    - `src/renderer/inspector/nodes/JsonNode.test.tsx` — headlineField rendering
+    - `src/renderer/inspector/nodes/ImageNode.test.tsx`, `VideoNode.test.tsx`, `AudioNode.test.tsx`, `CollectionRail.test.tsx`
+    - `src/renderer/inspector/InspectorCanvas.integration.test.tsx` — full mount with qwen-chain fixture
+  - Phase 3 (cleanup):
+    - delete `PromptsView`, `StoryboardView`, `AssetsView` + their tests
+    - delete `BackendProjectFile` adapter for bundle path (BUG-017 proper fix)
+    - delete dheeCoreManager's ConversationManager facade (BUG-016 proper fix)
+- **Scope estimate:** 4–6 Claude-Code days for v1 (inspection only, no editing); +2–3 days for regenerate/status overlays; +2–3 days for Timeline modal integration. Each phase ships incrementally on `feat/dag-bundles`.
+- **Fix commit:** (pending).

@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     'server/runners/index': 'src/server/runners/index.ts',
+    'server/manager': 'src/server/manager.ts',
     'core/llm/index': 'src/core/llm/index.ts',
     'dag/index': 'src/dag/walker.ts',
   },
