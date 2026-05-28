@@ -107,6 +107,18 @@ export interface NodeDef {
     config: Record<string, unknown>;
   };
   /**
+   * For `outputs.format: 'json'` nodes: dot-path into the produced JSON
+   * naming the headline field — the primary text the desktop's Inspector
+   * Canvas shows on the card or tile. Examples:
+   *   - 'deltaText'                          (narrative_qwen_chain_relay shot prompts)
+   *   - 'frames.first_frame.imagePrompt'     (narrative_prompt_relay shot prompts)
+   *   - 'name'                               (characters_plan / settings_plan items)
+   *
+   * Renderer falls back to a generic key/value tree when absent or when
+   * the path doesn't resolve. Ignored for non-json kinds.
+   */
+  headlineField?: string;
+  /**
    * Optional display capability tag — the contract between a bundle's
    * artifacts and the desktop's views. The desktop discovers what to
    * render by *capability*, not by node id, so bundles can use any

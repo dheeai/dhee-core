@@ -181,7 +181,8 @@
         }
       },
       "itemKey": "characters",
-      "displayCapability": "character.prompt"
+      "displayCapability": "character.prompt",
+      "headlineField": "imagePrompt"
     },
     {
       "id": "character_image",
@@ -266,7 +267,8 @@
         }
       },
       "itemKey": "settings",
-      "displayCapability": "setting.prompt"
+      "displayCapability": "setting.prompt",
+      "headlineField": "imagePrompt"
     },
     {
       "id": "setting_image",
@@ -361,7 +363,8 @@
         }
       },
       "itemKey": "shots",
-      "displayCapability": "shot.prompt"
+      "displayCapability": "shot.prompt",
+      "headlineField": "imagePrompt"
     },
     {
       "id": "shot_image",
@@ -428,7 +431,8 @@
         }
       },
       "itemKey": "shots",
-      "displayCapability": "shot.motion"
+      "displayCapability": "shot.motion",
+      "headlineField": "description"
     },
     {
       "id": "scene_video_prompt",

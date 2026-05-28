@@ -180,7 +180,8 @@
         }
       },
       "itemKey": "characters",
-      "displayCapability": "character.prompt"
+      "displayCapability": "character.prompt",
+      "headlineField": "imagePrompt"
     },
     {
       "id": "character_image",
@@ -265,7 +266,8 @@
         }
       },
       "itemKey": "settings",
-      "displayCapability": "setting.prompt"
+      "displayCapability": "setting.prompt",
+      "headlineField": "imagePrompt"
     },
     {
       "id": "setting_image",
@@ -360,7 +362,8 @@
         }
       },
       "itemKey": "shots",
-      "displayCapability": "shot.prompt"
+      "displayCapability": "shot.prompt",
+      "headlineField": "imagePrompt"
     },
     {
       "id": "shot_image",
@@ -439,7 +442,8 @@
           "outputFormat": "json"
         }
       },
-      "displayCapability": "shot.last_prompt"
+      "displayCapability": "shot.last_prompt",
+      "headlineField": "imagePrompt"
     },
     {
       "id": "shot_image_last_frame",
@@ -511,7 +515,8 @@
         }
       },
       "itemKey": "shots",
-      "displayCapability": "shot.motion"
+      "displayCapability": "shot.motion",
+      "headlineField": "description"
     },
     {
       "id": "shot_video",
@@ -547,7 +552,8 @@
           "width": 1216,
           "height": 704
         }
-      }
+      },
+      "displayCapability": "shot.video"
     },
     {
       "id": "final_video",
