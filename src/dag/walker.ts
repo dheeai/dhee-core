@@ -934,6 +934,38 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
         const upInsts = instancesById.get(inp.from) ?? [];
         if (upInsts.length === 0) continue;
 
+        // scope='previousN' on a collection upstream → expose as an
+        // ordered array of the last N completed instances whose
+        // shotNumber is strictly less than the current instance's
+        // shotNumber, sorted by shotNumber DESC then truncated to N.
+        // Used by chain bundles where the LLM picks the best prior
+        // shot to use as the edit base (handles the "previous shot
+        // was a tight CU, no scene context" failure mode).
+        if (inp.scope === 'previousN' && inst.itemId) {
+          // Parse shotNumber from itemId (canonical format: scene_N_shot_M
+          // OR just shot_M when scenes_plan doesn't carry scene info).
+          const parseShotNum = (id: string | undefined): number | undefined => {
+            if (!id) return undefined;
+            const m = id.match(/(?:^|_)shot_(\d+)$/);
+            return m ? parseInt(m[1]!, 10) : undefined;
+          };
+          const currentShotNum = parseShotNum(inst.itemId);
+          if (currentShotNum !== undefined) {
+            const n = inp.n ?? 5;
+            const priors: Array<{ shotNumber: number; itemId: string; outputAbs: string }> = [];
+            for (const u of upInsts) {
+              if (!u.outputRel || u.status !== 'completed') continue;
+              const uShot = parseShotNum(u.itemId);
+              if (uShot === undefined || uShot >= currentShotNum) continue;
+              const abs = resolve(opts.projectDir, u.outputRel);
+              if (existsSync(abs)) priors.push({ shotNumber: uShot, itemId: u.itemId ?? '', outputAbs: abs });
+            }
+            priors.sort((a, b) => b.shotNumber - a.shotNumber);
+            resolvedInputs[inp.from] = priors.slice(0, n);
+            continue;
+          }
+        }
+
         // scope='all' on a collection upstream → expose as
         // { [itemId]: outputAbs } map so runners can resolve cross-
         // collection references (e.g. shot_image references

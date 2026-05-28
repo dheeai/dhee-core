@@ -17,7 +17,7 @@ export type NodeKind = 'stage' | 'collection';
 
 export type InputUsage = 'context' | 'reference' | 'input' | 'aggregate';
 
-export type InputScope = 'all' | 'matching' | 'any';
+export type InputScope = 'all' | 'matching' | 'any' | 'previousN';
 
 export interface AggregateConfig {
   /** How upstream items are packed into this node's call. */
@@ -35,6 +35,16 @@ export interface NodeInput {
   usage: InputUsage;
   /** For collection sources: which items to pull. Defaults to 'all'. */
   scope?: InputScope;
+  /**
+   * For scope='previousN': how many prior instances to include.
+   * The walker collects up to N upstream instances whose shotNumber is
+   * strictly less than the current instance's shotNumber, sorted by
+   * shotNumber DESC and truncated to N. Exposed as an array of
+   * { shotNumber, outputAbs, ... } to the runner. Used by Qwen-chain
+   * bundles where the LLM picks the best prior shot to use as the
+   * edit base.
+   */
+  n?: number;
   /** For 'aggregate' usage: how N upstream items become one call. */
   aggregate?: AggregateConfig;
 }

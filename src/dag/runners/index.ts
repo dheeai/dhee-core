@@ -10,6 +10,7 @@
 import type { Runner } from '../schema.js';
 import { comfyImageRunner } from './comfyImage.js';
 import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
+import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import {
@@ -80,6 +81,18 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Drives the LTX Director / Director Chain ComfyUI workflow to render per-scene relay clips from first-frame anchors + motion directives.',
     },
     runner: comfyLtxDirectorRunner,
+  },
+  {
+    manifest: {
+      tool: 'comfy.qwen_edit_chain',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Comfy Qwen Edit chain',
+      description:
+        'Qwen Image Edit 2511 + Multi-Angle LoRA + Lightning 4-step LoRA. Iteratively edits a prior shot (LLM-picked from previousN candidates) into the next shot via camera-rotation guidance. Enables consistent character/setting continuity across a scene at low cost.',
+    },
+    runner: comfyQwenEditChainRunner,
   },
   {
     manifest: {

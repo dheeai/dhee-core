@@ -37,6 +37,8 @@ function buildWorkflow(opts: {
   unetName: string;
   steps: number;
   cfg: number;
+  /** Optional additional reference images (already-uploaded filenames on Comfy). */
+  extraRefs?: string[];
 }): APIWorkflow {
   const wf: APIWorkflow = {};
 
@@ -60,12 +62,19 @@ function buildWorkflow(opts: {
   // Encode the scaled reference as the starting latent.
   wf['ENC'] = { class_type: 'VAEEncode', inputs: { pixels: ['SCALE', 0], vae: ['VAE', 0] } };
 
-  // ── Qwen edit text encoder with single reference image ──
-  // (Multi-angle is one-source-image; we hand the same image to image1 only.)
-  wf['POS'] = {
-    class_type: 'TextEncodeQwenImageEditPlus',
-    inputs: { prompt: opts.prompt, clip: ['CLIP', 0], vae: ['VAE', 0], image1: ['SCALE', 0] },
-  };
+  // ── Qwen edit text encoder ──
+  // image1 = scaled base image (the shot we're "editing")
+  // image2, image3 = optional character/setting refs to inject new subjects
+  const refLoadIds: string[] = [];
+  (opts.extraRefs ?? []).forEach((refName, i) => {
+    const id = `REF_${i + 1}`;
+    wf[id] = { class_type: 'LoadImage', inputs: { image: refName } };
+    refLoadIds.push(id);
+  });
+  const posInputs: Record<string, unknown> = { prompt: opts.prompt, clip: ['CLIP', 0], vae: ['VAE', 0], image1: ['SCALE', 0] };
+  if (refLoadIds[0]) posInputs['image2'] = [refLoadIds[0], 0];
+  if (refLoadIds[1]) posInputs['image3'] = [refLoadIds[1], 0];
+  wf['POS'] = { class_type: 'TextEncodeQwenImageEditPlus', inputs: posInputs };
   wf['NEG'] = {
     class_type: 'TextEncodeQwenImageEditPlus',
     inputs: { prompt: '', clip: ['CLIP', 0], vae: ['VAE', 0], image1: ['SCALE', 0] },
@@ -110,6 +119,14 @@ async function main() {
   const prompt = arg('prompt', '');
   const loraName = arg('lora', 'qwen-image-edit-2511-multiple-angles-lora.safetensors');
   const strength = parseFloat(arg('strength', '0.9'));
+  // --ref <path> may be passed up to 2× (for image2 + image3 slots of TextEncodeQwenImageEditPlus).
+  const refPaths: string[] = [];
+  for (let i = 0; i < process.argv.length; i++) {
+    if (process.argv[i] === '--ref' && process.argv[i + 1]) {
+      refPaths.push(process.argv[i + 1]!);
+      i++;
+    }
+  }
   const lightningLoraName = arg('lightning-lora', 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors');
   const unetName = arg('unet', 'qwen_image_edit_2511_bf16.safetensors');
   // With Lightning 4-step LoRA stacked, default to 4 steps + cfg 1.
@@ -130,7 +147,15 @@ async function main() {
   const up = await client.uploadImage(imagePath, 'input', true);
   console.log(`  → ${up.name}`);
 
-  const wf = buildWorkflow({ imageRefName: up.name, prompt, loraName, loraStrength: strength, lightningLoraName, unetName, steps, cfg });
+  const extraRefs: string[] = [];
+  for (const rp of refPaths.slice(0, 2)) {
+    console.log(`Uploading ref ${basename(rp)}...`);
+    const u = await client.uploadImage(rp, 'input', true);
+    console.log(`  → ${u.name}`);
+    extraRefs.push(u.name);
+  }
+
+  const wf = buildWorkflow({ imageRefName: up.name, prompt, loraName, loraStrength: strength, lightningLoraName, unetName, steps, cfg, extraRefs });
   console.log(`UNET:    ${unetName}`);
   console.log(`LoRAs:   ${loraName} @ ${strength} (multi-angle) + ${lightningLoraName} @ 1.0 (lightning)`);
   console.log(`Sampler: ${steps} steps, cfg ${cfg}, euler/simple`);

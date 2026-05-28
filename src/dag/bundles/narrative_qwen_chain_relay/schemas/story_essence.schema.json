@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "required": ["genre", "throughline", "tonal_notes", "narration", "primary_emotion"],
+  "properties": {
+    "genre": { "type": "string" },
+    "throughline": { "type": "string" },
+    "tonal_notes": { "type": "array", "items": { "type": "string" } },
+    "narration": { "type": "string", "enum": ["none", "voiceover", "diegetic dialogue"] },
+    "primary_emotion": { "type": "string" }
+  }
+}
