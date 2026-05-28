@@ -106,6 +106,35 @@ export interface NodeDef {
     /** Tool-specific config. Validated against runner's input JSON Schema. */
     config: Record<string, unknown>;
   };
+  /**
+   * Optional display capability tag — the contract between a bundle's
+   * artifacts and the desktop's views. The desktop discovers what to
+   * render by *capability*, not by node id, so bundles can use any
+   * internal node naming and any output path layout without the desktop
+   * needing per-bundle code.
+   *
+   * Reserved kshana-core capabilities (see docs/display-capabilities.md):
+   *   - 'shot.prompt'         per-shot image-generation prompt JSON
+   *   - 'shot.motion'         per-shot motion / video prompt JSON
+   *   - 'shot.first_frame'    per-shot first-frame image PNG
+   *   - 'shot.last_frame'     per-shot last-frame image PNG
+   *   - 'shot.video'          per-shot video clip MP4
+   *   - 'scene.video'         per-scene relay clip MP4
+   *   - 'scene.plan'          scene plan (scenes + shots arrays) JSON
+   *   - 'character.image'     character reference PNG
+   *   - 'character.prompt'    character image prompt JSON
+   *   - 'setting.image'       setting reference PNG
+   *   - 'setting.prompt'      setting image prompt JSON
+   *   - 'final.video'         final assembled video MP4
+   *
+   * Custom capabilities (anything outside the reserved set) are allowed
+   * — desktop views without a handler for that capability simply ignore
+   * those nodes. Convention: use `<domain>.<artifact>` dotted form.
+   *
+   * Bundles that omit `displayCapability` fall back to legacy node-id
+   * heuristics in the desktop (best-effort; not guaranteed).
+   */
+  displayCapability?: string;
 }
 
 export interface BundleDependencies {

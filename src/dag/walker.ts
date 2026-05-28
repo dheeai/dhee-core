@@ -46,6 +46,16 @@ export {
   pruneStaleEntries,
 } from './walkState.js';
 export type { WalkState, NodeStateEntry, NodeRunStatus } from './walkState.js';
+export {
+  findByCapability,
+  findInstanceByCapability,
+  listCompletedItemIds,
+} from './capabilities.js';
+export type {
+  CapabilityNode,
+  CapabilityInstance,
+  ProjectStateLike,
+} from './capabilities.js';
 
 export interface WalkerCliParams {
   /** Which scene(s) to render. */

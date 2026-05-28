@@ -48,7 +48,8 @@
           "tier": "heavy",
           "outputFormat": "markdown"
         }
-      }
+      },
+      "displayCapability": "plot.outline"
     },
     {
       "id": "story",
@@ -70,7 +71,8 @@
           "tier": "heavy",
           "outputFormat": "markdown"
         }
-      }
+      },
+      "displayCapability": "story.prose"
     },
     {
       "id": "story_essence",
@@ -93,7 +95,8 @@
           "tier": "medium",
           "outputFormat": "json"
         }
-      }
+      },
+      "displayCapability": "story.essence"
     },
     {
       "id": "world_style",
@@ -119,7 +122,8 @@
           "tier": "heavy",
           "outputFormat": "markdown"
         }
-      }
+      },
+      "displayCapability": "style.world"
     },
     {
       "id": "characters_plan",
@@ -146,7 +150,8 @@
           "tier": "heavy",
           "outputFormat": "json"
         }
-      }
+      },
+      "displayCapability": "character.plan"
     },
     {
       "id": "character_image_prompt",
@@ -175,7 +180,8 @@
           "outputFormat": "json"
         }
       },
-      "itemKey": "characters"
+      "itemKey": "characters",
+      "displayCapability": "character.prompt"
     },
     {
       "id": "character_image",
@@ -201,7 +207,8 @@
           "width": 1024,
           "height": 1024
         }
-      }
+      },
+      "displayCapability": "character.image"
     },
     {
       "id": "settings_plan",
@@ -228,7 +235,8 @@
           "tier": "heavy",
           "outputFormat": "json"
         }
-      }
+      },
+      "displayCapability": "setting.plan"
     },
     {
       "id": "setting_image_prompt",
@@ -257,7 +265,8 @@
           "outputFormat": "json"
         }
       },
-      "itemKey": "settings"
+      "itemKey": "settings",
+      "displayCapability": "setting.prompt"
     },
     {
       "id": "setting_image",
@@ -283,7 +292,8 @@
           "width": 1920,
           "height": 1080
         }
-      }
+      },
+      "displayCapability": "setting.image"
     },
     {
       "id": "scenes_plan",
@@ -311,7 +321,8 @@
           "outputFormat": "json",
           "maxTokens": 16000
         }
-      }
+      },
+      "displayCapability": "scene.plan"
     },
     {
       "id": "shot_image_prompt",
@@ -349,7 +360,8 @@
           "outputFormat": "json"
         }
       },
-      "itemKey": "shots"
+      "itemKey": "shots",
+      "displayCapability": "shot.prompt"
     },
     {
       "id": "shot_image",
@@ -385,7 +397,8 @@
           "width": 1920,
           "height": 1080
         }
-      }
+      },
+      "displayCapability": "shot.first_frame"
     },
     {
       "id": "shot_motion_directive",
@@ -414,7 +427,8 @@
           "outputFormat": "json"
         }
       },
-      "itemKey": "shots"
+      "itemKey": "shots",
+      "displayCapability": "shot.motion"
     },
     {
       "id": "scene_video_prompt",
@@ -444,7 +458,8 @@
           "tier": "heavy",
           "outputFormat": "markdown"
         }
-      }
+      },
+      "displayCapability": "scene.video_prompt"
     },
     {
       "id": "scene_clip",
@@ -486,7 +501,8 @@
           "height": 480
         }
       },
-      "itemKey": "scenes"
+      "itemKey": "scenes",
+      "displayCapability": "scene.video"
     },
     {
       "id": "final_video",
@@ -505,7 +521,8 @@
       "runner": {
         "tool": "ffmpeg.concat",
         "config": {}
-      }
+      },
+      "displayCapability": "final.video"
     }
   ]
 }
