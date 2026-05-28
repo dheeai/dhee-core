@@ -183,6 +183,79 @@ export interface DagBundle {
   /** Terminal node — what the walker tries to produce. */
   goal: string;
   nodes: NodeDef[];
+  /**
+   * Optional UI metadata so the desktop's project list / tiles / detail
+   * panels can render this bundle's outputs without hardcoding paths or
+   * node ids. Bundle authors describe what to use as a thumbnail and
+   * what numbers to summarize in the tile; the desktop just consumes.
+   *
+   * Without this block, the desktop falls back to a generic
+   * folder-icon thumbnail + an empty stats line. So legacy bundles
+   * still display — they just don't get the rich tile treatment.
+   *
+   * See docs/display-capabilities.md for the full reserved capability
+   * registry; the `from` / `source` fields here reference those.
+   */
+  display?: BundleDisplay;
+}
+
+/**
+ * Bundle-author-declared display metadata. Drives the project tile on
+ * the desktop's landing screen — thumbnail + summary stats.
+ */
+export interface BundleDisplay {
+  /**
+   * Source for the project tile's thumbnail image. The desktop finds
+   * a completed instance of a node with this capability tag and uses
+   * its outputPath as the image.
+   *
+   * Capability needs to produce an image-format artifact (png/jpg/
+   * webp). Bundles that produce only text/audio should omit this and
+   * the tile falls back to a generic icon.
+   */
+  thumbnail?: {
+    from: string;
+    /**
+     * Which completed instance to pick when multiple match. Default
+     * 'first_completed' (lowest scene/shot id in lex order). Use
+     * 'random_completed' for galleries that should feel alive on
+     * each landing-screen visit. 'latest_completed' = most recently
+     * walker-recorded; useful for "what just finished?" feel.
+     */
+    pick?: 'first_completed' | 'random_completed' | 'latest_completed';
+  };
+  /**
+   * Inline numbers to summarize in the tile (e.g. "3 scenes · 31 shots"
+   * for narrative; "12 tracks · 47 min" for a music project).
+   *
+   * Each entry is either:
+   *  - count of completed collection instances tagged with `source`
+   *    (`count_completed: true`)
+   *  - a number / array.length extracted via dot-path from the JSON
+   *    file at the `source` capability's outputPath (`path: "..."`).
+   *
+   * Stats with no matching capability or unreadable source are
+   * silently skipped — the tile shows whatever's available.
+   */
+  stats?: Array<{
+    /** Display label (e.g. "scenes", "shots", "tracks", "min", "panels"). */
+    label: string;
+    /** Capability whose node(s) to inspect. */
+    source: string;
+    /**
+     * Count completed collection instances of `source`. Mutually
+     * exclusive with `path`.
+     */
+    count_completed?: boolean;
+    /**
+     * Dot-path into the source node's output JSON. Examples:
+     *   - "scenes.length" — length of an array property
+     *   - "totalDuration" — top-level scalar
+     *   - "metadata.wordCount" — nested scalar
+     * Mutually exclusive with `count_completed`.
+     */
+    path?: string;
+  }>;
 }
 
 // ---------------------------------------------------------------------------

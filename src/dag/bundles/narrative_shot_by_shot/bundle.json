@@ -569,5 +569,23 @@
       },
       "displayCapability": "final.video"
     }
-  ]
+  ],
+  "display": {
+    "thumbnail": {
+      "from": "shot.first_frame",
+      "pick": "first_completed"
+    },
+    "stats": [
+      {
+        "label": "scenes",
+        "source": "scene.plan",
+        "path": "scenes.length"
+      },
+      {
+        "label": "shots",
+        "source": "scene.plan",
+        "path": "shots.length"
+      }
+    ]
+  }
 }

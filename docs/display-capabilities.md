@@ -98,3 +98,81 @@ The 3 built-in narrative bundles (`narrative_prompt_relay`, `narrative_shot_by_s
 ## Why not infer capability from node id?
 
 Tempting, but brittle: bundles can name nodes anything, and naming conventions drift. Encoding the contract explicitly via `displayCapability` keeps the desktop honest and bundles free to evolve their internal vocabulary.
+
+## The `display` block — tile thumbnail + stats
+
+For the project list / landing tile, bundles also declare what the desktop should put in the thumbnail and what numbers to summarize. This is a top-level `display` block in `bundle.json`:
+
+```json
+{
+  "id": "narrative_qwen_chain_relay",
+  "display": {
+    "thumbnail": {
+      "from": "shot.first_frame",
+      "pick": "first_completed"
+    },
+    "stats": [
+      { "label": "scenes", "source": "scene.plan", "path": "scenes.length" },
+      { "label": "shots",  "source": "scene.plan", "path": "shots.length" }
+    ]
+  },
+  "nodes": [...]
+}
+```
+
+### Thumbnail
+
+- `from` — a capability tag. The desktop finds completed instances of nodes with this capability and uses one's `outputPath` as the thumbnail image.
+- `pick` — selection rule when multiple instances match:
+  - `first_completed` (default) — lowest-key in lex order; for shot ids that's the opening frame
+  - `random_completed` — random pick each landing visit, gives the gallery life
+  - `latest_completed` — highest-key in lex order
+
+Capability needs to produce an image-format artifact (png / jpg / webp). Bundles that produce no images (audio-only, text-only) omit the thumbnail block and tiles fall back to a generic icon.
+
+### Stats
+
+An array of `{label, source, ...}` entries. Each entry is one of:
+
+- **`count_completed: true`** — count completed instances of a collection node with capability `source`. Use for "12 tracks", "47 shots", etc.
+- **`path: "<dot.path>"`** — read the JSON file at the capability's `outputPath` and extract via dot-path. `foo.length` is array-length sugar. Use for "3 scenes" (scenes.length), "1240 words" (wordCount).
+
+Stats with no matching capability OR unreadable source files are silently skipped.
+
+### Wild bundle examples
+
+A **music album** bundle:
+
+```json
+"display": {
+  "thumbnail": { "from": "music.cover_art" },
+  "stats": [
+    { "label": "tracks", "source": "music.track", "count_completed": true },
+    { "label": "min",    "source": "music.master", "path": "totalDurationMinutes" }
+  ]
+}
+```
+
+A **text-only novella** bundle (no images):
+
+```json
+"display": {
+  "stats": [
+    { "label": "chapters", "source": "chapter.text", "count_completed": true },
+    { "label": "words",    "source": "story.prose",  "path": "metadata.wordCount" }
+  ]
+}
+```
+
+A **3D scan / SAM3D** bundle:
+
+```json
+"display": {
+  "thumbnail": { "from": "model3d.preview" },
+  "stats": [
+    { "label": "models", "source": "model3d.mesh", "count_completed": true }
+  ]
+}
+```
+
+The desktop renders all of these without any per-bundle code change.
