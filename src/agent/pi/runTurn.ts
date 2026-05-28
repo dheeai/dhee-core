@@ -41,6 +41,15 @@ export interface RunAgentTurnOpts {
    * turn so the JSONL handle releases cleanly.
    */
   keepAlive?: boolean;
+  /**
+   * Phase 6.5c.b: called once per captured pi-agent event during the
+   * turn (text_delta + tool_execution_start + tool_execution_end +
+   * any other forwarded event types). The desktop's chatPrompt
+   * forwards these to the renderer via webContents.send('dhee:event')
+   * so the chat panel shows streaming text + tool-call activity
+   * inline as it happens, instead of a single bubble at end-of-turn.
+   */
+  onEvent?: (ev: unknown) => void;
 }
 
 /**
@@ -63,6 +72,10 @@ export async function runAgentTurn(
   const toolCalls: ToolCallSummary[] = [];
 
   const unsub = session.subscribe((ev) => {
+    // Phase 6.5c.b: every event also flows to onEvent (for IPC
+    // streaming) — accumulation into the envelope continues for the
+    // final return value.
+    opts.onEvent?.(ev);
     const e = ev as {
       type?: string;
       assistantMessageEvent?: { type?: string; delta?: string };

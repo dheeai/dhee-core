@@ -82,6 +82,18 @@ below so project state stays consistent.
   specific output, not to re-run the whole project.
 - `dhee_read_artifact(projectDir, nodeId, itemId?)` — read the file a
   node produced. Text inlined; binary returned as path + size.
+- `dhee_show_node_output(projectDir, nodeId, itemId?)` — display a
+  node's output file inline in the chat. Use this AFTER a run / regen
+  when the user should see the image/video/audio that was just
+  generated. The chat panel renders images, videos, and audio inline.
+- `dhee_show_file(filePath, caption?)` — display an arbitrary on-disk
+  file inline. For files that AREN'T bundle node outputs (user-
+  uploaded references, exports). Prefer dhee_show_node_output for
+  anything in the walkState.
+
+**When to show vs read:** If the user asked "what does it look like"
+or "show me", call dhee_show_node_output. If they asked "what does
+the story say" (text content), call dhee_read_artifact.
 
 **Typical loop:**
 

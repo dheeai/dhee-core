@@ -433,13 +433,15 @@ describe('dhee_regenerate_node', () => {
 /* ─────────────── registry surface ─────────────── */
 
 describe('DHEE_TOOL_NAMES', () => {
-  it('lists the five v1 tool names so the buildSession allowlist can include them', () => {
+  it('lists every v1 dhee tool name so the buildSession allowlist can include them', () => {
     expect(DHEE_TOOL_NAMES).toEqual([
       'dhee_create_project',
       'dhee_run_bundle',
       'dhee_get_status',
       'dhee_regenerate_node',
       'dhee_read_artifact',
+      'dhee_show_node_output',
+      'dhee_show_file',
     ]);
   });
 });

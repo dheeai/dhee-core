@@ -19,6 +19,8 @@ import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
 import { dheeRunBundleTool, makeRunBundleTool } from './dheeRunBundle.js';
+import { dheeShowFileTool, makeShowFileTool } from './dheeShowFile.js';
+import { dheeShowNodeOutputTool, makeShowNodeOutputTool } from './dheeShowNodeOutput.js';
 
 export const DHEE_TOOL_NAMES = [
   'dhee_create_project',
@@ -26,6 +28,8 @@ export const DHEE_TOOL_NAMES = [
   'dhee_get_status',
   'dhee_regenerate_node',
   'dhee_read_artifact',
+  'dhee_show_node_output',
+  'dhee_show_file',
 ] as const;
 
 export {
@@ -34,15 +38,19 @@ export {
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
   dheeRunBundleTool,
+  dheeShowFileTool,
+  dheeShowNodeOutputTool,
   makeCreateProjectTool,
   makeGetStatusTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
   makeRunBundleTool,
+  makeShowFileTool,
+  makeShowNodeOutputTool,
 };
 
 /**
- * pi extensionFactory — registers all 5 v1 dhee tools.
+ * pi extensionFactory — registers all v1 dhee tools.
  * Pass this in `DefaultResourceLoader({extensionFactories: [registerDheeTools]})`.
  */
 export function registerDheeTools(pi: ExtensionAPI): void {
@@ -51,4 +59,6 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);
   pi.registerTool(dheeReadArtifactTool);
+  pi.registerTool(dheeShowNodeOutputTool);
+  pi.registerTool(dheeShowFileTool);
 }

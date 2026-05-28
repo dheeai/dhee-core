@@ -59,6 +59,8 @@ describe('buildPiSessionConfig', () => {
     expect(cfg.tools).toContain('dhee_get_status');
     expect(cfg.tools).toContain('dhee_regenerate_node');
     expect(cfg.tools).toContain('dhee_read_artifact');
+    expect(cfg.tools).toContain('dhee_show_node_output');
+    expect(cfg.tools).toContain('dhee_show_file');
   });
 
   it('omits dhee custom tools when includeDefaultTools=false', async () => {
