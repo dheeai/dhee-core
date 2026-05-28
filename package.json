@@ -23,6 +23,10 @@
     "./agent/pi": {
       "types": "./dist/agent/pi/index.d.ts",
       "default": "./dist/agent/pi/index.js"
+    },
+    "./dag": {
+      "types": "./dist/dag/index.d.ts",
+      "default": "./dist/dag/index.js"
     }
   },
   "files": [
