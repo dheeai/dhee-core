@@ -25,6 +25,7 @@
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
@@ -33,6 +34,7 @@ import {
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
 } from '@mariozechner/pi-coding-agent';
+import { getModel } from '@mariozechner/pi-ai';
 import { DHEE_TOOL_NAMES, registerDheeTools } from './tools/index.js';
 
 /** The skill name (from the YAML frontmatter `name:` field) we inject. */
@@ -78,6 +80,23 @@ export interface BuildPiSessionOptions {
    * in the live tools. Defaults to true.
    */
   includeDefaultTools?: boolean;
+  /**
+   * Phase 6.5b: explicit model + API key pair. When provided, pi-ai's
+   * auto-discovery is bypassed:
+   *   - AuthStorage gets `apiKey` set as a runtime credential for
+   *     `modelProvider` (no on-disk auth.json mutation).
+   *   - `getModel(modelProvider, modelId)` resolves the typed Model
+   *     that createAgentSession uses for every turn.
+   *
+   * Without this, pi-coding-agent falls back to whatever the user's
+   * ~/.pi/agent/settings.json names — which is usually empty on
+   * desktops that haven't run `pi /login` — and `session.prompt()`
+   * silently returns no text. Explicit is the only reliable path
+   * when the desktop's settings (not pi's) own the credentials.
+   */
+  modelProvider?: string;
+  modelId?: string;
+  apiKey?: string;
 }
 
 /**
@@ -116,12 +135,30 @@ export async function buildPiSessionConfig(
   });
   await resourceLoader.reload();
 
-  return {
+  const config: CreateAgentSessionOptions = {
     cwd,
     resourceLoader,
     tools: [...READONLY_BUILTINS, ...customToolNames],
     sessionManager: opts.sessionManager ?? SessionManager.inMemory(cwd),
   };
+
+  // Phase 6.5b: when the caller supplies an explicit model + key, wire
+  // a fresh in-memory AuthStorage with the runtime key set + resolve
+  // the typed Model via pi-ai's getModel. This bypasses pi-coding-
+  // agent's `findInitialModel` heuristic (which reads ~/.pi/agent/
+  // settings.json + auth.json + env vars, and returns null silently
+  // when none align) — the desktop owns its own credentials.
+  if (opts.modelProvider && opts.modelId && opts.apiKey) {
+    const authStorage = AuthStorage.inMemory();
+    authStorage.setRuntimeApiKey(opts.modelProvider, opts.apiKey);
+    config.authStorage = authStorage;
+    // getModel is strongly typed against MODELS table; cast to any so
+    // the desktop can pass user-string provider/model ids without
+    // dragging pi-ai's type union through every consumer.
+    config.model = getModel(opts.modelProvider as never, opts.modelId as never);
+  }
+
+  return config;
 }
 
 /** Boot a dhee-flavoured pi-coding-agent session. */

@@ -76,6 +76,33 @@ describe('buildPiSessionConfig', () => {
     expect(cfg.sessionManager).toBe(sm);
   });
 
+  it('Phase 6.5b: explicit modelProvider/modelId/apiKey produces a config with a typed model + runtime auth', async () => {
+    const cfg = await buildPiSessionConfig({
+      sessionManager: SessionManager.inMemory(process.cwd()),
+      modelProvider: 'openrouter',
+      modelId: 'deepseek/deepseek-v4-flash',
+      apiKey: 'or-test-key-123',
+    });
+    expect(cfg.model).toBeDefined();
+    expect((cfg.model as { provider: string }).provider).toBe('openrouter');
+    expect((cfg.model as { id: string }).id).toBe('deepseek/deepseek-v4-flash');
+    expect(cfg.authStorage).toBeDefined();
+    // The runtime API key should be retrievable for the configured provider.
+    const key = await (cfg.authStorage as unknown as { getApiKey: (p: string) => Promise<string | undefined> }).getApiKey('openrouter');
+    expect(key).toBe('or-test-key-123');
+  });
+
+  it('Phase 6.5b: partial overrides (e.g. modelProvider without apiKey) do NOT activate the explicit-model path — falls back to auto-discovery', async () => {
+    const cfg = await buildPiSessionConfig({
+      sessionManager: SessionManager.inMemory(process.cwd()),
+      modelProvider: 'openrouter',
+      modelId: 'deepseek/deepseek-v4-flash',
+      // apiKey omitted on purpose
+    });
+    expect(cfg.model).toBeUndefined();
+    expect(cfg.authStorage).toBeUndefined();
+  });
+
   it('honors a custom cwd', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'kshana-build-session-'));
     try {
