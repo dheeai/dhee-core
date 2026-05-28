@@ -63,6 +63,14 @@ export {
 } from './bundleSource.js';
 export type { BundleSource } from './bundleSource.js';
 export type { DagBundle, NodeDef, NodeInput, NodeOutput } from './schema.js';
+export { invalidateNodes, regenerateNode } from './projectRegen.js';
+export type {
+  InvalidateNodesOpts,
+  InvalidateNodesResult,
+  RegenerateNodeOpts,
+  RegenerateNodeResult,
+  RunProjectViaBundleFn,
+} from './projectRegen.js';
 
 export interface WalkerCliParams {
   /** Which scene(s) to render. */
