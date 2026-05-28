@@ -37,7 +37,7 @@ X", you pass `"X"` (no extension, no path).
   from follow-up tool calls if the user keeps the same context — but
   always pass `project` explicitly when the user asks about a
   *different* project than the currently focused one.
-- **dhee_status(project)** — quick snapshot of which stages are
+- **dhee_status(project, projectDir?)** — quick snapshot of which stages are
   done, in progress, or failed for one project.
 
   **Don't poll this in a loop.** A single status check is fine when
@@ -59,7 +59,7 @@ X", you pass `"X"` (no extension, no path).
   dhee-desktop new-project wizard does this and tells you the
   folder path explicitly. Without `existingDir`, the tool creates
   `<name>.dhee` under the configured projects directory.
-- **dhee_run_to(project, projectDir?, stage?, skip_media?)** — drive
+- **dhee_run_to(project, projectDir?, stage?, skip_media?, scope?)** — drive
   the pipeline up to a stage (or to completion). Long-running
   (typically 1–4 hours). Streams progress as nodes finish. Pass
   `projectDir` (absolute path) when the host has told you where the
@@ -123,6 +123,19 @@ X", you pass `"X"` (no extension, no path).
   to inventory the current content first), and wait for explicit
   confirmation. Confidence in the necessity does not authorise it.
   Only the user does.
+- **dhee_replace_character_reference(project, projectDir?, character,
+  referencePath)** — replace an already-generated character reference
+  image with an uploaded image and invalidate ONLY the shot media
+  whose saved shot image prompts visibly reference that character.
+  Use this when the user attaches a character/reference image and
+  asks to replace/change/swap a character after generation. Pass the
+  uploaded project-relative path from the "Attached character
+  reference images:" or "Attached reference images:" section as
+  `referencePath`. After it completes, if it reports invalidated
+  nodes, call `dhee_run_to project=<same project> projectDir=<same path>
+  scope='last_invalidated'`.
+  Do NOT use `dhee_invalidate stage=character_image` for this flow;
+  that broad stage invalidation regenerates too much.
 - **dhee_audit_fidelity(project)** — run the VLM judge over a
   project's images, scoring each against its prompt. Long-running.
 - **dhee_describe_image(project, path, expectedPrompt?)** — ask the

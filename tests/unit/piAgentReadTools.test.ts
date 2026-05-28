@@ -131,6 +131,35 @@ describe('pi-agent dhee_status', () => {
     );
   });
 
+  it('resolves an explicit projectDir outside the default naming convention', async () => {
+    const projectDir = join(projectsDir, 'Summer-sky-2');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({
+        title: 'Summer-sky-2',
+        style: 'anime',
+        targetDuration: 60,
+        executorState: {
+          nodes: {
+            a: node('a', 'plot', 'completed'),
+          },
+        },
+      }, null, 2),
+    );
+
+    const r = await executeTool(dheeStatus, {
+      project: 'Summer-sky-2',
+      projectDir,
+    });
+
+    expect((r.details as { status: string }).status).toBe('completed');
+    const text = (r.content as Array<{ text: string }>)[0].text;
+    expect(text).toMatch(/Project: Summer-sky-2/);
+    expect(text).toMatch(/Style: anime/);
+    expect(text).toMatch(/Total nodes: 1/);
+  });
+
   it('lists failed nodes with their error messages', async () => {
     makeProject('p', {
       title: 'P',

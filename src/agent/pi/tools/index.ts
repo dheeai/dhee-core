@@ -4,6 +4,7 @@ import { dheeListProjects } from "./listProjects.js";
 import { dheeNew } from "./newProject.js";
 import { dheeRunTo } from "./runTo.js";
 import { dheeInvalidate } from "./invalidate.js";
+import { dheeReplaceCharacterReference } from "./replaceCharacterReference.js";
 import { dheeReadArtifact } from "./readArtifact.js";
 import { dheeDescribeImage } from "./describeImage.js";
 import { dheeRenderSceneBundle } from "./renderSceneBundle.js";
@@ -32,6 +33,7 @@ export const dheeTools = [
   dheeNew,
   dheeRunTo,
   dheeInvalidate,
+  dheeReplaceCharacterReference,
   dheeReadArtifact,
   dheeDescribeImage,
   dheeRenderSceneBundle,
@@ -57,6 +59,7 @@ export {
   dheeNew,
   dheeRunTo,
   dheeInvalidate,
+  dheeReplaceCharacterReference,
   dheeReadArtifact,
   dheeDescribeImage,
   dheeRenderSceneBundle,

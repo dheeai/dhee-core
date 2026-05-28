@@ -8,6 +8,12 @@ import { resolveProjectDir, ProjectDirNotFoundError } from "./resolveProjectDir.
 
 const Params = Type.Object({
   project: Type.String({ description: "Project name (folder is <project>.dhee)" }),
+  projectDir: Type.Optional(
+    Type.String({
+      description:
+        "Absolute path to the project folder. Pass when the host (e.g. dhee-desktop) created the project at a workspace path that doesn't follow the default `<name>.dhee` convention.",
+    }),
+  ),
 });
 
 export interface StatusDetails {
@@ -55,6 +61,7 @@ export const dheeStatus = defineTool({
       projectDir = resolveProjectDir({
         name: params.project,
         basePath: getProjectsDir(),
+        ...(params.projectDir ? { projectDir: params.projectDir } : {}),
       });
     } catch (err) {
       if (err instanceof ProjectDirNotFoundError) return failure(err.message);
