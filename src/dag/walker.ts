@@ -56,6 +56,13 @@ export type {
   CapabilityInstance,
   ProjectStateLike,
 } from './capabilities.js';
+export {
+  parseBundleSource,
+  resolveBundleDir,
+  BundleSourceError,
+} from './bundleSource.js';
+export type { BundleSource } from './bundleSource.js';
+export type { DagBundle, NodeDef, NodeInput, NodeOutput } from './schema.js';
 
 export interface WalkerCliParams {
   /** Which scene(s) to render. */
