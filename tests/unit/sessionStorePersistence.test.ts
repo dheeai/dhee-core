@@ -1,14 +1,17 @@
 /**
- * sessionStore + historyReplay round-trip tests.
+ * sessionStore round-trip tests.
  *
  * Exercises the persistence layer end-to-end without booting a real
  * pi-coding-agent (which would need an LLM, auth, etc):
  *  - sessionStore: record / find / mostRecent / forget / purge
- *  - historyReplay: parse a hand-crafted JSONL into HistoryData
  *
  * Avoids the project rule against grep-based tests by exercising actual
  * behavior: writing real files, reading them back, asserting on
  * structured outputs.
+ *
+ * historyReplay-based tests (the old buildHistoryFromFile suite) were
+ * removed in d6f11bd along with the legacy executor; if the desktop's
+ * chat-resume layer comes back it will get its own test file.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,7 +19,6 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as store from '../../src/agent/pi/sessionStore.js';
-import { buildHistoryFromFile } from '../../src/server/historyReplay.js';
 
 const ENV_KEY = 'DHEE_PI_SESSIONS_DIR';
 let tempRoot: string;
@@ -120,177 +122,41 @@ describe('sessionStore', () => {
     rmSync(file);
     expect(store.findSession('orphan')).toBeNull();
   });
-});
 
-describe('buildHistoryFromFile', () => {
-  function jsonl(...lines: unknown[]): string {
-    return lines.map(l => JSON.stringify(l)).join('\n') + '\n';
-  }
+  it('mostRecentSession returns the most recently-touched record across all projects', async () => {
 
-  it('returns an empty snapshot when the file is missing', async () => {
+    store.ensureProjectSessionsDir('p1');
+    store.ensureProjectSessionsDir('p2');
+    const a = store.sessionFilePathFor('aa', 'p1');
+    const b = store.sessionFilePathFor('bb', 'p2');
+    writeFileSync(a, '', 'utf8');
+    writeFileSync(b, '', 'utf8');
 
-    const out = buildHistoryFromFile(join(tempRoot, 'nope.jsonl'));
-    expect(out.messages).toEqual([]);
-    expect(out.toolCalls).toEqual([]);
-    expect(out.compactionCount).toBe(0);
+    store.recordSession('aa', 'p1', a);
+    await new Promise(r => setTimeout(r, 5));
+    store.recordSession('bb', 'p2', b);
+
+    const recent = store.mostRecentSession();
+    expect(recent?.sessionId).toBe('bb');
   });
 
-  it('translates user/assistant message entries into chat bubbles', async () => {
+  it('listSessionsForProject returns sessions ordered by lastActivity desc, only for that project', async () => {
 
-    const file = join(tempRoot, 't1.jsonl');
-    const t = '2026-05-08T10:00:00.000Z';
-    writeFileSync(
-      file,
-      jsonl(
-        { type: 'session', version: 3, id: 's', timestamp: t, cwd: tempRoot },
-        {
-          type: 'message',
-          id: 'e1',
-          parentId: null,
-          timestamp: t,
-          message: { role: 'user', content: 'Hello there', timestamp: 1 },
-        },
-        {
-          type: 'message',
-          id: 'e2',
-          parentId: 'e1',
-          timestamp: t,
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'Hi! How can I help?' }],
-            timestamp: 2,
-          },
-        },
-      ),
-      'utf8',
-    );
+    store.ensureProjectSessionsDir('p1');
+    store.ensureProjectSessionsDir('p2');
+    const f1 = store.sessionFilePathFor('s1', 'p1');
+    const f2 = store.sessionFilePathFor('s2', 'p1');
+    const f3 = store.sessionFilePathFor('s3', 'p2');
+    for (const f of [f1, f2, f3]) writeFileSync(f, '', 'utf8');
 
-    const out = buildHistoryFromFile(file);
-    expect(out.messages.map((m: { type: string; content: string }) => [m.type, m.content])).toEqual([
-      ['user', 'Hello there'],
-      ['agent', 'Hi! How can I help?'],
-    ]);
-    expect(out.toolCalls).toEqual([]);
-  });
+    store.recordSession('s1', 'p1', f1);
+    await new Promise(r => setTimeout(r, 5));
+    store.recordSession('s2', 'p1', f2);
+    store.recordSession('s3', 'p2', f3);
 
-  it('reconstructs tool calls + their results across message entries', async () => {
-
-    const file = join(tempRoot, 't2.jsonl');
-    const t = '2026-05-08T10:00:00.000Z';
-    writeFileSync(
-      file,
-      jsonl(
-        { type: 'session', version: 3, id: 's', timestamp: t, cwd: tempRoot },
-        {
-          type: 'message',
-          id: 'e1',
-          parentId: null,
-          timestamp: t,
-          message: {
-            role: 'assistant',
-            content: [
-              { type: 'text', text: 'Looking that up.' },
-              {
-                type: 'toolCall',
-                id: 'call-42',
-                name: 'kshana_list_projects',
-                arguments: { filter: 'active' },
-              },
-            ],
-            timestamp: 1,
-          },
-        },
-        {
-          type: 'message',
-          id: 'e2',
-          parentId: 'e1',
-          timestamp: t,
-          message: {
-            role: 'toolResult',
-            toolCallId: 'call-42',
-            toolName: 'kshana_list_projects',
-            content: [{ type: 'text', text: 'project-a, project-b' }],
-            isError: false,
-            timestamp: 2,
-          },
-        },
-      ),
-      'utf8',
-    );
-
-    const out = buildHistoryFromFile(file);
-    expect(out.toolCalls).toHaveLength(1);
-    expect(out.toolCalls[0].id).toBe('call-42');
-    expect(out.toolCalls[0].toolName).toBe('kshana_list_projects');
-    expect(out.toolCalls[0].status).toBe('completed');
-    expect(out.toolCalls[0].args).toEqual({ filter: 'active' });
-    const result = out.toolCalls[0].result as { output: string };
-    expect(result.output).toBe('project-a, project-b');
-  });
-
-  it('counts compaction entries and emits a system bubble for each', async () => {
-
-    const file = join(tempRoot, 't3.jsonl');
-    const t = '2026-05-08T10:00:00.000Z';
-    writeFileSync(
-      file,
-      jsonl(
-        { type: 'session', version: 3, id: 's', timestamp: t, cwd: tempRoot },
-        {
-          type: 'compaction',
-          id: 'c1',
-          parentId: null,
-          timestamp: t,
-          summary: 'earlier turns summarized',
-          firstKeptEntryId: 'x',
-          tokensBefore: 90000,
-        },
-      ),
-      'utf8',
-    );
-
-    const out = buildHistoryFromFile(file);
-    expect(out.compactionCount).toBe(1);
-    expect(out.messages).toHaveLength(1);
-    expect(out.messages[0].type).toBe('system');
-  });
-
-  it('strips synthetic user messages (system events, project announcements)', async () => {
-
-    const file = join(tempRoot, 't4.jsonl');
-    const t = '2026-05-08T10:00:00.000Z';
-    writeFileSync(
-      file,
-      jsonl(
-        { type: 'session', version: 3, id: 's', timestamp: t, cwd: tempRoot },
-        {
-          type: 'message',
-          id: 'e1',
-          parentId: null,
-          timestamp: t,
-          message: {
-            role: 'user',
-            content: '[SYSTEM EVENT] runner failed task xyz',
-            timestamp: 1,
-          },
-        },
-        {
-          type: 'message',
-          id: 'e2',
-          parentId: 'e1',
-          timestamp: t,
-          message: {
-            role: 'user',
-            content: '(Active project: demo) tell me about this',
-            timestamp: 2,
-          },
-        },
-      ),
-      'utf8',
-    );
-
-    const out = buildHistoryFromFile(file);
-    expect(out.messages).toHaveLength(1);
-    expect(out.messages[0].content).toBe('tell me about this');
+    const p1 = store.listSessionsForProject('p1');
+    expect(p1.map(r => r.sessionId)).toEqual(['s2', 's1']);
+    const p2 = store.listSessionsForProject('p2');
+    expect(p2.map(r => r.sessionId)).toEqual(['s3']);
   });
 });
