@@ -32,6 +32,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { SessionManager } from '@mariozechner/pi-coding-agent';
 import { buildPiSession } from './buildSession.js';
 import { ensureDir, getPiSessionsDir } from './paths.js';
+import { runAgentTurn } from './runTurn.js';
 import {
   findSession,
   listSessionsForProject,
@@ -137,47 +138,23 @@ export async function cmdSend(
     return { ok: false, error: `buildSession failed: ${(err as Error)?.message ?? String(err)}` };
   }
 
-  const session = built.session as unknown as {
-    subscribe?: (cb: (ev: unknown) => void) => () => void;
-    prompt: (m: string) => Promise<void>;
-    dispose?: () => void;
-  };
+  const result = await runAgentTurn(
+    built.session as never,
+    msg,
+    // CLI is one-shot — dispose so the JSONL handle releases.
+  );
 
-  const textChunks: string[] = [];
-  const toolCalls: ToolCallSummary[] = [];
-
-  const unsub = session.subscribe?.((ev) => {
-    const e = ev as {
-      type?: string;
-      assistantMessageEvent?: { type?: string; delta?: string };
-      toolName?: string;
-    };
-    if (e.type === 'message_update' && e.assistantMessageEvent?.type === 'text_delta') {
-      const delta = e.assistantMessageEvent.delta ?? '';
-      if (delta) textChunks.push(delta);
-    } else if (e.type === 'tool_execution_start') {
-      const name = e.toolName ?? 'unknown';
-      toolCalls.push({ name });
-    }
-  });
-
-  try {
-    await session.prompt(msg);
-  } catch (err) {
-    unsub?.();
-    session.dispose?.();
-    return { ok: false, error: `prompt failed: ${(err as Error)?.message ?? String(err)}` };
+  if (!result.ok) {
+    return { ok: false, error: `prompt failed: ${result.error}` };
   }
-  unsub?.();
-  session.dispose?.();
 
   touchSession(sessionId);
 
   return {
     ok: true,
     sessionId,
-    assistant_text: textChunks.join('').trim(),
-    tool_calls: toolCalls,
+    assistant_text: result.assistant_text,
+    tool_calls: result.tool_calls,
   };
 }
 

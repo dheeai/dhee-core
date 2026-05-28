@@ -47,10 +47,14 @@ const READONLY_BUILTINS = ['read', 'ls', 'grep', 'find'] as const;
 export interface BuildPiSessionOptions {
   /**
    * Pi SessionManager. Caller decides in-memory vs file-backed.
-   * Required so we don't accidentally write transcripts where the
-   * caller didn't want them.
+   *
+   * Optional in Phase 6.5 — when omitted, we default to
+   * `SessionManager.inMemory(cwd)`. The opt-in default lets the
+   * desktop's chat layer build an ephemeral session without taking
+   * a transitive dependency on `@mariozechner/pi-coding-agent`'s
+   * exports.
    */
-  sessionManager: ReturnType<typeof SessionManager.inMemory>;
+  sessionManager?: ReturnType<typeof SessionManager.inMemory>;
   /** Working directory for the agent. Defaults to process.cwd(). */
   cwd?: string;
   /**
@@ -116,7 +120,7 @@ export async function buildPiSessionConfig(
     cwd,
     resourceLoader,
     tools: [...READONLY_BUILTINS, ...customToolNames],
-    sessionManager: opts.sessionManager,
+    sessionManager: opts.sessionManager ?? SessionManager.inMemory(cwd),
   };
 }
 
