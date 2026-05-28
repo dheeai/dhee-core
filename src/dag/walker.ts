@@ -932,7 +932,13 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       const resolvedInputs: Record<string, unknown> = { ...bundleInputs };
       for (const inp of node.inputs) {
         const upInsts = instancesById.get(inp.from) ?? [];
-        if (upInsts.length === 0) continue;
+        if (upInsts.length === 0) {
+          // For previousN: still expose an empty array so the
+          // downstream template can reference {{inp.from}} without
+          // failing — shot 1 of each scene legitimately has no priors.
+          if (inp.scope === 'previousN') resolvedInputs[inp.from] = [];
+          continue;
+        }
 
         // scope='previousN' on a collection upstream → expose as an
         // ordered array of the last N completed instances whose
@@ -952,13 +958,29 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
           const currentShotNum = parseShotNum(inst.itemId);
           if (currentShotNum !== undefined) {
             const n = inp.n ?? 5;
-            const priors: Array<{ shotNumber: number; itemId: string; outputAbs: string }> = [];
+            const priors: Array<{ shotNumber: number; itemId: string; outputAbs: string; content?: unknown }> = [];
+            // For JSON-output upstream collections, read the file content
+            // and embed it inline so the consuming LLM can READ what each
+            // prior produced (not just see a path). Without this the
+            // LLM gets opaque paths and can't make a sensible chain-base
+            // choice — it'll think every shot has no useful prior.
+            const upstreamNode = opts.bundle.nodes.find((nd) => nd.id === inp.from);
+            const inlineJson = upstreamNode?.outputs.format === 'json';
             for (const u of upInsts) {
               if (!u.outputRel || u.status !== 'completed') continue;
               const uShot = parseShotNum(u.itemId);
               if (uShot === undefined || uShot >= currentShotNum) continue;
               const abs = resolve(opts.projectDir, u.outputRel);
-              if (existsSync(abs)) priors.push({ shotNumber: uShot, itemId: u.itemId ?? '', outputAbs: abs });
+              if (!existsSync(abs)) continue;
+              const entry: { shotNumber: number; itemId: string; outputAbs: string; content?: unknown } = {
+                shotNumber: uShot, itemId: u.itemId ?? '', outputAbs: abs,
+              };
+              if (inlineJson) {
+                try {
+                  entry.content = JSON.parse(readFileSync(abs, 'utf-8'));
+                } catch { /* ignore */ }
+              }
+              priors.push(entry);
             }
             priors.sort((a, b) => b.shotNumber - a.shotNumber);
             resolvedInputs[inp.from] = priors.slice(0, n);

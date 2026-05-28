@@ -336,6 +336,25 @@ export function createLlmGenerateRunner(opts?: {
     const isJson = (cfg.outputFormat ?? 'markdown') === 'json';
     let lastErr: string | undefined;
     let content: string | undefined;
+    let parsedJson: unknown = undefined;
+
+    // Resolve schema path once if applicable.
+    let schemaAbs: string | undefined;
+    if (isJson && cfg.outputSchema) {
+      schemaAbs = resolve(ctx.bundleDir, cfg.outputSchema);
+      if (!existsSync(schemaAbs)) {
+        return { ok: false, error: `llm.generate: outputSchema not found at ${schemaAbs}` };
+      }
+    }
+
+    // Retry loop covers BOTH transient network failures AND schema
+    // validation failures. On a schema error we feed the error message
+    // back to the LLM as a corrective hint so it can self-correct on
+    // the next attempt (common with enum drift — model emits "medium
+    // close-up" instead of the strict "close-up" enum value).
+    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
+      { role: 'user', content: sub.rendered },
+    ];
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (ctx.signal?.aborted) {
@@ -343,7 +362,7 @@ export function createLlmGenerateRunner(opts?: {
       }
       try {
         const resp = await client.generate({
-          messages: [{ role: 'user', content: sub.rendered }],
+          messages,
           ...(ctx.signal ? { signal: ctx.signal } : {}),
           ...(isJson ? { responseFormat: { type: 'json_object' as const } } : {}),
           ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
@@ -352,9 +371,37 @@ export function createLlmGenerateRunner(opts?: {
         const got = resp.content ?? '';
         if (!got || got.trim() === '') {
           lastErr = 'LLM returned empty response (no content).';
-          // Empty response is not retried — the model returning empty is
-          // a content/prompt issue, not a transient network failure.
           break;
+        }
+
+        // For JSON output: parse + schema-validate INSIDE the retry
+        // loop. On failure, feed the error back to the LLM.
+        if (isJson) {
+          const parsed = tryParseJson(got);
+          if (!parsed.ok) {
+            lastErr = parsed.error;
+            if (attempt < maxRetries) {
+              messages.push({ role: 'assistant', content: got });
+              messages.push({ role: 'user', content: `Your previous response did not parse as JSON. Error: ${parsed.error}. Return the JSON object ONLY, no preamble or markdown fences.` });
+              ctx.log(`llm.generate: attempt ${attempt + 1} JSON parse failed (${parsed.error.slice(0, 120)}); retrying with feedback`);
+              continue;
+            }
+            break;
+          }
+          if (schemaAbs) {
+            const v = validateAgainstSchema(parsed.value, schemaAbs);
+            if (!v.ok) {
+              lastErr = v.error;
+              if (attempt < maxRetries) {
+                messages.push({ role: 'assistant', content: got });
+                messages.push({ role: 'user', content: `Your previous response failed schema validation: ${v.error}. Please re-emit the JSON object using ONLY values from the declared enums. Return the JSON object only, no preamble.` });
+                ctx.log(`llm.generate: attempt ${attempt + 1} schema validation failed (${v.error.slice(0, 160)}); retrying with feedback`);
+                continue;
+              }
+              break;
+            }
+          }
+          parsedJson = parsed.value;
         }
         content = got;
         break;
@@ -378,21 +425,8 @@ export function createLlmGenerateRunner(opts?: {
       };
     }
 
-    // 5. Format-specific handling.
     let toWrite = content;
-    let parsedJson: unknown = undefined;
     if (isJson) {
-      const parsed = tryParseJson(content);
-      if (!parsed.ok) return { ok: false, error: parsed.error };
-      parsedJson = parsed.value;
-      if (cfg.outputSchema) {
-        const schemaAbs = resolve(ctx.bundleDir, cfg.outputSchema);
-        if (!existsSync(schemaAbs)) {
-          return { ok: false, error: `llm.generate: outputSchema not found at ${schemaAbs}` };
-        }
-        const v = validateAgainstSchema(parsedJson, schemaAbs);
-        if (!v.ok) return { ok: false, error: v.error };
-      }
       toWrite = JSON.stringify(parsedJson, null, 2);
     }
 

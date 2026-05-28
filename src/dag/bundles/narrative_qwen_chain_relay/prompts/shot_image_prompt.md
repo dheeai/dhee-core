@@ -7,8 +7,8 @@ Shot data:
 
 This call is for shot id: **{{item_id}}** — find it in the `shots` array above.
 
-Prior shot images available as chain bases (most recent first, by shotNumber DESC):
-{{shot_image}}
+Prior shot prompts (the deltaText + view tokens for shots that already have first-frames generated). Pick the `chosenBaseShotNumber` from THIS list — most recent first, by shotNumber DESC. Empty array means this is shot 1 of the scene:
+{{shot_image_prompt}}
 
 World style:
 {{world_style}}
@@ -28,13 +28,33 @@ You output a JSON object with these fields:
    - If the current shot is a continuation (e.g. dialogue between same two chars, slight reframe) — pick the most recent shot (highest shotNumber).
    - If this is shot 1 of the scene (no priors), use `null`.
 - `chosenBaseReason`: ONE short sentence explaining why.
-- `view`, `elevation`, `distance`: pick from the enums (the LoRA only recognizes exact tokens).
+- `view`, `elevation`, `distance`: pick from the enums (the LoRA only recognizes exact tokens). **Critical**: emit the LITERAL token string from the enum, not a paraphrase. E.g. `"close-up"` ✓ not `"medium close-up"` ✗ or `"extreme close-up"` ✗.
 - `deltaText`: 2–5 sentences describing what CHANGES from the chosen prior shot to THIS shot — new actions, character entries/exits, expression changes, camera motion. **Do NOT restate things that haven't changed** (same setting, same characters' clothing, same lighting). **Do NOT prepend `<sks>`** — the runner assembles it.
+
+## Choosing camera tokens
+
+**The first frame represents the OPENING moment of the shot.** When `cameraWork` describes a compound shot (e.g. "X then Y", "POV pan then close-up"), pick tokens that match the OPENING framing X, NOT Y. The shot's later moments are captured by the video model from the motion directive; your job is the first frame only.
+
+**Mapping common cinematography vocabulary to LoRA tokens:**
+
+| Source cameraWork phrase | Emit |
+|---|---|
+| `extreme wide`, `extreme_wide`, `long shot`, `establishing` | `wide shot` |
+| `medium wide` | `wide shot` (or `medium shot` if subject dominates the frame) |
+| `medium close-up`, `medium close up`, `MCU` | `close-up` (LoRA only has 3 distance tokens) |
+| `extreme close-up`, `ECU`, `insert shot`, `detail shot` | `close-up` |
+| `over the shoulder`, `OTS`, `over-the-shoulder` | `back-right quarter view` or `back-left quarter view` (pick based on which character's shoulder you're behind) |
+| `point of view`, `POV`, `subjective` | `front view` (we see what the character sees, treating the looked-at subject as the camera target) |
+| `tracking from behind`, `tracking behind` | `back view` |
+| `low angle`, `low-angle`, `from below` | use `low-angle shot` for elevation |
+| `high angle`, `from above`, `bird's eye` | use `high-angle shot` for elevation |
+
+**Camerawork that does NOT map to an enum token** (dutch angle, handheld shake, insert of an inanimate object, slow-motion, pull-focus): the LoRA can't represent these via the `<sks>` prefix. Describe them in `deltaText` instead — the video model can interpret motion directives even when the LoRA prefix is generic.
 
 ## Camera token reference
 
 - **view (azimuth)**: front view | front-right quarter view | right side view | back-right quarter view | back view | back-left quarter view | left side view | front-left quarter view
-   - `back-right quarter view` = OTS shot looking over a character's right shoulder
+   - `back-right quarter view` = OTS looking over a character's right shoulder
    - `back-left quarter view` = OTS over left shoulder
 - **elevation**: low-angle shot | eye-level shot | elevated shot | high-angle shot
 - **distance**: close-up | medium shot | wide shot

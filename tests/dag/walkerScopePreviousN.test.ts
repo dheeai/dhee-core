@@ -153,6 +153,18 @@ describe("walker scope: 'previousN'", () => {
     expect(shot1!.previousShots).toEqual([]);
   });
 
+  it('(4) shot 1 with self-referencing previousN exposes empty array (not undefined)', async () => {
+    // Regression: when shot_image_prompt references shot_image (which
+    // hasn't run yet for shot 1), walker must still set the input key
+    // to [] so the template's {{shot_image}} substitution doesn't fail.
+    preSeed(makeShots(1));
+    const result = await walkBundle({ projectDir, bundle: makeBundle(5), bundleSource: 'built-in:prevN-test' });
+    expect(result.ok).toBe(true);
+    const shot1 = seen.find((s) => s.itemId === 'scene_1_shot_1');
+    expect(shot1).toBeTruthy();
+    expect(shot1!.previousShots).toEqual([]); // empty, not undefined
+  });
+
   it('(5) priors are sorted shotNumber DESC', async () => {
     preSeed(makeShots(4));
     const result = await walkBundle({ projectDir, bundle: makeBundle(5), bundleSource: 'built-in:prevN-test' });

@@ -325,7 +325,7 @@
           "scope": "matching"
         },
         {
-          "from": "shot_image",
+          "from": "shot_image_prompt",
           "usage": "context",
           "scope": "previousN",
           "n": 5

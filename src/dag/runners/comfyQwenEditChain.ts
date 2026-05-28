@@ -152,8 +152,15 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   }
   workflow['LI']!.inputs['image'] = upBase.name;
   workflow['POS']!.inputs['prompt'] = fullPrompt;
-  if (upRefs[0] && workflow['REF_1']) workflow['REF_1']!.inputs['image'] = upRefs[0];
-  if (upRefs[1] && workflow['REF_2']) workflow['REF_2']!.inputs['image'] = upRefs[1];
+  // All 4 LoadImage slots must point at a real uploaded file (cloud Comfy
+  // validates LoadImage filenames before execution). Cascade fallbacks:
+  // missing ref slot → use the previous filled ref → use the base image.
+  // Effect: the model sees up to 2 distinct refs but can never error
+  // on a missing placeholder filename.
+  const fallback1 = upRefs[0] ?? upBase.name;
+  const fallback2 = upRefs[1] ?? fallback1;
+  if (workflow['REF_1']) workflow['REF_1']!.inputs['image'] = fallback1;
+  if (workflow['REF_2']) workflow['REF_2']!.inputs['image'] = fallback2;
 
   // LoRA strength override (Multi-Angles default 0.9).
   if (workflow['LORA_MA'] && typeof cfg.multiAngleStrength === 'number') {

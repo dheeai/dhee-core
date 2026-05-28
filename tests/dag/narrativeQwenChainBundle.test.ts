@@ -48,11 +48,14 @@ describe('narrative_qwen_chain_relay bundle', () => {
     expect(node.runner.tool).toBe('comfy.qwen_edit_chain');
   });
 
-  it('shot_image_prompt has a previousN self-input for chain awareness', () => {
+  it('shot_image_prompt self-references with previousN for chain awareness', () => {
     const node = bundle.nodes.find((n) => n.id === 'shot_image_prompt') as NodeDef;
     expect(node).toBeTruthy();
-    const prev = node.inputs.find((i) => i.from === 'shot_image' && i.scope === 'previousN');
-    expect(prev, 'shot_image_prompt must reference shot_image with scope=previousN').toBeTruthy();
+    // Self-reference: LLM sees its own prior outputs (deltaTexts) to make
+    // chain-base choices. References to shot_image directly won't work
+    // because shot_image hasn't run for prior shots at this point in topo.
+    const prev = node.inputs.find((i) => i.from === 'shot_image_prompt' && i.scope === 'previousN');
+    expect(prev, 'shot_image_prompt must reference shot_image_prompt with scope=previousN').toBeTruthy();
     expect(prev?.n).toBeGreaterThanOrEqual(1);
   });
 
