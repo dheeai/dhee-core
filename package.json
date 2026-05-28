@@ -12,10 +12,6 @@
       "types": "./dist/core/llm/index.d.ts",
       "default": "./dist/core/llm/index.js"
     },
-    "./manager": {
-      "types": "./dist/server/manager.d.ts",
-      "default": "./dist/server/manager.js"
-    },
     "./runners": {
       "types": "./dist/server/runners/index.d.ts",
       "default": "./dist/server/runners/index.js"

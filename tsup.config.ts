@@ -4,7 +4,10 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     'server/runners/index': 'src/server/runners/index.ts',
-    'server/manager': 'src/server/manager.ts',
+    // Phase 6.4: `./manager` entry deleted along with the no-op
+    // ConversationManager stub. Embed hosts import the surviving
+    // helpers (configurePostHogRuntime / loadDevEnv / analytics) from
+    // the main `dhee-core` barrel.
     'core/llm/index': 'src/core/llm/index.ts',
     'dag/index': 'src/dag/walker.ts',
   },
