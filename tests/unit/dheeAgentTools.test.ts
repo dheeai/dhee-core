@@ -279,7 +279,7 @@ describe('dhee_read_artifact', () => {
 
 /* ─────────────── dhee_run_bundle ─────────────── */
 
-describe('dhee_run_bundle', () => {
+describe('dhee_run_bundle (Phase 6.5c.c — BackgroundTaskRunner dispatch)', () => {
   function makeProject(name: string): string {
     const projectDir = join(projectsRoot, name);
     mkdirSync(projectDir, { recursive: true });
@@ -291,59 +291,139 @@ describe('dhee_run_bundle', () => {
     return projectDir;
   }
 
-  it('returns ok=true and the final video path when the runner succeeds', async () => {
+  /**
+   * Fake BackgroundTaskRunner — captures the dispatched spec + lets
+   * tests drive 'completed' / 'failed' / 'cancelled' by id. Mirrors
+   * the real runner's `on(event, handler) → unsubscribe` signature.
+   */
+  function makeFakeRunner() {
+    const handlers: Record<string, Array<(payload: { task: { id: string }; error?: string }) => void>> = {
+      completed: [],
+      failed: [],
+      cancelled: [],
+    };
+    let lastDispatch: { spec: unknown; taskId: string } | null = null;
+    let rejectNext: { reason: string; activeTaskId: string; activeProjectName: string } | null = null;
+    const runner = {
+      dispatch(spec: unknown) {
+        if (rejectNext) {
+          const r = rejectNext;
+          rejectNext = null;
+          return { status: 'rejected' as const, reason: r.reason, activeTaskId: r.activeTaskId, activeProjectName: r.activeProjectName };
+        }
+        const taskId = `t-${Math.random().toString(36).slice(2, 6)}`;
+        lastDispatch = { spec, taskId };
+        return { status: 'started' as const, taskId };
+      },
+      on(event: 'completed' | 'failed' | 'cancelled', handler: (p: { task: { id: string }; error?: string }) => void) {
+        handlers[event].push(handler);
+        return () => {
+          handlers[event] = handlers[event].filter((h) => h !== handler);
+        };
+      },
+    };
+    return {
+      runner: runner as never,
+      fire(event: 'completed' | 'failed' | 'cancelled', payload: { task: { id: string }; error?: string }) {
+        for (const h of handlers[event]) h(payload);
+      },
+      getLastDispatch: () => lastDispatch,
+      rejectNextWith(reason: { reason: string; activeTaskId: string; activeProjectName: string }) {
+        rejectNext = reason;
+      },
+    };
+  }
+
+  it('dispatches via BackgroundTaskRunner and resolves on the matching completed event', async () => {
     const dir = makeProject('runok');
-    const tool = makeRunBundleTool({
-      runProjectViaBundle: vi.fn().mockResolvedValue({
-        ok: true,
-        finalVideoAbs: '/tmp/foo/final.mp4',
-      }),
-    });
-    const out = await tool.execute('rb-1', { projectDir: dir }, undefined, undefined, ctx);
-    expect(out.isError).toBeFalsy();
-    const text = (out.content[0] as { text: string }).text;
-    expect(text).toContain('/tmp/foo/final.mp4');
+    const { runner, fire, getLastDispatch } = makeFakeRunner();
+    const tool = makeRunBundleTool({ getBackgroundTaskRunner: () => runner });
+
+    const promise = tool.execute('rb-1', { projectDir: dir }, undefined, undefined, ctx);
+    // Allow dispatch microtask to settle before firing the event.
+    await Promise.resolve();
+    const d = getLastDispatch();
+    expect(d).not.toBeNull();
+    fire('completed', { task: { id: d!.taskId } });
+    const out = await promise;
+    expect((out as { isError?: boolean }).isError).toBeFalsy();
+    expect((out.content[0] as { text: string }).text).toMatch(/completed/i);
   });
 
-  it('surfaces the runner error verbatim so the agent can act on it', async () => {
-    const dir = makeProject('runerr');
-    const tool = makeRunBundleTool({
-      runProjectViaBundle: vi.fn().mockResolvedValue({
-        ok: false,
-        error: 'comfyui not reachable at https://comfyui.share.zrok.io',
-      }),
-    });
-    const out = await tool.execute('rb-2', { projectDir: dir }, undefined, undefined, ctx);
-    expect(out.isError).toBe(true);
-    expect((out.content[0] as { text: string }).text).toContain('comfyui not reachable');
-  });
+  it('forwards stopAt as `stage` and runOnly through to the runner spec', async () => {
+    const dir = makeProject('rundisp');
+    const { runner, fire, getLastDispatch } = makeFakeRunner();
+    const tool = makeRunBundleTool({ getBackgroundTaskRunner: () => runner });
 
-  it('passes runOnly through to the runner when supplied', async () => {
-    const dir = makeProject('runonly');
-    const spy = vi.fn().mockResolvedValue({ ok: true });
-    const tool = makeRunBundleTool({ runProjectViaBundle: spy });
-    await tool.execute(
-      'rb-3',
-      { projectDir: dir, runOnly: ['shot_image'] },
+    const promise = tool.execute(
+      'rb-2',
+      { projectDir: dir, stopAt: 'shot_image', runOnly: ['shot_image'] },
       undefined,
       undefined,
       ctx,
     );
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ runOnly: ['shot_image'] }));
+    await Promise.resolve();
+    const d = getLastDispatch()!;
+    const spec = d.spec as { kind: string; params: { stage?: string; runOnly?: string[] } };
+    expect(spec.kind).toBe('run_to');
+    expect(spec.params.stage).toBe('shot_image');
+    expect(spec.params.runOnly).toEqual(['shot_image']);
+    fire('completed', { task: { id: d.taskId } });
+    await promise;
   });
 
-  it('errors when project.json is missing (so the user gets a clear "no such project")', async () => {
-    const tool = makeRunBundleTool({
-      runProjectViaBundle: vi.fn().mockResolvedValue({ ok: true }),
+  it('returns isError=true when the runner fires `failed` with an error', async () => {
+    const dir = makeProject('runerr');
+    const { runner, fire, getLastDispatch } = makeFakeRunner();
+    const tool = makeRunBundleTool({ getBackgroundTaskRunner: () => runner });
+    const promise = tool.execute('rb-3', { projectDir: dir }, undefined, undefined, ctx);
+    await Promise.resolve();
+    fire('failed', {
+      task: { id: getLastDispatch()!.taskId },
+      error: 'comfyui not reachable',
     });
+    const out = await promise;
+    expect((out as { isError?: boolean }).isError).toBe(true);
+    expect((out.content[0] as { text: string }).text).toContain('comfyui not reachable');
+  });
+
+  it('returns isError=true when the runner fires `cancelled`', async () => {
+    const dir = makeProject('runcancel');
+    const { runner, fire, getLastDispatch } = makeFakeRunner();
+    const tool = makeRunBundleTool({ getBackgroundTaskRunner: () => runner });
+    const promise = tool.execute('rb-4', { projectDir: dir }, undefined, undefined, ctx);
+    await Promise.resolve();
+    fire('cancelled', { task: { id: getLastDispatch()!.taskId } });
+    const out = await promise;
+    expect((out as { isError?: boolean }).isError).toBe(true);
+    expect((out.content[0] as { text: string }).text).toMatch(/cancelled/i);
+  });
+
+  it('returns isError=true when the runner rejects dispatch (task already running)', async () => {
+    const dir = makeProject('runbusy');
+    const { runner, rejectNextWith } = makeFakeRunner();
+    const tool = makeRunBundleTool({ getBackgroundTaskRunner: () => runner });
+    rejectNextWith({
+      reason: 'task_already_running',
+      activeTaskId: 't-other',
+      activeProjectName: 'OtherProject',
+    });
+    const out = await tool.execute('rb-5', { projectDir: dir }, undefined, undefined, ctx);
+    expect((out as { isError?: boolean }).isError).toBe(true);
+    expect((out.content[0] as { text: string }).text).toMatch(/already in flight/i);
+  });
+
+  it('errors when project.json is missing', async () => {
+    const { runner } = makeFakeRunner();
+    const tool = makeRunBundleTool({ getBackgroundTaskRunner: () => runner });
     const out = await tool.execute(
-      'rb-4',
+      'rb-6',
       { projectDir: join(projectsRoot, 'ghost') },
       undefined,
       undefined,
       ctx,
     );
-    expect(out.isError).toBe(true);
+    expect((out as { isError?: boolean }).isError).toBe(true);
     expect((out.content[0] as { text: string }).text).toMatch(/project\.json not found/i);
   });
 });

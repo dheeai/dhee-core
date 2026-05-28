@@ -1,24 +1,25 @@
 /**
- * dhee_run_bundle — dispatch a bundle DAG run for a project.
+ * dhee_run_bundle — dispatch a bundle DAG run via the
+ * BackgroundTaskRunner.
  *
- * Awaits the run synchronously. The pi-coding-agent loop will keep
- * the tool call open until the runner resolves; the LLM provider's
- * connection isn't held open during that wait (tool execution
- * happens between LLM round-trips), so multi-minute runs are fine.
+ * Phase 6.5c.c: previously this called runProjectViaBundle directly,
+ * which blocked the tool call until the bundle finished AND produced
+ * no per-node progress events (so the desktop's status strip stayed
+ * silent during a 30-min run). Now we dispatch through
+ * BackgroundTaskRunner.dispatch — the same runner the desktop's
+ * status strip subscribes to — and await its terminal event.
  *
- * For long-lived hosts (the desktop), the tool can be swapped for a
- * version that dispatches into BackgroundTaskRunner and returns a
- * taskId immediately. That's a separate concern from the CLI driver.
+ * The tool call still appears to block from pi-agent's perspective
+ * (the LLM sees one tool call that takes minutes to resolve), but
+ * the runner's event stream surfaces progress to whatever's listening
+ * (the chat panel's stream_chunk handler, the status strip, etc).
+ * That gives the user something to watch while the model "thinks."
  */
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
-import type {
-  RunProjectViaBundleOpts,
-  RunProjectViaBundleResult,
-} from '../../../server/runners/runProjectViaBundle.js';
 
 const Params = Type.Object({
   projectDir: Type.String({ description: 'Absolute path to the project directory.' }),
@@ -28,11 +29,6 @@ const Params = Type.Object({
         "Optional node id to stop after (e.g. 'shot_image' to halt before video generation). Useful for staged review.",
     }),
   ),
-  /**
-   * Vertex-friendly representation of runOnly: a JSON string of an
-   * array (per Landmine 3 in DRIVING_PI_FROM_CLAUDE_CODE.md), but
-   * we also accept a real array if the model emits one.
-   */
   runOnly: Type.Optional(
     Type.Array(Type.String(), {
       description:
@@ -41,51 +37,134 @@ const Params = Type.Object({
   ),
 });
 
+interface DispatchResultStarted {
+  status: 'started';
+  taskId: string;
+}
+interface DispatchResultRejected {
+  status: 'rejected';
+  reason: string;
+  activeTaskId: string;
+  activeProjectName: string;
+}
+type DispatchResult = DispatchResultStarted | DispatchResultRejected;
+
+interface RunnerRecord {
+  task: { id: string };
+}
+interface TaskFailedEvent extends RunnerRecord {
+  error: string;
+}
+
+interface BackgroundTaskRunner {
+  dispatch(spec: {
+    kind: 'run_to';
+    projectName: string;
+    params: { projectDir: string; stage?: string; runOnly?: string[] };
+    sessionId: string;
+  }): DispatchResult;
+  on<E extends 'completed' | 'failed' | 'cancelled'>(
+    event: E,
+    handler: (
+      payload: E extends 'failed' ? TaskFailedEvent : RunnerRecord,
+    ) => void,
+  ): () => void;
+}
+
 export interface RunBundleDeps {
-  /** Injected for tests. Production default = the real runner. */
-  runProjectViaBundle?: (opts: RunProjectViaBundleOpts) => Promise<RunProjectViaBundleResult>;
+  /**
+   * Injected for tests. Production default = the in-process runners
+   * module singleton.
+   */
+  getBackgroundTaskRunner?: () => BackgroundTaskRunner;
 }
 
 function textResult(text: string, isError = false) {
   return { content: [{ type: 'text' as const, text }], details: {}, ...(isError ? { isError: true } : {}) };
 }
 
-async function defaultRunner(opts: RunProjectViaBundleOpts): Promise<RunProjectViaBundleResult> {
-  const mod = await import('../../../server/runners/runProjectViaBundle.js');
-  return mod.runProjectViaBundle(opts);
+async function defaultGetBackgroundTaskRunner(): Promise<BackgroundTaskRunner> {
+  const mod = await import('../../../server/runners/backgroundTaskRunnerSingleton.js');
+  return mod.getBackgroundTaskRunner() as unknown as BackgroundTaskRunner;
 }
 
 export function makeRunBundleTool(deps: RunBundleDeps = {}) {
-  const runner = deps.runProjectViaBundle ?? defaultRunner;
   return defineTool({
     name: 'dhee_run_bundle',
     label: 'Run bundle',
     description:
-      'Dispatch the bundle DAG for a project. Returns when the run finishes (success or failure). Pass stopAt to halt at an earlier stage, or runOnly to re-run specific nodes (cascades to their downstream).',
+      'Dispatch the bundle DAG for a project via the in-process BackgroundTaskRunner. Returns when the run finishes (success / failure / cancelled). The runner emits per-node progress to the UI status strip while this tool call is in flight. Pass stopAt to halt at an earlier stage, or runOnly to re-run specific nodes (cascades to their downstream).',
     parameters: Params,
-    async execute(_id, params, signal) {
+    async execute(_id, params): Promise<ReturnType<typeof textResult>> {
       const projectJsonPath = join(params.projectDir, 'project.json');
       if (!existsSync(projectJsonPath)) {
         return textResult(`project.json not found at ${projectJsonPath}`, true);
       }
-      const opts: RunProjectViaBundleOpts = {
-        projectDir: params.projectDir,
-        ...(params.stopAt ? { stopAt: params.stopAt } : {}),
-        ...(params.runOnly ? { runOnly: params.runOnly } : {}),
-        ...(signal ? { signal } : {}),
-      };
-      let result: RunProjectViaBundleResult;
-      try {
-        result = await runner(opts);
-      } catch (err) {
-        return textResult(`runProjectViaBundle threw: ${(err as Error).message}`, true);
+
+      const runner = deps.getBackgroundTaskRunner
+        ? deps.getBackgroundTaskRunner()
+        : await defaultGetBackgroundTaskRunner();
+
+      const dispatch = runner.dispatch({
+        kind: 'run_to',
+        projectName: basename(params.projectDir),
+        params: {
+          projectDir: params.projectDir,
+          ...(params.stopAt ? { stage: params.stopAt } : {}),
+          ...(params.runOnly ? { runOnly: params.runOnly } : {}),
+        },
+        // Tagged with the project basename so the runner's events
+        // route to whoever is listening. The exact sessionId here is
+        // informational — events are global.
+        sessionId: `dhee_run_bundle:${basename(params.projectDir)}`,
+      });
+
+      if (dispatch.status === 'rejected') {
+        return textResult(
+          `Another bundle run is already in flight (taskId=${dispatch.activeTaskId} on project '${dispatch.activeProjectName}'). Stop that one first or wait for it to finish.`,
+          true,
+        );
       }
-      if (!result.ok) {
-        return textResult(`Bundle run failed: ${result.error ?? '(no error message)'}`, true);
-      }
-      const lines = [`Bundle run completed.`];
-      if (result.finalVideoAbs) lines.push(`Final video: ${result.finalVideoAbs}`);
-      return textResult(lines.join('\n'));
+
+      const taskId = dispatch.taskId;
+      const matches = (e: RunnerRecord): boolean => e.task.id === taskId;
+
+      // Await the terminal event — the tool stays "in-flight" from
+      // pi-agent's perspective for the whole run, but the runner's
+      // events flow to the UI status strip via dheeCoreManager's
+      // event bus. Cleaner than blocking on a Promise inside
+      // runProjectViaBundle.
+      return new Promise((resolve) => {
+        const offs: Array<() => void> = [];
+        const cleanup = () => offs.forEach((off) => off());
+
+        offs.push(
+          runner.on('completed', (e) => {
+            if (!matches(e)) return;
+            cleanup();
+            resolve(textResult(`Bundle run completed (taskId=${taskId}).`));
+          }),
+        );
+        offs.push(
+          runner.on('failed', (e) => {
+            if (!matches(e)) return;
+            cleanup();
+            resolve(
+              textResult(
+                `Bundle run failed: ${(e as TaskFailedEvent).error ?? '(no error)'}`,
+                true,
+              ),
+            );
+          }),
+        );
+        offs.push(
+          runner.on('cancelled', (e) => {
+            if (!matches(e)) return;
+            cleanup();
+            resolve(textResult(`Bundle run cancelled (taskId=${taskId}).`, true));
+          }),
+        );
+      });
     },
   });
 }
