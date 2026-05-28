@@ -81,6 +81,14 @@ export interface BuildPiSessionOptions {
    */
   includeDefaultTools?: boolean;
   /**
+   * Phase 6.5c.d: when set + no explicit `sessionManager`, use
+   * `SessionManager.continueRecent(cwd, sessionsDir)` so chat
+   * history persists across desktop restarts. Pass the per-project
+   * sessions dir (e.g. `~/.dhee/pi-sessions/<projectSlug>/`) — pi
+   * picks the most recent JSONL or mints a fresh one.
+   */
+  sessionsDir?: string;
+  /**
    * Phase 6.5b: explicit model + API key pair. When provided, pi-ai's
    * auto-discovery is bypassed:
    *   - AuthStorage gets `apiKey` set as a runtime credential for
@@ -135,11 +143,23 @@ export async function buildPiSessionConfig(
   });
   await resourceLoader.reload();
 
+  // Phase 6.5c.d session-manager selection:
+  // 1. Explicit `opts.sessionManager` always wins.
+  // 2. Else if `opts.sessionsDir` is set, continueRecent the most
+  //    recent JSONL in that dir (creates a new one if none exists)
+  //    so chat history persists across desktop restarts.
+  // 3. Otherwise in-memory (no persistence; CLI default).
+  const sessionManager =
+    opts.sessionManager ??
+    (opts.sessionsDir
+      ? SessionManager.continueRecent(cwd, opts.sessionsDir)
+      : SessionManager.inMemory(cwd));
+
   const config: CreateAgentSessionOptions = {
     cwd,
     resourceLoader,
     tools: [...READONLY_BUILTINS, ...customToolNames],
-    sessionManager: opts.sessionManager ?? SessionManager.inMemory(cwd),
+    sessionManager,
   };
 
   // Phase 6.5b: when the caller supplies an explicit model + key, wire
