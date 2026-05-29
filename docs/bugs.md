@@ -314,6 +314,32 @@ prompted the migration are documented in the commit history of the
 
 ---
 
+### BUG-023 — Critique cascade doesn't re-render downstream non-text artifacts (stale-output cache hit)
+- **Status:** open
+- **Discovered:** 2026-05-29
+- **Reporter:** ganaraj + claude (during Ruby V4 refined batch refinement of 22 broken shots)
+- **Symptom:** After agent applies 22 critiques via `dhee_critique_node(applyOnly:true)` and then issues one `dhee_run_bundle` to process the batch, the walker:
+  - ✅ re-runs every `shot_image_prompt:scene_X_shot_Y` LLM (good — the refined prompt JSONs land on disk with longer, structurally-correct content)
+  - ❌ **marks every downstream `shot_image:scene_X_shot_Y` as `completed` without invoking the Qwen runner** — the old (cloned) PNGs at the expected outputPath are preserved, no Comfy call is made
+  - ❌ then runs LTX `scene_clip` chunks against the OLD shot_image PNGs (because the cascade did fire to scene_clip, just with stale upstream inputs), producing scene videos that bake in the broken images we were trying to fix
+- **Evidence:**
+  - All `Ruby V4 refined/assets/images/shots/*.png` retain their mtime of `19:56` (cp -R clone time). Not one PNG was rewritten by the run that finished at ~21:38.
+  - `walkState.nodes['shot_image:*'].metadata.promptId` is `null/false` for every entry. A real Qwen call would have stamped the Comfy prompt_id.
+  - `walkState.nodes['shot_image:*'].completedAt` is `~1780069057xxx` (≈21:37) — within milliseconds of every other entry, indicating a bulk synthetic write, not 22 separate Comfy renders.
+  - `pendingCritiques: {}` after the run — confirms the LLM phase DID consume + clear the critiques (so the prompts WERE rewritten).
+  - The two scene_clip chunks that didn't have a pre-existing file on disk (`scene_3_chunk_1`, `scene_3_chunk_2`) DID get rendered with real promptIds — confirming the "file exists at outputPath = cache hit" hypothesis for the skip.
+- **Suspected root cause:** Two-part. (a) `invalidateNodes` only marks the directly-targeted node — it does NOT cascade-invalidate downstream nodes. (b) The walker, when reaching a downstream node whose walkState is still `completed` with a present file at outputPath, treats it as cache-hit and writes a fresh `completedAt` without invoking the runner. The combination means that a critique on an upstream LLM node never reaches the downstream image/video render. Compare with the explicit user-driven "Regenerate" right-click (UX-8), which DOES invalidate downstream — that path uses a different invalidation routine that walks the graph.
+- **Manifestations to test:**
+  - Tiny bundle (prompt LLM → image comfy → video comfy), all completed in walkState with files on disk, stamp a `pendingCritique` for the prompt node + invalidate prompt node, run walker → image node + video node MUST be re-invoked (not silently skipped) so the new prompt actually drives a new image + video.
+  - Regression: an UNTOUCHED downstream node (no upstream change) is still cache-skipped via the file-exists check — so the fix is "force re-render when upstream re-ran during the walk", not "always re-render".
+  - Both stage and collection downstreams are tested; per-item invalidation cascades to per-item downstream invalidation (`shot_image_prompt:s1_3` → `shot_image:s1_3` only, not `shot_image:s1_4`).
+  - `runOnly` interaction: `runOnly: [prompt-node-only]` should still cascade-invalidate downstream UNLESS the caller explicitly clamps to only the prompt (e.g. dry-run "show me the new prompt text without re-rendering" via a future `dryDownstream` flag).
+- **Workaround in the meantime:** when batching critiques with `applyOnly:true`, also manually invalidate the downstream `shot_image:<item>` entries (delete them or set status:invalidated) before the final `dhee_run_bundle`, OR drop the on-disk PNG so the file-exists check misses.
+- **Test:** `tests/dag/walkerCritiqueCascade.test.ts > BUG-023 — pendingCritique on upstream forces downstream non-text re-render` (pending — Red first)
+- **Fix commit:** (pending)
+
+---
+
 ### BUG-022 — Walker walkState-write wipes sibling fields from project.json
 - **Status:** investigating
 - **Discovered:** 2026-05-29
