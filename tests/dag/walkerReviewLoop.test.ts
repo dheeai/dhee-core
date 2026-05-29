@@ -255,10 +255,22 @@ describe('walker review-loop', () => {
     });
     expect(result.ok).toBe(true);
 
-    // Initial walk + 3 re-walks = 4 prompt_node runs total.
-    // (max=3 means walker re-walks up to 3 times after the first.)
+    // Semantic: max=3 = up to 3 TOTAL walks. So 3 prompt_node runs.
     const promptRuns = runCalls.filter((c) => c.nodeId === 'prompt_node');
-    expect(promptRuns.length).toBe(4);
+    expect(promptRuns.length).toBe(3);
+  });
+
+  it('reviewLoopMax=1 → single walk, no auto-rewalk (equivalent to disabled)', async () => {
+    initProject('built-in:review-loop-test');
+    judgeBehavior = () => ({ pass: false, notes: 'always fails' });
+
+    await walkBundle({
+      projectDir,
+      bundle: makeBundle(1),
+      bundleSource: 'built-in:review-loop-test',
+    });
+    const promptRuns = runCalls.filter((c) => c.nodeId === 'prompt_node');
+    expect(promptRuns.length).toBe(1);
   });
 
   it('reviewLoopMax=0 (default) → walker exits after one walk even with new critique', async () => {

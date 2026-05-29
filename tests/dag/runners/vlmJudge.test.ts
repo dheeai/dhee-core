@@ -20,8 +20,10 @@ import { join } from 'node:path';
 import {
   buildJudgePrompt,
   parseVerdict,
+  pickBestAttempt,
   pickConfig,
   stampPendingCritique,
+  type JudgeAttempt,
 } from '../../../src/dag/runners/vlmJudge.js';
 
 const cleanupDirs: string[] = [];
@@ -152,6 +154,39 @@ describe('pickConfig', () => {
   it('errors loudly when neither source resolves', () => {
     const got = pickConfig({ outputPath: 'x', refineNode: 'y' }, {});
     expect(got).toEqual({ error: expect.stringMatching(/no VLM endpoint/) });
+  });
+});
+
+describe('pickBestAttempt (best-of-N selection)', () => {
+  const a = (n: number, pass: boolean, score: number): JudgeAttempt => ({
+    n,
+    pass,
+    score,
+    notes: '',
+    stashPath: '',
+  });
+
+  it('picks the FIRST passing attempt when any pass', () => {
+    // attempt 1 fails (0.9), attempt 2 passes (0.65), attempt 3 passes (0.85).
+    // First passing wins → attempt 2, even though attempt 3 scored higher.
+    expect(pickBestAttempt([a(1, false, 0.9), a(2, true, 0.65), a(3, true, 0.85)]).n).toBe(2);
+  });
+
+  it('picks highest-scoring when no attempt passes', () => {
+    expect(pickBestAttempt([a(1, false, 0.4), a(2, false, 0.7), a(3, false, 0.5)]).n).toBe(2);
+  });
+
+  it('breaks score ties by earliest (lowest n)', () => {
+    expect(pickBestAttempt([a(1, false, 0.5), a(2, false, 0.5), a(3, false, 0.5)]).n).toBe(1);
+  });
+
+  it('handles single attempt', () => {
+    expect(pickBestAttempt([a(1, true, 0.9)]).n).toBe(1);
+    expect(pickBestAttempt([a(1, false, 0.2)]).n).toBe(1);
+  });
+
+  it('throws on empty input (no defensible best)', () => {
+    expect(() => pickBestAttempt([])).toThrow(/no attempts/);
   });
 });
 

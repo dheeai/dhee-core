@@ -747,8 +747,12 @@ async function walkBundleWithReviewLoop(
 
   const result = await walkBundleOnce(opts);
 
+  // Semantic: `reviewLoopMax` = TOTAL max walks per dispatch
+  // (including the initial). max=1 → no re-walks. max=3 → up to 3
+  // total walks. iteration is 0-indexed: after walk N, iteration is
+  // N-1 in the recursive call, so the guard is iteration + 1 >= max.
   const max = opts.bundle.reviewLoopMax ?? 0;
-  if (max <= 0 || iteration >= max) return result;
+  if (max <= 1 || iteration + 1 >= max) return result;
 
   // Rule: re-walk while there are unconsumed pendingCritiques at the
   // end of the walk. A clean walk (no critiques OR all critiques

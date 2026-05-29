@@ -195,20 +195,21 @@ export interface DagBundle {
   /** Terminal node — what the walker tries to produce. */
   goal: string;
   /**
-   * Maximum number of times the walker will auto-re-walk on its own
-   * when review nodes (or any other runners) stamp NEW pendingCritiques
-   * during a walk. Set > 0 to enable quality-gated retry loops.
+   * Maximum TOTAL walks per dispatch when review nodes (or other
+   * runners) stamp pendingCritiques. The walker checks at the end of
+   * each walk: if pendingCritiques is non-empty AND walks-so-far <
+   * max, invalidate those entries and re-walk.
    *
-   * Semantics: the walker snapshots `pendingCritiques` keys at walk
-   * entry. If the post-walk set has keys that weren't there at entry,
-   * the walker calls itself again (count + 1). When a re-walk produces
-   * no new critiques OR the count hits `reviewLoopMax`, the walker
-   * returns.
+   * Semantics:
+   *   - `0` or `1` → no auto-rewalk; single-shot behavior preserved.
+   *     Existing dhee_critique_node flow (stamp + dispatch single
+   *     walk) is unchanged.
+   *   - `3` → up to 3 total walks. e.g. attempt 1 fails review →
+   *     re-walk #2 → attempt 2 still fails → re-walk #3 → walker
+   *     exits regardless of verdict (cap reached).
    *
-   * Default 0 = disabled. Existing single-shot critique flow
-   * (dhee_critique_node stamps once, dispatches walk, walker exits)
-   * is unchanged. Recommended values: 2-3 for bundles with judge
-   * nodes; higher risks spending budget on stubborn shots.
+   * Recommended 2–3 for bundles with judge nodes; higher risks
+   * spending budget on stubborn shots that won't converge.
    */
   reviewLoopMax?: number;
   nodes: NodeDef[];

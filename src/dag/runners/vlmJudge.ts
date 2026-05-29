@@ -38,7 +38,7 @@
  *   - Errors loudly if no config is reachable. The judge isn't
  *     optional once a bundle declares it.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import OpenAI from 'openai';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
@@ -59,15 +59,56 @@ interface JudgeConfig {
   maxTokens?: number;
 }
 
-export interface JudgeVerdict {
+export interface JudgeAttempt {
+  n: number;
   pass: boolean;
-  /** 0..1 confidence/quality */
   score: number;
-  /** What's wrong and how to fix it, in concrete actionable terms. */
   notes: string;
-  /** Raw model output for debugging — kept so audit trails can replay. */
+  /** Stash path (relative to projectDir) so the runner can copy this
+   *  attempt's image back over the canonical path if it later turns
+   *  out to be the best of N. */
+  stashPath: string;
+  rawResponse?: string;
+}
+
+export interface JudgeVerdict {
+  // Top-level mirrors the best attempt so consumers (tests, Inspector
+  // tiles, downstream nodes) can read pass/score/notes without
+  // walking the attempts array.
+  pass: boolean;
+  /** 0..1 confidence/quality, from bestAttempt */
+  score: number;
+  /** What's wrong and how to fix it, from bestAttempt */
+  notes: string;
+  /** Raw model output for the LAST attempt (debugging) */
   rawResponse?: string;
   model?: string;
+  /** Best-of-N tracking: attempts so far, current attempt #, best of the N. */
+  currentAttempt?: number;
+  bestAttempt?: number;
+  attempts?: JudgeAttempt[];
+}
+
+/**
+ * Pick the best attempt out of an array. Rule:
+ *   1. If ANY attempt has pass=true: pick the FIRST passing attempt
+ *      (earliest acceptable = lowest budget).
+ *   2. Otherwise: pick the highest-scoring. Ties broken by earliest
+ *      (lower n).
+ *
+ * Pure for unit testing. Asserts attempts.length >= 1.
+ */
+export function pickBestAttempt(attempts: JudgeAttempt[]): JudgeAttempt {
+  if (attempts.length === 0) throw new Error('pickBestAttempt: no attempts to pick from');
+  const passing = attempts.filter((a) => a.pass);
+  if (passing.length > 0) {
+    return passing.reduce((best, a) => (a.n < best.n ? a : best));
+  }
+  return attempts.reduce((best, a) => {
+    if (a.score > best.score) return a;
+    if (a.score === best.score && a.n < best.n) return a;
+    return best;
+  });
 }
 
 const DEFAULT_SYSTEM_PROMPT = `You are a vision-language judge auditing a rendered image against a production brief.
@@ -214,6 +255,33 @@ async function run(ctx: RunnerContext): Promise<RunnerResult> {
   const resolved = pickConfig(cfg);
   if ('error' in resolved) return { ok: false, error: resolved.error };
 
+  // Read prior verdict.json (from previous walk iterations of this
+  // review loop) to load prior attempts. On iter 1 this is empty.
+  const outAbs = resolve(ctx.projectDir, cfg.outputPath);
+  mkdirSync(dirname(outAbs), { recursive: true });
+  let priorAttempts: JudgeAttempt[] = [];
+  if (existsSync(outAbs)) {
+    try {
+      const prior = JSON.parse(readFileSync(outAbs, 'utf-8')) as JudgeVerdict;
+      if (Array.isArray(prior.attempts)) priorAttempts = prior.attempts;
+    } catch {
+      // malformed prior verdict — treat as no history
+    }
+  }
+  const currentAttempt = priorAttempts.length + 1;
+
+  // Stash the just-rendered upstream image so we can restore it later
+  // if it turns out to be the best of N. Stash lives in a .attempts
+  // sibling dir under the verdict's output dir to keep all the
+  // review state co-located with the verdict tile.
+  const ext = /\.(jpe?g)$/i.test(imageValue) ? 'jpeg' : 'png';
+  const stashDir = resolve(dirname(outAbs), '.attempts');
+  mkdirSync(stashDir, { recursive: true });
+  const stashFileName = `${ctx.itemId ?? 'singleton'}_attempt_${currentAttempt}.${ext === 'jpeg' ? 'jpg' : ext}`;
+  const stashAbs = resolve(stashDir, stashFileName);
+  const stashRel = `${dirname(cfg.outputPath)}/.attempts/${stashFileName}`;
+  copyFileSync(imageValue, stashAbs);
+
   const userMessage = buildJudgePrompt({
     contextInputs: ctx.inputs,
     imageInputId,
@@ -221,12 +289,11 @@ async function run(ctx: RunnerContext): Promise<RunnerResult> {
   });
   const systemPrompt = cfg.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
 
-  const ext = /\.(jpe?g)$/i.test(imageValue) ? 'jpeg' : 'png';
   const b64 = readFileSync(imageValue).toString('base64');
   const dataUrl = `data:image/${ext};base64,${b64}`;
 
   ctx.log(
-    `vlm.judge: judging ${imageValue.split('/').pop()} with ${resolved.model} (threshold=${cfg.passThreshold ?? 0.7})`,
+    `vlm.judge: attempt ${currentAttempt} — judging ${imageValue.split('/').pop()} with ${resolved.model} (threshold=${cfg.passThreshold ?? 0.7})`,
   );
 
   const client = new OpenAI({ baseURL: resolved.baseUrl, apiKey: resolved.apiKey });
@@ -258,31 +325,71 @@ async function run(ctx: RunnerContext): Promise<RunnerResult> {
   }
 
   const threshold = cfg.passThreshold ?? 0.7;
-  const finalPass = parsed.pass && parsed.score >= threshold;
-  const verdict: JudgeVerdict = {
-    pass: finalPass,
+  const thisAttemptPass = parsed.pass && parsed.score >= threshold;
+  const thisAttempt: JudgeAttempt = {
+    n: currentAttempt,
+    pass: thisAttemptPass,
     score: parsed.score,
     notes: parsed.notes,
+    stashPath: stashRel,
     rawResponse: raw,
-    model: resolved.model,
   };
 
-  const outAbs = resolve(ctx.projectDir, cfg.outputPath);
-  mkdirSync(dirname(outAbs), { recursive: true });
+  const attempts = [...priorAttempts, thisAttempt];
+  const best = pickBestAttempt(attempts);
+
+  // If the best is NOT the current attempt, restore the best's
+  // stashed image back over the canonical path so downstream nodes
+  // (LTX, etc.) consume the best-of-N. If best IS current, canonical
+  // already has the right image — no copy needed.
+  if (best.n !== currentAttempt) {
+    const bestStashAbs = resolve(ctx.projectDir, best.stashPath);
+    if (existsSync(bestStashAbs)) {
+      copyFileSync(bestStashAbs, imageValue);
+      ctx.log(
+        `vlm.judge: attempt ${currentAttempt} (score=${parsed.score.toFixed(2)}) scored below best attempt ${best.n} (score=${best.score.toFixed(2)}); restored best image over ${imageValue.split('/').pop()}`,
+      );
+    } else {
+      ctx.log(`vlm.judge: WARNING — best attempt ${best.n} stash missing at ${best.stashPath}; canonical unchanged`);
+    }
+  }
+
+  const verdict: JudgeVerdict = {
+    pass: best.pass,
+    score: best.score,
+    notes: best.notes,
+    rawResponse: raw,
+    model: resolved.model,
+    currentAttempt,
+    bestAttempt: best.n,
+    attempts,
+  };
   writeFileSync(outAbs, JSON.stringify(verdict, null, 2), 'utf-8');
   ctx.log(
-    `vlm.judge: verdict pass=${finalPass} score=${parsed.score.toFixed(2)} ${finalPass ? '✓' : '✗'}`,
+    `vlm.judge: best-of-${attempts.length} → attempt ${best.n} (pass=${best.pass} score=${best.score.toFixed(2)}) ${best.pass ? '✓' : '✗'}`,
   );
 
-  if (!finalPass) {
-    stampPendingCritique(ctx.projectDir, cfg.refineNode, ctx.itemId, parsed.notes);
+  // Stamp critique only when this iteration's attempt failed AND we
+  // haven't already found a passing attempt. If best.pass is true,
+  // the loop should exit even if this latest attempt was worse —
+  // we have a winner, no need to keep retrying.
+  const shouldStampCritique = !best.pass;
+  if (shouldStampCritique) {
+    stampPendingCritique(ctx.projectDir, cfg.refineNode, ctx.itemId, thisAttempt.notes);
     ctx.log(`vlm.judge: stamped pendingCritique[${cfg.refineNode}${ctx.itemId ? `:${ctx.itemId}` : ''}] for review-loop re-walk`);
   }
 
   return {
     ok: true,
     outputPath: cfg.outputPath,
-    metadata: { pass: finalPass, score: parsed.score, model: resolved.model },
+    metadata: {
+      pass: best.pass,
+      score: best.score,
+      model: resolved.model,
+      currentAttempt,
+      bestAttempt: best.n,
+      totalAttempts: attempts.length,
+    },
   };
 }
 
