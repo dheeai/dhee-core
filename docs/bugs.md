@@ -314,6 +314,23 @@ prompted the migration are documented in the commit history of the
 
 ---
 
+### BUG-024 — comfy.qwen_edit_chain picks wrong character refs when prompt uses natural names instead of snake_case IDs
+- **Status:** fixed
+- **Discovered:** 2026-05-29
+- **Fixed:** 2026-05-29
+- **Reporter:** ganaraj + claude (post-Qwen-quality review on Ruby V4 refined)
+- **Symptom:** Refined shot images came out with the wrong character in scenes where the character's name in the prompt didn't match the character's id verbatim. Concrete cases on Ruby V4 refined:
+  - `scene_2_shot_3` ("pawn shop owner... polishing a gold chain"): rendered owner as a lean dark-haired man in a leather jacket. He looked like Angel.
+  - `scene_2_shot_4` ("owner drops the chain"): refs sent were ruby + angel — no owner ref at all.
+  - `scene_2_shot_6` ("Ruby presses gun against the owner's forehead"): only ruby.png sent; gun-direction also drifted because Qwen had no anchor for the owner.
+- **Evidence:** `assets/images/shots/*_first.meta.json` sidecars record the exact `charRefs` list passed to Qwen. For all three shots above, the pawn_shop_owner reference image was NOT in the list — even though the prompt clearly referenced the character.
+- **Root cause:** `comfyQwenEditChain.ts:161` filtered character IDs by `fullPrompt.toLowerCase().includes(cid.toLowerCase())`. IDs are snake_case (`pawn_shop_owner`); prompts use natural language ("pawn shop owner", "the owner"). Zero matches → fallback to alphabetic charIds → `angel` + `lamborghini_driver` win the slots regardless of who's in the scene.
+- **Fix:** Extracted to `pickCharacterRefs(prompt, charIds)`. Three-tier match: (1) verbatim id, (2) id-with-spaces (`pawn shop owner` → pawn_shop_owner), (3) last id-token if ≥5 chars (`owner` → pawn_shop_owner; rejects short generic tokens like `red`). Preserves order-of-mention so the first named character lands in Qwen's first ref slot. Falls back to alphabetical only when zero mentions found.
+- **Test:** `tests/dag/runners/qwenCharacterRefPick.test.ts` — 7 cases including the real-world repro and a regression-guard against spurious short-token matches.
+- **Fix commit:** (pending — same as docs entry)
+
+---
+
 ### BUG-023 — Critique cascade doesn't re-render downstream non-text artifacts (stale-output cache hit)
 - **Status:** fixed (over-approximation; per-item granularity is a follow-up)
 - **Discovered:** 2026-05-29

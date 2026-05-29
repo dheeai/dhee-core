@@ -27,6 +27,64 @@ import { dirname, resolve } from 'node:path';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 
+/**
+ * Pick up to 2 character ref IDs that the prompt is talking about
+ * (Qwen Edit Multi-Angle takes max 2 extras). Anchors on:
+ *   1. Exact id in prompt ('ruby' in '<sks> Ruby raises the gun')
+ *   2. Id-with-spaces in prompt ('pawn shop owner' → pawn_shop_owner)
+ *   3. Last id-token in prompt IF it's >=5 chars ('owner' →
+ *      pawn_shop_owner; rejects short generic tokens like 'red' to
+ *      avoid spurious matches).
+ *
+ * Preserves order-of-mention so the primary subject (typically the
+ * first named character) lands in Qwen's first ref slot.
+ *
+ * Falls back to alphabetical char IDs if zero mentions found, so the
+ * workflow's 2 LoadImage slots always have valid files.
+ *
+ * Exported for unit testing (tests/dag/runners/qwenCharacterRefPick.test.ts).
+ */
+export function pickCharacterRefs(fullPrompt: string, charIds: string[]): string[] {
+  const promptLower = fullPrompt.toLowerCase();
+
+  // Build candidate keys per character id, longest first so 'pawn shop owner'
+  // matches before falling through to 'owner' alone.
+  type Candidate = { id: string; key: string };
+  const candidates: Candidate[] = [];
+  for (const id of charIds) {
+    const idLower = id.toLowerCase();
+    candidates.push({ id, key: idLower });
+    const spaced = idLower.replace(/_/g, ' ');
+    if (spaced !== idLower) candidates.push({ id, key: spaced });
+    const tokens = idLower.split('_');
+    const last = tokens[tokens.length - 1];
+    if (last && last.length >= 5 && tokens.length > 1) {
+      candidates.push({ id, key: last });
+    }
+  }
+
+  // Find earliest occurrence in the prompt for each id (preserves
+  // order-of-mention). For each id, the earliest index across any of
+  // its candidate keys wins.
+  const earliestById = new Map<string, number>();
+  for (const { id, key } of candidates) {
+    const idx = promptLower.indexOf(key);
+    if (idx === -1) continue;
+    const prev = earliestById.get(id);
+    if (prev === undefined || idx < prev) earliestById.set(id, idx);
+  }
+
+  if (earliestById.size === 0) {
+    // No mentions — fall back to alphabetical, cap at 2.
+    return [...charIds].sort().slice(0, 2);
+  }
+
+  return [...earliestById.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, 2)
+    .map(([id]) => id);
+}
+
 interface PriorShot { shotNumber: number; itemId?: string; outputAbs: string }
 interface ShotPromptJSON {
   chosenBaseShotNumber?: number;
@@ -158,10 +216,9 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
 
   // Pick up to 2 character refs (prefer characters referenced in the deltaText, fallback to alphabetic).
   const charIds = Object.keys(charMap);
-  const namesMentioned = charIds.filter((cid) => fullPrompt.toLowerCase().includes(cid.toLowerCase()));
-  const refOrder = namesMentioned.length > 0 ? namesMentioned : charIds;
+  const refOrder = pickCharacterRefs(fullPrompt, charIds);
   const upRefs: string[] = [];
-  for (const cid of refOrder.slice(0, 2)) {
+  for (const cid of refOrder) {
     const u = await client.uploadImage(charMap[cid]!, 'input', true);
     upRefs.push(u.name);
     ctx.log(`  ref ${cid} → ${u.name}`);
