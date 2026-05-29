@@ -30,9 +30,10 @@
 
 import { existsSync, writeFileSync } from 'node:fs';
 import { SessionManager } from '@mariozechner/pi-coding-agent';
-import { buildPiSession } from './buildSession.js';
+import { buildPiSession, type BuildPiSessionOptions } from './buildSession.js';
 import { ensureDir, getPiSessionsDir } from './paths.js';
 import { runAgentTurn } from './runTurn.js';
+import { loadDevEnv } from '../../server/loadDevEnv.js';
 import {
   findSession,
   listSessionsForProject,
@@ -51,6 +52,67 @@ export interface DriveDeps {
 const DEFAULT_DEPS: DriveDeps = {
   buildSession: buildPiSession,
 };
+
+/**
+ * Resolve (provider, modelId, apiKey) from process.env so the CLI
+ * driver can pass an explicit model triple to buildPiSession. Without
+ * this, pi-coding-agent falls back to whatever ~/.pi/agent/settings.json
+ * names — which is usually empty on dev boxes that haven't run
+ * `pi /login` — and session.prompt() either errors with "No API key
+ * found" or returns no content.
+ *
+ * Mirrors the desktop's `resolvePiModelFromSettings` mapping but
+ * sourced from env, not Settings UI:
+ *   - LLM_PROVIDER=gemini → google + GEMINI_MODEL + GOOGLE_API_KEY
+ *   - OPENAI_BASE_URL contains openrouter.ai → openrouter + OPENAI_MODEL + OPENAI_API_KEY
+ *   - otherwise → openai + OPENAI_MODEL + OPENAI_API_KEY
+ *
+ * Returns null when no usable triple can be assembled — caller falls
+ * back to pi's settings.json discovery (legacy behavior).
+ */
+function resolvePiModelFromEnv(env: NodeJS.ProcessEnv = process.env): {
+  modelProvider: string;
+  modelId: string;
+  apiKey: string;
+} | null {
+  const provider = (env['LLM_PROVIDER'] ?? '').trim().toLowerCase();
+  if (provider === 'gemini') {
+    const modelId = (env['GEMINI_MODEL'] ?? '').trim();
+    const apiKey = (env['GOOGLE_API_KEY'] ?? '').trim();
+    if (modelId && apiKey) return { modelProvider: 'google', modelId, apiKey };
+    return null;
+  }
+  const baseUrl = (env['OPENAI_BASE_URL'] ?? '').trim();
+  const modelId = (env['OPENAI_MODEL'] ?? '').trim();
+  const apiKey = (env['OPENAI_API_KEY'] ?? '').trim();
+  if (!modelId || !apiKey) return null;
+  const isOpenRouter = /openrouter\.ai/i.test(baseUrl);
+  return {
+    modelProvider: isOpenRouter ? 'openrouter' : 'openai',
+    modelId,
+    apiKey,
+  };
+}
+
+/**
+ * Build session options that compose every CLI-side default — env
+ * load, model+key triple, sessions dir for persistence — so cmdStart
+ * and cmdSend share the same wiring instead of drifting.
+ */
+function buildSessionOptsFromEnv(
+  sm: ReturnType<typeof SessionManager.open> | ReturnType<typeof SessionManager.create>,
+  cwd: string,
+): BuildPiSessionOptions {
+  // Surface dhee-core/.env into process.env. Safe + idempotent: already-
+  // set keys are preserved.
+  loadDevEnv();
+  const model = resolvePiModelFromEnv();
+  return {
+    sessionManager: sm,
+    cwd,
+    ...(model ?? {}),
+  };
+}
 
 export interface CmdStartOk {
   ok: true;
@@ -89,7 +151,7 @@ export async function cmdStart(deps: DriveDeps = DEFAULT_DEPS): Promise<CmdStart
 
   let built;
   try {
-    built = await deps.buildSession({ sessionManager: sm, cwd });
+    built = await deps.buildSession(buildSessionOptsFromEnv(sm, cwd));
   } catch (err) {
     return { ok: false, error: `buildSession failed: ${(err as Error)?.message ?? String(err)}` };
   }
@@ -133,7 +195,7 @@ export async function cmdSend(
 
   let built;
   try {
-    built = await deps.buildSession({ sessionManager: sm, cwd: process.cwd() });
+    built = await deps.buildSession(buildSessionOptsFromEnv(sm, process.cwd()));
   } catch (err) {
     return { ok: false, error: `buildSession failed: ${(err as Error)?.message ?? String(err)}` };
   }

@@ -813,6 +813,33 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
     if (pruned > 0) {
       log(`walker: pruned ${pruned} stale walkState entries (nodes no longer in bundle).`);
     }
+
+    // Reap stale 'in_progress' entries. At walk entry there CAN'T be a
+    // live runner for any in_progress node — that would only happen
+    // if a runner from a prior dispatch is currently executing, but a
+    // single bundle dispatch holds the only walker call. So any
+    // in_progress entry now is from a prior dispatch that was killed
+    // mid-flight (Comfy went down, desktop crashed, Cmd-C, etc.).
+    //
+    // Without this, the walker's per-instance loop sees in_progress in
+    // walkState + nothing on disk + falls through to running the
+    // node fresh. That works for items but the BARE node entry stays
+    // `in_progress` forever, polluting status reports and blocking
+    // some bundle-level gating checks.
+    let reaped = 0;
+    for (const [key, entry] of Object.entries(state.nodes)) {
+      if (entry.status === 'in_progress') {
+        state.nodes[key] = {
+          status: 'failed',
+          error: 'stale in_progress entry: prior dispatch was killed mid-flight (Comfy restart, process exit, or manual abort). Walker reaped at entry; will re-run.',
+        };
+        reaped += 1;
+      }
+    }
+    if (reaped > 0) {
+      log(`walker: reaped ${reaped} stale in_progress walkState entries (prior dispatch killed mid-flight).`);
+    }
+
     // Initialize entries for any bundle nodes that aren't yet in
     // walkState. Status defaults to 'pending' so callers can read the
     // full DAG state in one go (the agent shows "5 of 8 done"; the
