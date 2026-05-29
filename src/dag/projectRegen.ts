@@ -26,8 +26,8 @@
  * from the runner module's load order (and so tests can use a stub).
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type {
   RunProjectViaBundleOpts,
   RunProjectViaBundleResult,
@@ -126,6 +126,25 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
     if (!walkState.nodes![key]) {
       notFound.push(key);
       continue;
+    }
+    // Delete the on-disk artifact too — some runners (comfy.image,
+    // comfy.qwen_edit_chain, comfy.ltx_director) have their own
+    // "skip if output file exists" cache that runs independently of
+    // walkState. If we only clear walkState, those runners see the
+    // stale file and return `{skipped: true}` — turning the
+    // invalidation into a no-op. Removing the file forces a real
+    // re-render. Best-effort; missing/unwritable files are not
+    // fatal — the runner-level cache check still works the right
+    // way (file gone → re-render).
+    const entry = walkState.nodes![key];
+    const outputPath = entry?.outputPath;
+    if (typeof outputPath === 'string' && outputPath.length > 0) {
+      const abs = resolve(opts.projectDir, outputPath);
+      try {
+        if (existsSync(abs)) unlinkSync(abs);
+      } catch {
+        // best-effort; swallow so invalidation still proceeds.
+      }
     }
     delete walkState.nodes![key];
     invalidated.push(key);
