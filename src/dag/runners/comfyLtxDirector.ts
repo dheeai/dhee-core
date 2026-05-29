@@ -260,10 +260,40 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     string,
     { inputs: Record<string, unknown>; class_type: string }
   >;
-  const workflow: Record<
+  let workflow: Record<
     string,
     { inputs: Record<string, unknown>; class_type: string }
   > = JSON.parse(JSON.stringify(baseWorkflow));
+
+  // Apply per-endpoint workflow aliases (model-file rename +
+  // class_type swap for GGUF / quant variants). Same mechanism as
+  // comfy.qwen_edit_chain — bundle's canonical workflow stays
+  // untouched on disk; the user's local Comfy may have differently-
+  // named LoRAs / UNETs (e.g. VBVR vs transition base LoRA), and the
+  // agent's dhee_apply_workflow_aliases tool persists the chosen map.
+  try {
+    const { readAliases, applyAliases } = await import('../workflowAliases.js');
+    const { resolve: pathResolve } = await import('node:path');
+    const aliasesDir =
+      process.env['DHEE_WORKFLOW_ALIASES_DIR'] ??
+      pathResolve(process.env['HOME'] ?? '', '.dhee', 'workflow-aliases');
+    const aliases = readAliases(aliasesDir, endpointBaseUrl ?? 'unknown');
+    if (
+      (aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0) ||
+      (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0)
+    ) {
+      const workflowKey = cfg.workflowPath.split('/').slice(-2).join('/');
+      workflow = applyAliases(workflow as never, {
+        workflowKey,
+        aliases,
+      }) as never;
+      ctx.log(
+        `comfy.ltx_director: applied aliases for endpoint=${endpointBaseUrl} workflow=${workflowKey}`,
+      );
+    }
+  } catch (e) {
+    ctx.log(`comfy.ltx_director: alias load skipped (${(e as Error).message})`);
+  }
 
   const director = workflow['46'];
   if (!director || director.class_type !== 'LTXDirector') {
