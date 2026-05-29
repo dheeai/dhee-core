@@ -13,6 +13,7 @@ import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { llmGenerateRunner } from './llmGenerate.js';
+import { vlmJudgeRunner } from './vlmJudge.js';
 import {
   RunnerRegistry,
   getGlobalRegistry,
@@ -105,6 +106,18 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Concatenates input video clips into a single final video, optionally with audio overlay and watermark.',
     },
     runner: ffmpegConcatRunner,
+  },
+  {
+    manifest: {
+      tool: 'vlm.judge',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'VLM judge (review)',
+      description:
+        'Sends an image to a vision-language model for pass/fail review. On fail, stamps pendingCritiques[refineNode:itemId] so the walker’s review-loop wrapper invalidates the upstream prompt-LLM and re-walks with the critique applied. Verdict JSON is written to outputPath. VLM endpoint resolved from runner config or VLM_PROVIDER/VLM_API_KEY/VLM_MODEL env. Pair with bundle-level reviewLoopMax to bound retry budget per dispatch.',
+    },
+    runner: vlmJudgeRunner,
   },
 ];
 
