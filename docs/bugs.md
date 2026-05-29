@@ -315,8 +315,9 @@ prompted the migration are documented in the commit history of the
 ---
 
 ### BUG-023 — Critique cascade doesn't re-render downstream non-text artifacts (stale-output cache hit)
-- **Status:** open
+- **Status:** fixed (over-approximation; per-item granularity is a follow-up)
 - **Discovered:** 2026-05-29
+- **Fixed:** 2026-05-29
 - **Reporter:** ganaraj + claude (during Ruby V4 refined batch refinement of 22 broken shots)
 - **Symptom:** After agent applies 22 critiques via `dhee_critique_node(applyOnly:true)` and then issues one `dhee_run_bundle` to process the batch, the walker:
   - ✅ re-runs every `shot_image_prompt:scene_X_shot_Y` LLM (good — the refined prompt JSONs land on disk with longer, structurally-correct content)
@@ -335,8 +336,9 @@ prompted the migration are documented in the commit history of the
   - Both stage and collection downstreams are tested; per-item invalidation cascades to per-item downstream invalidation (`shot_image_prompt:s1_3` → `shot_image:s1_3` only, not `shot_image:s1_4`).
   - `runOnly` interaction: `runOnly: [prompt-node-only]` should still cascade-invalidate downstream UNLESS the caller explicitly clamps to only the prompt (e.g. dry-run "show me the new prompt text without re-rendering" via a future `dryDownstream` flag).
 - **Workaround in the meantime:** when batching critiques with `applyOnly:true`, also manually invalidate the downstream `shot_image:<item>` entries (delete them or set status:invalidated) before the final `dhee_run_bundle`, OR drop the on-disk PNG so the file-exists check misses.
-- **Test:** `tests/dag/walkerCritiqueCascade.test.ts > BUG-023 — pendingCritique on upstream forces downstream non-text re-render` (pending — Red first)
-- **Fix commit:** (pending)
+- **Test:** `tests/dag/walkerCritiqueCascade.test.ts > BUG-023 — pendingCritique on upstream forces downstream non-text re-render`
+- **Fix:** Walker now tracks a `reRunInThisWalk: Set<string>` of node ids whose runner was actually invoked during this walk. The per-instance cache-skip check at `walker.ts:946` consults this set: if any of `node.inputs[].from` was re-run, the cache-skip is bypassed and the runner is invoked for fresh output. Successful runs add their bare node id to the set. Over-approximation by design — sibling items of an item-level re-run will also re-render. Per-item granularity respecting `inputs[].scope='matching'` is tracked as the `it.todo` in the regression test.
+- **Fix commit:** 3e86ae6
 
 ---
 
