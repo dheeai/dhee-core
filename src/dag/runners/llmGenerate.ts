@@ -297,9 +297,28 @@ export function createLlmGenerateRunner(opts?: {
       inputsWithItemId['item_id'] = ctx.itemId;
     }
 
-    // 2. Skip-if-output-exists (cache hit).
+    // 2. Skip-if-output-exists (cache hit) — but only when no pending
+    //    critique exists for this (node, item). When a critique is
+    //    pending, the user explicitly wants a re-fire, so we must
+    //    bypass the cache. Critique check is deferred to step 3b but
+    //    we need its key here to gate cache reads.
     const outAbs = resolve(ctx.projectDir, cfg.outputPath);
-    if (!cfg.forceRerun && existsSync(outAbs)) {
+    const critiqueKeyForCache = ctx.itemId
+      ? `${ctx.node.id}:${ctx.itemId}`
+      : ctx.node.id;
+    const hasPendingCritique = (() => {
+      try {
+        const p = resolve(ctx.projectDir, 'project.json');
+        if (!existsSync(p)) return false;
+        const projJson = JSON.parse(readFileSync(p, 'utf-8')) as {
+          pendingCritiques?: Record<string, string>;
+        };
+        return Boolean(projJson.pendingCritiques?.[critiqueKeyForCache]);
+      } catch {
+        return false;
+      }
+    })();
+    if (!cfg.forceRerun && !hasPendingCritique && existsSync(outAbs)) {
       try {
         const st = statSync(outAbs);
         if (st.isFile() && st.size > 0) {
@@ -322,6 +341,33 @@ export function createLlmGenerateRunner(opts?: {
     const template = readFileSync(tmplAbs, 'utf-8');
     const sub = substituteTemplate(template, inputsWithItemId);
     if (!sub.ok) return { ok: false, error: sub.error };
+
+    // 3b. Check for a pending critique under
+    //     `pendingCritiques[nodeId(:itemId)]` in project.json. When
+    //     present, prepend a system message conveying the critique so
+    //     the LLM corrects the prior output on this re-fire. Cleared
+    //     on success below. Allows the dhee_critique_node tool to
+    //     "set fix-it instructions, then invalidate" without needing
+    //     a separate runner.
+    const critiqueKey = ctx.itemId
+      ? `${ctx.node.id}:${ctx.itemId}`
+      : ctx.node.id;
+    let pendingCritique: string | undefined;
+    let critiquesPath: string | undefined;
+    try {
+      critiquesPath = resolve(ctx.projectDir, 'project.json');
+      if (existsSync(critiquesPath)) {
+        const projJson = JSON.parse(readFileSync(critiquesPath, 'utf-8')) as {
+          pendingCritiques?: Record<string, string>;
+        };
+        if (projJson.pendingCritiques && projJson.pendingCritiques[critiqueKey]) {
+          pendingCritique = projJson.pendingCritiques[critiqueKey];
+        }
+      }
+    } catch {
+      // Best-effort — a malformed project.json shouldn't block the regen.
+      pendingCritique = undefined;
+    }
 
     // 4. Call LLM (with retries + abort).
     const tier: LLMTier = cfg.tier ?? 'medium';
@@ -352,9 +398,21 @@ export function createLlmGenerateRunner(opts?: {
     // back to the LLM as a corrective hint so it can self-correct on
     // the next attempt (common with enum drift — model emits "medium
     // close-up" instead of the strict "close-up" enum value).
-    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
-      { role: 'user', content: sub.rendered },
-    ];
+    //
+    // When a pending critique is present for this (node, item), prepend
+    // it as a leading user message that frames the regen as a "fix the
+    // previous output" task. Keeps the prompt template untouched.
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+    if (pendingCritique) {
+      messages.push({
+        role: 'user',
+        content:
+          `CRITIQUE OF PREVIOUS OUTPUT:\n${pendingCritique}\n\n` +
+          `The previous attempt at this artifact had the issues described above. ` +
+          `Address them directly in your new response. Otherwise follow the task below as written.`,
+      });
+    }
+    messages.push({ role: 'user', content: sub.rendered });
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (ctx.signal?.aborted) {
@@ -435,10 +493,37 @@ export function createLlmGenerateRunner(opts?: {
     writeFileSync(outAbs, toWrite, 'utf-8');
     ctx.log(`llm.generate: wrote ${cfg.outputPath} (${toWrite.length} bytes)`);
 
+    // 6b. Clear consumed pending critique. Done AFTER the artifact
+    //     write succeeds — if the call failed, the critique survives
+    //     for the next attempt (defense-in-depth against a partial
+    //     run leaving a stale fix-it note behind).
+    if (pendingCritique && critiquesPath) {
+      try {
+        const projJson = JSON.parse(readFileSync(critiquesPath, 'utf-8')) as {
+          pendingCritiques?: Record<string, string>;
+          [k: string]: unknown;
+        };
+        if (projJson.pendingCritiques) {
+          delete projJson.pendingCritiques[critiqueKey];
+          // Drop the field entirely when empty so project.json stays clean.
+          if (Object.keys(projJson.pendingCritiques).length === 0) {
+            delete projJson.pendingCritiques;
+          }
+          writeFileSync(critiquesPath, JSON.stringify(projJson, null, 2), 'utf-8');
+        }
+      } catch {
+        // Non-fatal — the artifact was already written.
+      }
+    }
+
     return {
       ok: true,
       outputPath: cfg.outputPath,
-      metadata: { model: client.getModel(), bytes: toWrite.length },
+      metadata: {
+        model: client.getModel(),
+        bytes: toWrite.length,
+        ...(pendingCritique ? { critiqueApplied: true } : {}),
+      },
     };
   }
 

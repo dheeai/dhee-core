@@ -78,8 +78,50 @@ below so project state stays consistent.
   often.
 - `dhee_regenerate_node(projectDir, nodeId, itemId?)` — invalidate a
   single node (optionally a single collection item) and re-run it +
-  everything downstream. Use when the user is unhappy with one
-  specific output, not to re-run the whole project.
+  everything downstream. Use when the user wants a fresh roll of the
+  dice on a node — same prompt, different output. NOT for fixing a
+  prompt that's structurally wrong (use `dhee_critique_node` for that).
+- `dhee_critique_node(projectDir, nodeId, itemId?, critique, confirm?)`
+  — apply an editorial critique to an LLM-generated node. Use when an
+  artifact is broken because the underlying prompt is wrong: missing
+  setting tokens, compressed temporal sequence, wrong character
+  identity, ambiguous instructions, etc. The runner consumes the
+  critique on the next re-fire and corrects the output; the cascade
+  invalidates everything downstream automatically.
+
+  **Critique only works on `llm.*` nodes.** Non-LLM nodes (comfy.image,
+  comfy.video, ffmpeg.concat) are deterministic given their inputs —
+  the fix point is always an upstream LLM node. If the user reports a
+  broken IMAGE or VIDEO:
+
+  1. Look up the broken node's `inputs[].from` in the bundle.
+  2. Walk upstream through the DAG until you hit a node with
+     `runner.tool` starting with `llm.` — that's where to critique.
+  3. For example, in `narrative_qwen_chain_relay`:
+     - Broken `shot_image:scene_1_shot_3` → walk to
+       `shot_image_prompt:scene_1_shot_3` (llm.generate). Critique that.
+     - Broken `shot_image` across many shots → likely the upstream
+       `characters_plan` or `settings_plan` is the root cause.
+
+  **Two-phase workflow — ALWAYS preview first.**
+
+  1. Call `dhee_critique_node(...)` WITHOUT `confirm` to get a preview
+     of the cascade: which downstream nodes will be invalidated + re-run.
+  2. Look at the preview's `imageOrVideoCount`:
+     - If ≤ 1 image/video node will be rebuilt → call again with
+       `confirm: true` immediately. No need to ask the user.
+     - If > 1 image/video node will be rebuilt → STOP. Present the
+       diagnosis + plan + impact to the user in chat:
+       - What was wrong with the broken artifact
+       - Which node you propose to critique + the critique itself
+       - The list of nodes (and image/video count) the cascade will hit
+       - Ask: "Proceed?" — wait for explicit consent.
+     - Only after consent: call with `confirm: true`.
+
+  The critique text should be specific and editorial. Cite missing
+  tokens, broken composition, identity drift, ambiguous instructions.
+  Don't write the new prompt yourself — describe what's wrong, and the
+  bundle's tuned generator will fix it.
 - `dhee_read_artifact(projectDir, nodeId, itemId?)` — read the file a
   node produced. Text inlined; binary returned as path + size.
 - `dhee_show_node_output(projectDir, nodeId, itemId?)` — display a

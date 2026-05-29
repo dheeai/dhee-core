@@ -519,6 +519,7 @@ describe('DHEE_TOOL_NAMES', () => {
       'dhee_run_bundle',
       'dhee_get_status',
       'dhee_regenerate_node',
+      'dhee_critique_node',
       'dhee_read_artifact',
       'dhee_show_node_output',
       'dhee_show_file',

@@ -15,6 +15,7 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 
 import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProject.js';
+import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
 import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
@@ -27,6 +28,7 @@ export const DHEE_TOOL_NAMES = [
   'dhee_run_bundle',
   'dhee_get_status',
   'dhee_regenerate_node',
+  'dhee_critique_node',
   'dhee_read_artifact',
   'dhee_show_node_output',
   'dhee_show_file',
@@ -34,6 +36,7 @@ export const DHEE_TOOL_NAMES = [
 
 export {
   dheeCreateProjectTool,
+  dheeCritiqueNodeTool,
   dheeGetStatusTool,
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
@@ -41,6 +44,7 @@ export {
   dheeShowFileTool,
   dheeShowNodeOutputTool,
   makeCreateProjectTool,
+  makeCritiqueNodeTool,
   makeGetStatusTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
@@ -58,6 +62,7 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeRunBundleTool);
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);
+  pi.registerTool(dheeCritiqueNodeTool);
   pi.registerTool(dheeReadArtifactTool);
   pi.registerTool(dheeShowNodeOutputTool);
   pi.registerTool(dheeShowFileTool);
