@@ -32,6 +32,14 @@ export {
 export { loadDevEnv } from './loadDevEnv.js';
 export type { LoadDevEnvResult } from './loadDevEnv.js';
 export {
+  createProjectInProcess,
+  CreateProjectError,
+} from './runners/createProjectInProcess.js';
+export type {
+  CreateProjectInProcessOpts,
+  CreateProjectInProcessResult,
+} from './runners/createProjectInProcess.js';
+export {
   captureAnalyticsEvent,
   configurePostHogRuntime,
   captureDesktopAppFirstStarted,

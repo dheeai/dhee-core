@@ -82,6 +82,54 @@ function extractText(content: unknown): string {
     .join('');
 }
 
+function firstPositiveIndex(values: number[]): number {
+  const positive = values.filter((value) => value >= 0);
+  return positive.length > 0 ? Math.min(...positive) : -1;
+}
+
+function sanitizeLegacyWizardKickoff(text: string): string | null {
+  if (!text.startsWith('Create the dhee project "')) return null;
+
+  const storyMarker = '\nStory:\n';
+  const storyStart = text.indexOf(storyMarker);
+  if (storyStart < 0) return null;
+
+  const afterStory = text.slice(storyStart + storyMarker.length);
+  const storyEnd = firstPositiveIndex([
+    afterStory.indexOf('\n\nPass these copied project-local reference images'),
+    afterStory.indexOf('\n\nThen start the pipeline.'),
+  ]);
+  const story =
+    (storyEnd >= 0 ? afterStory.slice(0, storyEnd) : afterStory).trim();
+  if (!story) return null;
+
+  const names = Array.from(afterStory.matchAll(/"name"\s*:\s*"([^"]+)"/g))
+    .map((match) => match[1])
+    .filter((name): name is string => Boolean(name));
+
+  return [
+    story,
+    names.length > 0 ? `Attached: ${Array.from(new Set(names)).join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function shouldHideInternalUserTask(text: string): boolean {
+  return (
+    /^Run the pipeline for the current project to completion\./.test(text) ||
+    /^Continue running the dhee pipeline for project=/.test(text)
+  );
+}
+
+function sanitizeUserHistoryText(text: string): string | null {
+  if (text.startsWith('[SYSTEM EVENT]')) return null;
+  const stripped = text.replace(/^\(Active project:[^)]*\)\s*/, '').trim();
+  if (!stripped) return null;
+  if (shouldHideInternalUserTask(stripped)) return null;
+  return sanitizeLegacyWizardKickoff(stripped) ?? stripped;
+}
+
 function buildHistoryFromEntries(entries: SessionEntry[]): HistoryData {
   const messages: HistoryChatMessage[] = [];
   const toolCalls: HistoryToolCall[] = [];
@@ -143,12 +191,10 @@ function buildHistoryFromEntries(entries: SessionEntry[]): HistoryData {
     if (msg.role === 'user') {
       const um = msg as UserMessage;
       const text = extractText(um.content);
-      // Skip the synthetic "[SYSTEM EVENT]" supervisor prompts and the
-      // injected "Active project: …" announcement preface — those are
-      // internal plumbing, not user-typed messages.
-      if (!text) continue;
-      if (text.startsWith('[SYSTEM EVENT]')) continue;
-      const stripped = text.replace(/^\(Active project:[^)]*\)\s*/, '').trim();
+      // Skip synthetic supervisor/control prompts and display-scrub
+      // legacy setup kickoffs so chat history reflects user prompts,
+      // not internal tool-routing metadata.
+      const stripped = sanitizeUserHistoryText(text);
       if (!stripped) continue;
       messages.push({
         id: `user-${entry.id}`,

@@ -293,4 +293,80 @@ describe('buildHistoryFromFile', () => {
     expect(out.messages).toHaveLength(1);
     expect(out.messages[0].content).toBe('tell me about this');
   });
+
+  it('scrubs legacy wizard kickoff prompts into user-visible story text', async () => {
+    const file = join(tempRoot, 't5.jsonl');
+    const t = '2026-05-08T10:00:00.000Z';
+    writeFileSync(
+      file,
+      jsonl(
+        { type: 'session', version: 3, id: 's', timestamp: t, cwd: tempRoot },
+        {
+          type: 'message',
+          id: 'e1',
+          parentId: null,
+          timestamp: t,
+          message: {
+            role: 'user',
+            content: [
+              'Create the dhee project "test" with these settings:',
+              '- Template: narrative',
+              '- Style: cinematic_realism',
+              '- Duration: 60 seconds',
+              '- Folder: /Users/me/Downloads/test (pass as existingDir)',
+              '',
+              'Story:',
+              'A boy playing football',
+              '',
+              'Pass these copied project-local reference images exactly as the dhee_new referenceImages parameter, not characterReferenceImages:',
+              '[',
+              '  {',
+              '    "name": "boy.png",',
+              '    "relativePath": "assets/uploads/characters/boy.png",',
+              '    "sourcePath": "/Users/me/Downloads/boy.png"',
+              '  }',
+              ']',
+              '',
+              'Then start the pipeline.',
+            ].join('\n'),
+            timestamp: 1,
+          },
+        },
+      ),
+      'utf8',
+    );
+
+    const out = buildHistoryFromFile(file);
+    expect(out.messages).toHaveLength(1);
+    expect(out.messages[0].content).toBe(
+      'A boy playing football\n\nAttached: boy.png',
+    );
+  });
+
+  it('hides app-owned setup control tasks from hydrated chat history', async () => {
+    const file = join(tempRoot, 't6.jsonl');
+    const t = '2026-05-08T10:00:00.000Z';
+    writeFileSync(
+      file,
+      jsonl(
+        { type: 'session', version: 3, id: 's', timestamp: t, cwd: tempRoot },
+        {
+          type: 'message',
+          id: 'e1',
+          parentId: null,
+          timestamp: t,
+          message: {
+            role: 'user',
+            content:
+              'Run the pipeline for the current project to completion. Use dhee_run_to with no stage so it runs to the end. Stream progress as nodes finish.',
+            timestamp: 1,
+          },
+        },
+      ),
+      'utf8',
+    );
+
+    const out = buildHistoryFromFile(file);
+    expect(out.messages).toEqual([]);
+  });
 });
