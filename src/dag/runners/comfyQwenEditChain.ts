@@ -120,7 +120,33 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   // ── Load workflow ──
   const wfPath = resolve(ctx.bundleDir, cfg.workflowPath);
   if (!existsSync(wfPath)) return { ok: false, error: `comfy.qwen_edit_chain: workflow not found at ${wfPath}` };
-  const workflow = JSON.parse(readFileSync(wfPath, 'utf-8')) as Record<string, { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } }>;
+  let workflow = JSON.parse(readFileSync(wfPath, 'utf-8')) as Record<string, { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } }>;
+
+  // ── Apply per-endpoint workflow aliases (model-file rename +
+  //    class_type swap for GGUF/quant variants). The user's local
+  //    Comfy may not have the exact filenames the bundle's workflow
+  //    expects; the agent's dhee_apply_workflow_aliases tool writes
+  //    a per-endpoint mapping. Reading + applying here keeps the
+  //    bundle's canonical workflow untouched.
+  try {
+    const { readAliases, applyAliases } = await import('../workflowAliases.js');
+    const aliasesDir = process.env['DHEE_WORKFLOW_ALIASES_DIR']
+      || resolve(process.env['HOME'] ?? '', '.dhee', 'workflow-aliases');
+    const aliases = readAliases(aliasesDir, baseUrl ?? 'unknown');
+    if ((aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0)
+        || (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0)) {
+      workflow = applyAliases(workflow as never, {
+        workflowKey: cfg.workflowPath,
+        aliases,
+      }) as never;
+      ctx.log(`comfy.qwen_edit_chain: applied aliases for endpoint=${baseUrl} workflow=${cfg.workflowPath}`);
+    }
+  } catch (e) {
+    // Non-fatal — aliases are an optional optimization. If the store
+    // is malformed or unreadable, fall through to the canonical
+    // workflow + let Comfy report the model-not-found.
+    ctx.log(`comfy.qwen_edit_chain: alias load skipped (${(e as Error).message})`);
+  }
 
   // ── Upload base + character refs (up to 2 extras for TextEncodeQwenImageEditPlus image2/image3) ──
   mkdirSync(dirname(outputAbs), { recursive: true });

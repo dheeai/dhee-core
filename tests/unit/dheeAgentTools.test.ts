@@ -520,6 +520,8 @@ describe('DHEE_TOOL_NAMES', () => {
       'dhee_get_status',
       'dhee_regenerate_node',
       'dhee_critique_node',
+      'dhee_check_workflow',
+      'dhee_apply_workflow_aliases',
       'dhee_read_artifact',
       'dhee_show_node_output',
       'dhee_show_file',

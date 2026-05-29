@@ -14,6 +14,8 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 
+import { dheeApplyWorkflowAliasesTool, makeApplyWorkflowAliasesTool } from './dheeApplyWorkflowAliases.js';
+import { dheeCheckWorkflowTool, makeCheckWorkflowTool } from './dheeCheckWorkflow.js';
 import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProject.js';
 import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
 import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
@@ -29,12 +31,16 @@ export const DHEE_TOOL_NAMES = [
   'dhee_get_status',
   'dhee_regenerate_node',
   'dhee_critique_node',
+  'dhee_check_workflow',
+  'dhee_apply_workflow_aliases',
   'dhee_read_artifact',
   'dhee_show_node_output',
   'dhee_show_file',
 ] as const;
 
 export {
+  dheeApplyWorkflowAliasesTool,
+  dheeCheckWorkflowTool,
   dheeCreateProjectTool,
   dheeCritiqueNodeTool,
   dheeGetStatusTool,
@@ -43,6 +49,8 @@ export {
   dheeRunBundleTool,
   dheeShowFileTool,
   dheeShowNodeOutputTool,
+  makeApplyWorkflowAliasesTool,
+  makeCheckWorkflowTool,
   makeCreateProjectTool,
   makeCritiqueNodeTool,
   makeGetStatusTool,
@@ -63,6 +71,8 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);
   pi.registerTool(dheeCritiqueNodeTool);
+  pi.registerTool(dheeCheckWorkflowTool);
+  pi.registerTool(dheeApplyWorkflowAliasesTool);
   pi.registerTool(dheeReadArtifactTool);
   pi.registerTool(dheeShowNodeOutputTool);
   pi.registerTool(dheeShowFileTool);

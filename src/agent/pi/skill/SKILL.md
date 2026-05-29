@@ -131,6 +131,61 @@ below so project state stays consistent.
   tokens, broken composition, identity drift, ambiguous instructions.
   Don't write the new prompt yourself — describe what's wrong, and the
   bundle's tuned generator will fix it.
+- `dhee_check_workflow(projectDir, workflowPath, endpoint)` — Comfy
+  workflows ship with specific model filenames the bundle author had
+  installed. A different user's Comfy may have those models under
+  different names (filename quirks: `qwen.safetensors` vs
+  `Qwen-Image-Edit-2511-FP8_e4m3fn.safetensors`) or only have a
+  quantized variant via a different loader class (`UnetLoaderGGUF`
+  instead of `UNETLoader`). This tool returns:
+    - `workflow_refs[]` — every model the workflow asks for
+    - `missing_refs[]` — refs not available on the target Comfy
+    - `available_by_class` — every `<class>.<field>` the user's
+      Comfy exposes (includes `UnetLoaderGGUF.unet_name`,
+      `CLIPLoaderGGUF.clip_name`, etc. so you can see ALL options)
+
+  When to call: any time a `dhee_run_bundle` or `dhee_regenerate_node`
+  fails with a "Value not in list" / "prompt_outputs_failed_validation"
+  / "model not found" error. Also proactively for new projects against
+  a user's local Comfy you haven't run this workflow on before.
+
+- `dhee_apply_workflow_aliases(endpoint, name_aliases?, class_swaps?)`
+  — once you've decided how to map missing refs to available models,
+  persist that decision. Two kinds of remap:
+
+    - **`name_aliases`**: `{ "<bundle-canonical>": "<user-local>" }`.
+      For same-class same-quantization-or-equivalent variants (e.g.
+      bf16 → fp8 of the same logical model).
+    - **`class_swaps`**: `[{ workflowKey, nodeId, newClass, field }]`.
+      For when the workflow's class doesn't have the model but a
+      DIFFERENT class does (e.g. `.safetensors` in `UNETLoader` →
+      `.gguf` in `UnetLoaderGGUF`). The tool validates `newClass`
+      actually exists on the user's Comfy AND offers the same field
+      name before persisting.
+
+  How to use the agent's intelligence here:
+    1. Call `dhee_check_workflow` first to get the raw data.
+    2. For each missing ref, look at `available_by_class` and decide:
+       - **Unambiguous same-class match** (only one available model
+         clearly is the same logical model, possibly with a different
+         quantization): auto-apply as a `name_alias`. Tell the user
+         what you mapped + why.
+       - **Multiple plausible candidates**: ASK the user — list them
+         and explain the trade-off (e.g. "bf16 highest quality / fp8
+         smaller VRAM").
+       - **No same-class match, but cross-class equivalent exists**
+         (e.g. you see the GGUF version in `UnetLoaderGGUF`): ASK
+         before doing a class swap — it's a structural change. Show
+         the equivalence ("you don't have any safetensors UNET for
+         qwen, but you do have qwen-Q4_K_M.gguf via UnetLoaderGGUF —
+         the GGUF loader works for the same model. Use that?").
+       - **No match anywhere**: tell the user the model is missing
+         + name it + where it would go in `ComfyUI/models/<kind>/`.
+         If you know a download source, share it. Don't call apply.
+
+  The aliases persist per-endpoint. Next run on the same Comfy reuses
+  them. The bundle's canonical workflow stays untouched on disk.
+
 - `dhee_read_artifact(projectDir, nodeId, itemId?)` — read the file a
   node produced. Text inlined; binary returned as path + size.
 - `dhee_show_node_output(projectDir, nodeId, itemId?)` — display a
