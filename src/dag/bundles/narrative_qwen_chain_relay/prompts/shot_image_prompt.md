@@ -23,6 +23,7 @@ Available setting references:
 
 You output a JSON object with these fields:
 
+- `characters`: **array of character IDs** (max 2). List the characters who VISUALLY APPEAR in this shot's first frame, in order of prominence — primary subject first, secondary character second. Use the snake_case `id` from `characters_plan` verbatim (e.g. `"pawn_shop_owner"`, NOT `"the owner"` or `"Pawn Shop Owner"`). The runner uploads these images as Qwen Edit reference slots; slot 1 binds the model's cross-attention tightest, so the most-on-screen character belongs there. Empty array `[]` is fine for insert shots of objects with no character in frame. **Do not** include characters who are only mentioned but not visually present (e.g. a heard-off-screen yell).
 - `chosenBaseShotNumber`: **integer** OR **null**. Of the prior shots listed above, pick the ONE whose framing best supports the current shot's intended composition. Examples:
    - If shot 5 is a CU on a hand and shot 3 was the last medium two-shot of both characters, and the current shot needs a wide two-shot — pick **3**, not 5. The CU has too little scene context.
    - If the current shot is a continuation (e.g. dialogue between same two chars, slight reframe) — pick the most recent shot (highest shotNumber).

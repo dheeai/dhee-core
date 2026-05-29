@@ -74,6 +74,26 @@ describe('narrative_qwen_chain_relay bundle', () => {
     expect(schema.properties.distance.enum).toEqual(['close-up', 'medium shot', 'wide shot']);
   });
 
+  it('schema requires a `characters` array (BUG-024 proper fix: structured ref declaration)', () => {
+    const schema = JSON.parse(readFileSync(join(BUNDLE_DIR, 'schemas/shot_image_prompt.schema.json'), 'utf-8'));
+    expect(schema.required).toContain('characters');
+    expect(schema.properties.characters.type).toBe('array');
+    expect(schema.properties.characters.items.type).toBe('string');
+    // Qwen Edit Multi-Angle takes max 2 character ref slots.
+    expect(schema.properties.characters.maxItems).toBe(2);
+  });
+
+  it('prompt template instructs the LLM to emit `characters` (snake_case ids, primary subject first)', () => {
+    const tmpl = readFileSync(join(BUNDLE_DIR, 'prompts/shot_image_prompt.md'), 'utf-8');
+    // Must reference the field name + the snake_case requirement so
+    // the LLM doesn't emit "Pawn Shop Owner" or "the owner".
+    expect(tmpl).toMatch(/`characters`/);
+    expect(tmpl).toMatch(/snake_case/i);
+    // Must communicate the primary-subject-first ordering since slot 1
+    // binds Qwen's cross-attention tightest.
+    expect(tmpl).toMatch(/primary subject first/i);
+  });
+
   it('comfy.qwen_edit_chain runner is registered in the global registry', () => {
     const reg = getGlobalRegistry();
     const r = reg.get('comfy.qwen_edit_chain');

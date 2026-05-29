@@ -27,64 +27,6 @@ import { dirname, resolve } from 'node:path';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 
-/**
- * Pick up to 2 character ref IDs that the prompt is talking about
- * (Qwen Edit Multi-Angle takes max 2 extras). Anchors on:
- *   1. Exact id in prompt ('ruby' in '<sks> Ruby raises the gun')
- *   2. Id-with-spaces in prompt ('pawn shop owner' → pawn_shop_owner)
- *   3. Last id-token in prompt IF it's >=5 chars ('owner' →
- *      pawn_shop_owner; rejects short generic tokens like 'red' to
- *      avoid spurious matches).
- *
- * Preserves order-of-mention so the primary subject (typically the
- * first named character) lands in Qwen's first ref slot.
- *
- * Falls back to alphabetical char IDs if zero mentions found, so the
- * workflow's 2 LoadImage slots always have valid files.
- *
- * Exported for unit testing (tests/dag/runners/qwenCharacterRefPick.test.ts).
- */
-export function pickCharacterRefs(fullPrompt: string, charIds: string[]): string[] {
-  const promptLower = fullPrompt.toLowerCase();
-
-  // Build candidate keys per character id, longest first so 'pawn shop owner'
-  // matches before falling through to 'owner' alone.
-  type Candidate = { id: string; key: string };
-  const candidates: Candidate[] = [];
-  for (const id of charIds) {
-    const idLower = id.toLowerCase();
-    candidates.push({ id, key: idLower });
-    const spaced = idLower.replace(/_/g, ' ');
-    if (spaced !== idLower) candidates.push({ id, key: spaced });
-    const tokens = idLower.split('_');
-    const last = tokens[tokens.length - 1];
-    if (last && last.length >= 5 && tokens.length > 1) {
-      candidates.push({ id, key: last });
-    }
-  }
-
-  // Find earliest occurrence in the prompt for each id (preserves
-  // order-of-mention). For each id, the earliest index across any of
-  // its candidate keys wins.
-  const earliestById = new Map<string, number>();
-  for (const { id, key } of candidates) {
-    const idx = promptLower.indexOf(key);
-    if (idx === -1) continue;
-    const prev = earliestById.get(id);
-    if (prev === undefined || idx < prev) earliestById.set(id, idx);
-  }
-
-  if (earliestById.size === 0) {
-    // No mentions — fall back to alphabetical, cap at 2.
-    return [...charIds].sort().slice(0, 2);
-  }
-
-  return [...earliestById.entries()]
-    .sort((a, b) => a[1] - b[1])
-    .slice(0, 2)
-    .map(([id]) => id);
-}
-
 interface PriorShot { shotNumber: number; itemId?: string; outputAbs: string }
 interface ShotPromptJSON {
   chosenBaseShotNumber?: number;
@@ -92,6 +34,14 @@ interface ShotPromptJSON {
   elevation: string;
   distance: string;
   deltaText: string;
+  /**
+   * Character IDs (from characters_plan) visually present in this shot,
+   * primary subject first. Max 2 (Qwen Edit Multi-Angle constraint).
+   * The LLM emits this as part of the structured output (see
+   * shot_image_prompt.schema.json). The runner uses this list directly
+   * for Qwen's reference slots — no inference from prose.
+   */
+  characters: string[];
 }
 
 interface ChainConfig {
@@ -214,14 +164,33 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   const upBase = await client.uploadImage(baseImagePath, 'input', true);
   ctx.log(`  base → ${upBase.name}`);
 
-  // Pick up to 2 character refs (prefer characters referenced in the deltaText, fallback to alphabetic).
-  const charIds = Object.keys(charMap);
-  const refOrder = pickCharacterRefs(fullPrompt, charIds);
+  // Character refs come straight from the LLM's structured output —
+  // see shot_image_prompt.schema.json `characters` field. No
+  // string-matching, no inference: the LLM declared who is in this
+  // shot, the runner just uploads those refs in declared order
+  // (primary subject = slot 1).
+  const declaredChars = Array.isArray(promptJSON.characters) ? promptJSON.characters : null;
+  if (declaredChars === null) {
+    return {
+      ok: false,
+      error: `comfy.qwen_edit_chain: prompt JSON missing 'characters' field. Re-run shot_image_prompt with the current schema (characters: array of character ids).`,
+    };
+  }
   const upRefs: string[] = [];
-  for (const cid of refOrder) {
-    const u = await client.uploadImage(charMap[cid]!, 'input', true);
+  for (const cid of declaredChars.slice(0, 2)) {
+    const refPath = charMap[cid];
+    if (!refPath) {
+      return {
+        ok: false,
+        error: `comfy.qwen_edit_chain: prompt declared character '${cid}' but no reference image is available (charMap keys: ${Object.keys(charMap).join(', ')}). Verify characters_plan and the LLM's emitted character id.`,
+      };
+    }
+    const u = await client.uploadImage(refPath, 'input', true);
     upRefs.push(u.name);
     ctx.log(`  ref ${cid} → ${u.name}`);
+  }
+  if (upRefs.length === 0) {
+    ctx.log(`  (no character refs declared — insert/object shot; base shot provides framing only)`);
   }
 
   // ── Patch workflow ──

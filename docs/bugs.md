@@ -315,7 +315,7 @@ prompted the migration are documented in the commit history of the
 ---
 
 ### BUG-024 — comfy.qwen_edit_chain picks wrong character refs when prompt uses natural names instead of snake_case IDs
-- **Status:** fixed
+- **Status:** fixed (proper schema-first fix; the earlier `pickCharacterRefs` heuristic patch was retired)
 - **Discovered:** 2026-05-29
 - **Fixed:** 2026-05-29
 - **Reporter:** ganaraj + claude (post-Qwen-quality review on Ruby V4 refined)
@@ -325,9 +325,11 @@ prompted the migration are documented in the commit history of the
   - `scene_2_shot_6` ("Ruby presses gun against the owner's forehead"): only ruby.png sent; gun-direction also drifted because Qwen had no anchor for the owner.
 - **Evidence:** `assets/images/shots/*_first.meta.json` sidecars record the exact `charRefs` list passed to Qwen. For all three shots above, the pawn_shop_owner reference image was NOT in the list — even though the prompt clearly referenced the character.
 - **Root cause:** `comfyQwenEditChain.ts:161` filtered character IDs by `fullPrompt.toLowerCase().includes(cid.toLowerCase())`. IDs are snake_case (`pawn_shop_owner`); prompts use natural language ("pawn shop owner", "the owner"). Zero matches → fallback to alphabetic charIds → `angel` + `lamborghini_driver` win the slots regardless of who's in the scene.
-- **Fix:** Extracted to `pickCharacterRefs(prompt, charIds)`. Three-tier match: (1) verbatim id, (2) id-with-spaces (`pawn shop owner` → pawn_shop_owner), (3) last id-token if ≥5 chars (`owner` → pawn_shop_owner; rejects short generic tokens like `red`). Preserves order-of-mention so the first named character lands in Qwen's first ref slot. Falls back to alphabetical only when zero mentions found.
-- **Test:** `tests/dag/runners/qwenCharacterRefPick.test.ts` — 7 cases including the real-world repro and a regression-guard against spurious short-token matches.
-- **Fix commit:** (pending — same as docs entry)
+- **First attempt (tactical, retired):** `pickCharacterRefs` — three-tier substring heuristic (verbatim id, id-with-spaces, last id-token ≥5 chars). Shipped in `b8f656a` to unblock the in-flight refined run, then immediately reviewed and judged the wrong abstraction: the runner shouldn't be reverse-engineering the LLM's intent from prose when the LLM is structured-output capable.
+- **Proper fix (schema-first):** Added `characters: string[]` (max 2, snake_case ids) to `schemas/shot_image_prompt.schema.json` as a required field. Updated `prompts/shot_image_prompt.md` so the LLM emits the list directly with the right semantics (primary subject first, only visually-present characters). Runner reads `promptJSON.characters` and uploads in declared order. No fallback — if `characters` is missing the runner fails loudly with a directive to re-run shot_image_prompt under the new schema. `pickCharacterRefs` deleted along with its tests. Matches the legacy (pre-bundle) projects' explicit-references design (Ruby V3 had `references: [{ refId, type, imageNumber }]` per shot — the new bundle had simply dropped it; this restores the principle).
+- **Test:** `tests/dag/narrativeQwenChainBundle.test.ts` — asserts schema requires `characters`, items are strings, maxItems is 2, and the prompt template names the field + the snake_case + primary-subject-first conventions.
+- **Fix commits:** `b8f656a` (heuristic; retired), `<this commit>` (schema-first; proper)
+- **Migration:** existing shot_image_prompt JSONs that predate this schema are missing the field and will fail at runner-time with a clear error message. Re-LLM via `dhee_critique_node` or by deleting the prompt JSON + walking the bundle. There's no silent fallback — the design intent is that the LLM declares its cast.
 
 ---
 
