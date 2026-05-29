@@ -884,6 +884,17 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
 
   // Run in topo order.
   let stopAtReached = false;
+  // BUG-023: track which nodes had their runner actually invoked in
+  // this walk. The cache-skip below (resume short-circuit) must be
+  // bypassed for any downstream of these — even if its walkState
+  // entry says completed + a stale output file is at the expected
+  // path, an upstream change means the cached output no longer
+  // reflects the inputs.
+  //
+  // Granularity: bare node id (over-approximation; see BUG-023).
+  // Per-item granularity would respect inputs[].scope='matching'
+  // so siblings don't unnecessarily re-render. Tracked as a TODO.
+  const reRunInThisWalk = new Set<string>();
   for (const node of ordered) {
     if (stopAtReached) break;
 
@@ -943,7 +954,14 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
       // short-circuit. Skipping here would silently turn a redo
       // request into a no-op.
       const explicitlyRunning = cascadeSet !== null && cascadeSet.has(node.id);
-      if (state && !explicitlyRunning) {
+      // BUG-023: bypass cache-skip when any upstream node was
+      // re-invoked in this walk. The cached output file at outputPath
+      // no longer reflects the inputs (upstream just changed), so
+      // treating it as a cache hit silently bakes stale upstream
+      // into the downstream artifact (real-world: shot_image
+      // skipped when shot_image_prompt was re-run via critique).
+      const upstreamReRun = node.inputs.some((i) => reRunInThisWalk.has(i.from));
+      if (state && !explicitlyRunning && !upstreamReRun) {
         const prior = state.nodes[stateKey];
         if (prior && prior.status === 'completed' && prior.outputPath) {
           const priorAbs = resolve(opts.projectDir, prior.outputPath);
@@ -1154,6 +1172,10 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
         };
         persistState();
       }
+      // BUG-023: record that this node had its runner invoked in
+      // this walk. Downstream cache-skip will see this and force a
+      // re-render even if a stale output sits at the outputPath.
+      reRunInThisWalk.add(node.id);
       log(`✓ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} → ${result.outputPath}`);
     }
 
