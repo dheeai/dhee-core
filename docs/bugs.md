@@ -287,3 +287,48 @@ prompted the migration are documented in the commit history of the
     - delete dheeCoreManager's ConversationManager facade (BUG-016 proper fix)
 - **Scope estimate:** 4–6 Claude-Code days for v1 (inspection only, no editing); +2–3 days for regenerate/status overlays; +2–3 days for Timeline modal integration. Each phase ships incrementally on `feat/dag-bundles`.
 - **Fix commit:** (pending).
+
+---
+
+### BUG-021 — Walker with `runOnly: [downstream-node]` doesn't hydrate upstream completed instances
+- **Status:** fixed
+- **Discovered:** 2026-05-29
+- **Reporter:** claude (during dhee_critique_node live verification)
+- **Symptom:** Re-dispatching the bundle with `runProjectViaBundle({ runOnly: ['shot_image_prompt'] })` after invalidating one item (`shot_image_prompt:scene_1_shot_3`) fails the FIRST executed instance with:
+  ```
+  llm.generate: prompt template references variable(s) that were not provided:
+    scenes_plan, item_id, shot_image_prompt, world_style, characters_plan, settings_plan
+  ```
+  `item_id` being on the missing list is the smoking gun — the runner sees `ctx.itemId === undefined`. The walker dispatched the collection node as a single stage-level call rather than fanning out per-item.
+- **Evidence:** Live run on Ruby V4 via `dhee_critique_node(shot_image_prompt, scene_1_shot_3, ...)` → applied → walker fired → first node returned the error above. `dhee_get_status` afterward showed `shot_image_prompt` in failed nodes; OTHER items of that collection (which the walker should have iterated) were never attempted.
+- **Suspected root cause:** `runOnly` filtering happens at the node-id level inside the walker's main loop, but the collection-materialization step (which expands the bare node into per-item instances) may be gated upstream of that, so when only the bare id is in the runOnly set, no items get materialized. Walker then falls through to a stage-mode invocation with empty inputs.
+- **Manifestations to test:**
+  - `runOnly: [collection-node-id]` with NO items in walkState → walker should still iterate (find items via the bundle's itemSource + project state).
+  - `runOnly: [collection-node-id]` with SOME items completed → walker should iterate ALL items, re-running invalidated ones and skipping completed ones via cache.
+  - `runOnly: [collection-node-id:itemId]` (composite key) → should run JUST that one item.
+  - `runOnly: [stage-node-id]` → still works (existing behavior, regression-guard it).
+  - Cascade behavior: downstream nodes after a `runOnly` collection still get their inputs from the completed items.
+- **Test:** `tests/dag/walkerRunOnlyUpstreamInputs.test.ts > BUG-021 — runOnly hydrates upstream completed instances for downstream inputs`
+- **Fix:** When `runOnly` excludes a node from the run cascade, the walker now still walks that node's instances and populates `outputAbs` / `outputRel` / `status` from walkState before `continue`ing past the dispatch step. Downstream `buildRunnerConfig` then sees the hydrated outputs in `instancesById` and feeds them into `ctx.inputs` normally.
+- **Fix commit:** (pending; same commit as BUG-022 investigation entry)
+
+---
+
+### BUG-022 — Walker walkState-write wipes sibling fields from project.json
+- **Status:** investigating
+- **Discovered:** 2026-05-29
+- **Reporter:** claude (during dhee_critique_node live verification)
+- **Symptom:** `dhee_critique_node` stamps `pendingCritiques[<key>]` into `project.json`, then invalidates the target node, then dispatches the bundle. After the dispatch returns, `pendingCritiques` is GONE from `project.json` — even though the runner never reached its clear-on-success step (BUG-021 prevented the LLM call from happening, so the write block that clears the critique never ran).
+- **Evidence:**
+  - Before apply: `project.json` had `pendingCritiques: { "shot_image_prompt:scene_1_shot_3": "<critique text>" }` (verified via `jq` post-invalidate, pre-dispatch).
+  - After apply + walker failure: `jq '.pendingCritiques' project.json` returns `null`. The critique was never consumed by `llm.generate` (the runner failed at template substitution, BEFORE the read-critique block).
+- **Suspected root cause:** The walker reads `project.json`, mutates only the `walkState` subtree, and writes a reconstructed object back — using a known-field allowlist or `JSON.stringify(knownObject, null, 2)` rather than a deep merge. Any field outside that allowlist (`pendingCritiques`, future sibling state) gets wiped on the first walkState update.
+- **Manifestations to test:**
+  - Add arbitrary unrecognized field `project.json` (e.g. `_userNotes: "..."`); kick the walker; verify the field survives.
+  - Critique apply → walker runs → critique key persists IF the runner failed before reaching `pendingCritiques` consumption.
+  - Future sibling stores (e.g. `runnerOverrides`, `branchTags`) need to be designed AROUND this bug OR the walker write needs to deep-merge.
+- **Investigation status (2026-05-29):** code review of `saveWalkState`, `invalidateNodes`, and `runProjectViaBundle` shows all three use shallow-merge writes that already preserve sibling fields. The observed wipe may have been a timing artifact (test repro happened across multiple sessions while bundle-dispatch failed midway). Pending a second repro under controlled conditions. If the next dhee_critique_node run with the BUG-021 fix in place still wipes `pendingCritiques`, return here with a precise repro.
+- **Test:** (pending second repro)
+- **Fix commit:** (pending)
+
+---

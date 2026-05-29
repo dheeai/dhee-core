@@ -877,9 +877,30 @@ export async function walkBundle(opts: WalkerOptions): Promise<{
 
     const insts = instancesById.get(node.id) ?? [];
 
-    // runOnly filter — skip nodes not in the cascade.
+    // runOnly filter — skip the dispatch for nodes outside the
+    // cascade. BUT we still hydrate their completed instances from
+    // walkState so downstream runners can read these nodes' outputs
+    // as inputs. Without this, a critique/regen targeting (say)
+    // shot_image_prompt with runOnly: ['shot_image_prompt'] would
+    // see empty `characters_plan` / `settings_plan` / `story` inputs
+    // — even though those upstream artifacts are on disk and the
+    // walkState says completed. (BUG-021)
     if (cascadeSet !== null && !cascadeSet.has(node.id)) {
-      // Mark instances as skipped (preserve any prior state from walkState).
+      if (state) {
+        for (const inst of insts) {
+          const stateKey = inst.itemId ? `${node.id}:${inst.itemId}` : node.id;
+          const prior = state.nodes[stateKey];
+          if (prior && prior.status === 'completed' && prior.outputPath) {
+            const priorAbs = resolve(opts.projectDir, prior.outputPath);
+            if (existsSync(priorAbs)) {
+              inst.status = 'completed';
+              inst.outputRel = prior.outputPath;
+              inst.outputAbs = priorAbs;
+              if (prior.metadata) inst.metadata = prior.metadata;
+            }
+          }
+        }
+      }
       continue;
     }
 
