@@ -60,6 +60,12 @@ const Params = Type.Object({
         'When true, apply the critique (invalidates + re-runs the cascade). When false or omitted, returns a preview of which nodes would be affected. ALWAYS preview first.',
     }),
   ),
+  applyOnly: Type.Optional(
+    Type.Boolean({
+      description:
+        'BATCH MODE. When true, stamps the critique + invalidates the target but does NOT dispatch the bundle. Use when you have many critiques to apply in a row — each call returns in milliseconds instead of waiting on the full cascade. After the last batched critique, call dhee_run_bundle ONCE to process every pending critique in a single walker pass. Ignored if confirm is not also true.',
+    }),
+  ),
 });
 
 export interface CritiqueNodeDeps {
@@ -219,6 +225,7 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
         nodeId: params.nodeId,
         ...(params.itemId ? { itemId: params.itemId } : {}),
         critique: params.critique,
+        ...(params.applyOnly ? { applyOnly: true } : {}),
         ...(signal ? { signal } : {}),
         ...(deps.runProjectViaBundle ? { runProjectViaBundle: deps.runProjectViaBundle as never } : {}),
       });
@@ -230,15 +237,16 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
           true,
         );
       }
-      return textResult(
-        `Critique applied to '${target}'. Pending critique stamped in project.json; node invalidated; bundle re-dispatched with runOnly: ['${params.nodeId}']. Downstream nodes will cascade-rerun via the walker.`,
-        {
-          applied: true,
-          affectedNodes: impact.affectedNodes,
-          affectedNonTextArtifacts: impact.affectedNonTextArtifacts,
-          target,
-        },
-      );
+      const message = params.applyOnly
+        ? `Critique batched for '${target}'. pendingCritique stamped + node invalidated; dispatch SKIPPED (applyOnly). Call dhee_run_bundle when all batched critiques are queued.`
+        : `Critique applied to '${target}'. Pending critique stamped in project.json; node invalidated; bundle re-dispatched with runOnly: ['${params.nodeId}']. Downstream nodes will cascade-rerun via the walker.`;
+      return textResult(message, {
+        applied: true,
+        applyOnly: params.applyOnly === true,
+        affectedNodes: impact.affectedNodes,
+        affectedNonTextArtifacts: impact.affectedNonTextArtifacts,
+        target,
+      });
     },
   });
 }

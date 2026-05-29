@@ -225,4 +225,96 @@ describe('runCritique', () => {
     expect(result.ok).toBe(true);
     expect(result.runResult).toBe(dispatchResult);
   });
+
+  describe('applyOnly mode', () => {
+    it('applyOnly=true: stamps + invalidates but skips dispatch entirely', async () => {
+      const dir = makeProjectDir({
+        nodes: {
+          'shot_image_prompt:scene_1_shot_4': {
+            status: 'completed',
+            outputPath: 'prompts/shot_image/scene_1_shot_4.json',
+          },
+        },
+      });
+      cleanupDirs.push(dir);
+      const dispatch = vi.fn();
+      const result = await runCritique({
+        projectDir: dir,
+        bundle: makeBundle(),
+        nodeId: 'shot_image_prompt',
+        itemId: 'scene_1_shot_4',
+        critique: 'freeze on the kiss',
+        applyOnly: true,
+        runProjectViaBundle: dispatch as never,
+      });
+      expect(result.ok).toBe(true);
+      expect(dispatch).not.toHaveBeenCalled();
+
+      const project = readProject(dir);
+      expect((project['pendingCritiques'] as Record<string, string>)[
+        'shot_image_prompt:scene_1_shot_4'
+      ]).toBe('freeze on the kiss');
+      const ws = project['walkState'] as {
+        nodes: Record<string, unknown>;
+        lastInvalidatedIds?: string[];
+      };
+      expect(ws.nodes['shot_image_prompt:scene_1_shot_4']).toBeUndefined();
+      // lastInvalidatedIds is keyed by bare nodeId, not the item-qualified key.
+      expect(ws.lastInvalidatedIds).toContain('shot_image_prompt');
+    });
+
+    it('applyOnly=true: many critiques in a row accumulate pendingCritiques without dispatching', async () => {
+      const dir = makeProjectDir({
+        nodes: Object.fromEntries(
+          ['scene_1_shot_4', 'scene_1_shot_5', 'scene_1_shot_6'].map((id) => [
+            `shot_image_prompt:${id}`,
+            { status: 'completed', outputPath: `prompts/shot_image/${id}.json` },
+          ]),
+        ),
+      });
+      cleanupDirs.push(dir);
+      const dispatch = vi.fn();
+      for (const item of ['scene_1_shot_4', 'scene_1_shot_5', 'scene_1_shot_6']) {
+        await runCritique({
+          projectDir: dir,
+          bundle: makeBundle(),
+          nodeId: 'shot_image_prompt',
+          itemId: item,
+          critique: `critique for ${item}`,
+          applyOnly: true,
+          runProjectViaBundle: dispatch as never,
+        });
+      }
+      expect(dispatch).toHaveBeenCalledTimes(0);
+
+      const project = readProject(dir);
+      const pending = project['pendingCritiques'] as Record<string, string>;
+      expect(Object.keys(pending).sort()).toEqual([
+        'shot_image_prompt:scene_1_shot_4',
+        'shot_image_prompt:scene_1_shot_5',
+        'shot_image_prompt:scene_1_shot_6',
+      ]);
+      const ws = project['walkState'] as { nodes: Record<string, unknown> };
+      for (const item of ['scene_1_shot_4', 'scene_1_shot_5', 'scene_1_shot_6']) {
+        expect(ws.nodes[`shot_image_prompt:${item}`]).toBeUndefined();
+      }
+    });
+
+    it('applyOnly=false / omitted preserves dispatch (back-compat)', async () => {
+      const dir = makeProjectDir({
+        nodes: { characters_plan: { status: 'completed', outputPath: 'plans/characters_plan.json' } },
+      });
+      cleanupDirs.push(dir);
+      const dispatch = vi.fn(async () => ({ ok: true }) as never);
+      await runCritique({
+        projectDir: dir,
+        bundle: makeBundle(),
+        nodeId: 'characters_plan',
+        critique: 'fix it',
+        applyOnly: false,
+        runProjectViaBundle: dispatch as never,
+      });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    });
+  });
 });

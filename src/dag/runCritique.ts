@@ -35,6 +35,15 @@ export interface RunCritiqueOpts {
   /** Optional item id for collection nodes. */
   itemId?: string;
   critique: string;
+  /**
+   * When true: stamp pendingCritique + invalidate target, but DO NOT
+   * dispatch the bundle. Use when batching many critiques back-to-back
+   * (e.g. 22 broken shots at once) — calling code does ONE
+   * `runProjectViaBundle` at the end to process every stamped critique
+   * in a single walker pass. Default false preserves prior behavior
+   * (dispatch immediately, await cascade completion).
+   */
+  applyOnly?: boolean;
   /** Injectable for tests; defaults to the lazy-imported real runner. */
   runProjectViaBundle?: (opts: {
     projectDir: string;
@@ -100,8 +109,12 @@ export async function runCritique(opts: RunCritiqueOpts): Promise<RunCritiqueRes
   // applied for the next regen.
   if (inv.error) return { ok: false, error: inv.error };
 
-  // 5. Dispatch bundle with runOnly on the bare node id. Walker handles
-  //    item-level + downstream cascade.
+  // 5a. applyOnly: skip dispatch. Caller batches many critiques and
+  //     runs the bundle once at the end.
+  if (opts.applyOnly) return { ok: true };
+
+  // 5b. Dispatch bundle with runOnly on the bare node id. Walker handles
+  //     item-level + downstream cascade.
   const dispatch = opts.runProjectViaBundle ?? defaultDispatcher;
   try {
     const runResult = await dispatch({
