@@ -74,16 +74,26 @@ function textResult(text: string, details: Record<string, unknown> = {}, isError
   };
 }
 
+interface ProjectLoad {
+  bundle: DagBundle;
+  walkState?: {
+    nodes?: Record<string, { status?: string; outputPath?: string } | undefined>;
+  };
+}
+
 function loadProjectBundle(
   projectDir: string,
-): { ok: true; bundle: DagBundle } | { ok: false; error: string } {
+): { ok: true; load: ProjectLoad } | { ok: false; error: string } {
   const projectJsonPath = join(projectDir, 'project.json');
   if (!existsSync(projectJsonPath)) {
     return { ok: false, error: `project.json not found at ${projectJsonPath}` };
   }
-  let project: { bundleSource?: string };
+  let project: { bundleSource?: string; walkState?: ProjectLoad['walkState'] };
   try {
-    project = JSON.parse(readFileSync(projectJsonPath, 'utf-8')) as { bundleSource?: string };
+    project = JSON.parse(readFileSync(projectJsonPath, 'utf-8')) as {
+      bundleSource?: string;
+      walkState?: ProjectLoad['walkState'];
+    };
   } catch (err) {
     return { ok: false, error: `project.json malformed: ${(err as Error).message}` };
   }
@@ -96,7 +106,10 @@ function loadProjectBundle(
     const isDir = statSync(dirOrFile).isDirectory();
     const bundleJsonPath = isDir ? join(dirOrFile, 'bundle.json') : dirOrFile;
     const bundle = loadBundle(bundleJsonPath);
-    return { ok: true, bundle };
+    return {
+      ok: true,
+      load: { bundle, ...(project.walkState ? { walkState: project.walkState } : {}) },
+    };
   } catch (err) {
     if (err instanceof BundleSourceError) return { ok: false, error: err.message };
     return { ok: false, error: `bundle load failed: ${(err as Error).message}` };
@@ -108,23 +121,29 @@ function formatPreview(
   itemId: string | undefined,
   critique: string,
   affected: AffectedNode[],
+  affectedNonTextArtifacts: AffectedNode[],
 ): string {
   const target = itemId ? `${nodeId} (item: ${itemId})` : nodeId;
-  const imageOrVideo = affected.filter((a) => a.format === 'image' || a.format === 'video');
   const lines = [
     `Preview — critique on ${target}`,
     '',
     `Critique: ${critique}`,
     '',
-    `If applied, the following ${affected.length} node(s) will be invalidated + re-run:`,
+    `Full structural cascade — ${affected.length} node(s) the walker would visit:`,
     ...affected.map(
       (a) => `  - ${a.nodeId}  [runner: ${a.runner}, format: ${a.format}]`,
     ),
     '',
-    `Image/video impact: ${imageOrVideo.length} node(s).`,
-    imageOrVideo.length > 1
-      ? 'IMPORTANT: more than one image/video node will be rebuilt. Ask the user for explicit confirmation before applying.'
-      : 'Single image/video impact — agent may proceed to confirm=true without asking the user.',
+    `Real impact — non-text artifacts that have actually been generated and would be destroyed: ${affectedNonTextArtifacts.length}`,
+    ...(affectedNonTextArtifacts.length === 0
+      ? ['  (none — nothing downstream has rendered yet, or all downstream is text/json)']
+      : affectedNonTextArtifacts.map(
+          (a) => `  - ${a.nodeId}  [${a.format}, runner: ${a.runner}]`,
+        )),
+    '',
+    affectedNonTextArtifacts.length > 1
+      ? 'IMPORTANT: more than one already-rendered non-text artifact will be destroyed. Ask the user for explicit confirmation before applying.'
+      : 'At most one already-rendered non-text artifact will be affected — agent may proceed to confirm=true without asking the user.',
   ];
   return lines.join('\n');
 }
@@ -137,11 +156,11 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
       "Apply an editorial critique to an LLM-generated bundle node. The runner prepends the critique to the next regeneration as a 'fix the previous output' instruction; the walker cascades downstream automatically. Two-phase: call FIRST with confirm omitted to preview the cascade impact, then with confirm=true to apply. Only works on nodes with llm.* runners — walk upstream from broken images/videos to find the right prompt node.",
     parameters: Params,
     async execute(_id, params, signal) {
-      const load = loadProjectBundle(params.projectDir);
-      if (!load.ok) {
-        return textResult(`critique failed: ${load.error}`, {}, true);
+      const loadRes = loadProjectBundle(params.projectDir);
+      if (!loadRes.ok) {
+        return textResult(`critique failed: ${loadRes.error}`, {}, true);
       }
-      const bundle = load.bundle;
+      const { bundle, walkState } = loadRes.load;
 
       // Validate target node + runner before any side effects.
       const node = bundle.nodes.find((n) => n.id === params.nodeId);
@@ -157,27 +176,38 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
         );
       }
 
-      // Phase 1: preview.
+      // Phase 1: preview. Pass walkState so the impact view filters
+      // to non-text artifacts that have actually been generated.
+      // Confirmation gate keys off the walkState-aware count, NOT the
+      // structural count — text-only or never-rendered downstream
+      // shouldn't trigger a "stop and ask" since there's nothing to
+      // destroy.
       const impact = computeCascadeImpact({
         bundle,
         nodeId: params.nodeId,
         ...(params.itemId ? { itemId: params.itemId } : {}),
+        ...(walkState ? { walkState } : {}),
       });
       if (impact.error) {
         return textResult(`critique preview failed: ${impact.error}`, {}, true);
       }
-      const imageOrVideoCount = impact.affectedNodes.filter(
-        (a) => a.format === 'image' || a.format === 'video',
-      ).length;
+      const realImpactCount = impact.affectedNonTextArtifacts.length;
 
       if (!params.confirm) {
         return textResult(
-          formatPreview(params.nodeId, params.itemId, params.critique, impact.affectedNodes),
+          formatPreview(
+            params.nodeId,
+            params.itemId,
+            params.critique,
+            impact.affectedNodes,
+            impact.affectedNonTextArtifacts,
+          ),
           {
             preview: true,
             affectedNodes: impact.affectedNodes,
-            imageOrVideoCount,
-            confirmationRecommended: imageOrVideoCount > 1,
+            affectedNonTextArtifacts: impact.affectedNonTextArtifacts,
+            realImpactCount,
+            confirmationRecommended: realImpactCount > 1,
           },
         );
       }
@@ -202,7 +232,12 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
       }
       return textResult(
         `Critique applied to '${target}'. Pending critique stamped in project.json; node invalidated; bundle re-dispatched with runOnly: ['${params.nodeId}']. Downstream nodes will cascade-rerun via the walker.`,
-        { applied: true, affectedNodes: impact.affectedNodes, target },
+        {
+          applied: true,
+          affectedNodes: impact.affectedNodes,
+          affectedNonTextArtifacts: impact.affectedNonTextArtifacts,
+          target,
+        },
       );
     },
   });

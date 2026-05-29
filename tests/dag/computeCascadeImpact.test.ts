@@ -135,4 +135,101 @@ describe('computeCascadeImpact', () => {
     ).length;
     expect(imageOrVideoCount).toBe(3); // img1, img2, vid
   });
+
+  it('walkState-aware: drops text-format nodes from affectedNonTextArtifacts', () => {
+    const b = bundle(
+      n('prompt', { runner: 'llm.generate', format: 'json' }),
+      n('img', { runner: 'comfy.image', format: 'image', inputs: ['prompt'] }),
+    );
+    const r = computeCascadeImpact({
+      bundle: b,
+      nodeId: 'prompt',
+      walkState: { nodes: { prompt: { status: 'completed' }, img: { status: 'completed' } } },
+    });
+    // Structural view counts both:
+    expect(r.affectedNodes.map((a) => a.nodeId)).toEqual(['prompt', 'img']);
+    // walkState-aware view drops the json prompt; only the image counts.
+    expect(r.affectedNonTextArtifacts.map((a) => a.nodeId)).toEqual(['img']);
+  });
+
+  it('walkState-aware: drops downstream nodes that have never been generated', () => {
+    const b = bundle(
+      n('prompt', { runner: 'llm.generate', format: 'json' }),
+      n('img', { runner: 'comfy.image', format: 'image', inputs: ['prompt'] }),
+      n('vid', { runner: 'comfy.video', format: 'video', inputs: ['img'] }),
+      n('final', { runner: 'ffmpeg.concat', format: 'video', inputs: ['vid'] }),
+    );
+    // Image rendered; video + final never have. Critiquing the prompt
+    // would only destroy the image; the never-rendered video + final
+    // don't count.
+    const r = computeCascadeImpact({
+      bundle: b,
+      nodeId: 'prompt',
+      walkState: {
+        nodes: {
+          prompt: { status: 'completed' },
+          img: { status: 'completed' },
+          // vid and final absent — never generated.
+        },
+      },
+    });
+    expect(r.affectedNonTextArtifacts.map((a) => a.nodeId)).toEqual(['img']);
+  });
+
+  it('walkState-aware: counts collection nodes when ANY of their items are completed', () => {
+    const b = bundle(
+      n('prompt', { runner: 'llm.generate', format: 'json' }),
+      n('imgs', { runner: 'comfy.image', format: 'image', inputs: ['prompt'] }),
+    );
+    const r = computeCascadeImpact({
+      bundle: b,
+      nodeId: 'prompt',
+      walkState: {
+        nodes: {
+          prompt: { status: 'completed' },
+          'imgs:scene_1_shot_1': { status: 'completed' },
+          'imgs:scene_1_shot_2': { status: 'pending' },
+        },
+      },
+    });
+    // imgs has one completed item → counts.
+    expect(r.affectedNonTextArtifacts.map((a) => a.nodeId)).toEqual(['imgs']);
+  });
+
+  it('walkState-aware: failed entries DO NOT count (no artifact on disk to destroy)', () => {
+    const b = bundle(
+      n('prompt', { runner: 'llm.generate', format: 'json' }),
+      n('img', { runner: 'comfy.image', format: 'image', inputs: ['prompt'] }),
+    );
+    const r = computeCascadeImpact({
+      bundle: b,
+      nodeId: 'prompt',
+      walkState: { nodes: { prompt: { status: 'completed' }, img: { status: 'failed' } } },
+    });
+    // failed === artifact never written; the cascade has nothing to destroy here.
+    expect(r.affectedNonTextArtifacts).toEqual([]);
+  });
+
+  it('walkState-aware: pending-only downstream is dropped (no completed item yet)', () => {
+    const b = bundle(
+      n('prompt', { runner: 'llm.generate', format: 'json' }),
+      n('img', { runner: 'comfy.image', format: 'image', inputs: ['prompt'] }),
+    );
+    const r = computeCascadeImpact({
+      bundle: b,
+      nodeId: 'prompt',
+      walkState: { nodes: { prompt: { status: 'completed' }, img: { status: 'pending' } } },
+    });
+    expect(r.affectedNonTextArtifacts).toEqual([]);
+  });
+
+  it('without walkState: affectedNonTextArtifacts is empty (legacy path)', () => {
+    const b = bundle(
+      n('prompt', { runner: 'llm.generate', format: 'json' }),
+      n('img', { runner: 'comfy.image', format: 'image', inputs: ['prompt'] }),
+    );
+    const r = computeCascadeImpact({ bundle: b, nodeId: 'prompt' });
+    expect(r.affectedNodes.length).toBe(2);
+    expect(r.affectedNonTextArtifacts).toEqual([]);
+  });
 });

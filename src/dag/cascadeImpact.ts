@@ -25,6 +25,17 @@ export interface CascadeImpactOpts {
   nodeId: string;
   /** Reserved for future per-item cascade narrowing. Not used today. */
   itemId?: string;
+  /**
+   * project.json's walkState. When supplied, downstream nodes that
+   * have NEVER been generated (no completed walkState entries for
+   * any of their items) are dropped from `affectedNonTextArtifacts`
+   * — destroying an artifact that doesn't yet exist isn't a real
+   * impact. Optional: when omitted, the full structural cascade is
+   * counted (legacy callers).
+   */
+  walkState?: {
+    nodes?: Record<string, { status?: string; outputPath?: string } | undefined>;
+  };
 }
 
 export interface AffectedNode {
@@ -40,17 +51,42 @@ export interface CascadeImpactResult {
    * Every node that would be re-run if the target were invalidated +
    * critiqued. Includes the target itself as the first entry, in
    * topological BFS order. Empty when `error` is set.
+   *
+   * This is the FULL structural cascade — it counts text + non-text
+   * nodes and doesn't account for walkState. For the user-visible
+   * "what will actually be regenerated" impact, see
+   * `affectedNonTextArtifacts` below.
    */
   affectedNodes: AffectedNode[];
+  /**
+   * Subset of `affectedNodes` that produce non-text artifacts (image,
+   * video, audio) AND have at least one completed walkState entry
+   * (i.e. an artifact that would actually be destroyed and rebuilt).
+   *
+   * Confirmation gates should key off `affectedNonTextArtifacts.length`,
+   * not `affectedNodes.length`:
+   *   - text outputs (md/json/text) are derivable + cheap, not what
+   *     the user is anxious about losing.
+   *   - downstream nodes that have NEVER been generated have nothing
+   *     to "destroy" — invalidation on a non-existent artifact is a
+   *     no-op.
+   *
+   * Empty when walkState wasn't supplied (caller didn't ask for the
+   * walkState-aware view).
+   */
+  affectedNonTextArtifacts: AffectedNode[];
   /** Set when nodeId isn't in the bundle. */
   error?: string;
 }
 
+/** Set of output formats considered non-text (regen burns real work). */
+const NON_TEXT_FORMATS = new Set<AffectedNode['format']>(['image', 'video', 'audio']);
+
 export function computeCascadeImpact(opts: CascadeImpactOpts): CascadeImpactResult {
-  const { bundle, nodeId } = opts;
+  const { bundle, nodeId, walkState } = opts;
   const byId = new Map(bundle.nodes.map((n) => [n.id, n]));
   if (!byId.has(nodeId)) {
-    return { affectedNodes: [], error: `unknown node: ${nodeId}` };
+    return { affectedNodes: [], affectedNonTextArtifacts: [], error: `unknown node: ${nodeId}` };
   }
 
   // Build a forward adjacency list: for each node, the list of nodes
@@ -87,5 +123,34 @@ export function computeCascadeImpact(opts: CascadeImpactOpts): CascadeImpactResu
     };
   });
 
-  return { affectedNodes };
+  // walkState-aware "what would actually be destroyed" view.
+  // 1. Filter to non-text outputs (text artifacts are cheap derivatives,
+  //    not what the confirmation gate is protecting against).
+  // 2. Filter to nodes that have at least one COMPLETED entry in
+  //    walkState — a downstream collection that's never been
+  //    materialized has nothing to invalidate.
+  // 3. When walkState isn't supplied, return an empty list (caller
+  //    asked for the structural-only view; don't fabricate impact).
+  const affectedNonTextArtifacts: AffectedNode[] = (() => {
+    if (!walkState?.nodes) return [];
+    const nonText = affectedNodes.filter((a) => NON_TEXT_FORMATS.has(a.format));
+    return nonText.filter((a) => {
+      // The node has at least one completed artifact when any
+      // walkState entry whose key is either the bare nodeId or
+      // `nodeId:itemId` carries status === 'completed'.
+      //
+      // 'failed' does NOT count — a failed run wrote no artifact, so
+      // there's nothing to destroy on the next pass. Same for pending
+      // / missing entries.
+      for (const [key, entry] of Object.entries(walkState.nodes!)) {
+        if (!entry) continue;
+        const bare = key.includes(':') ? key.slice(0, key.indexOf(':')) : key;
+        if (bare !== a.nodeId) continue;
+        if (entry.status === 'completed') return true;
+      }
+      return false;
+    });
+  })();
+
+  return { affectedNodes, affectedNonTextArtifacts };
 }

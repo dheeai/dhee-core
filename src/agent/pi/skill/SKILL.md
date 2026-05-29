@@ -106,15 +106,24 @@ below so project state stays consistent.
   **Two-phase workflow — ALWAYS preview first.**
 
   1. Call `dhee_critique_node(...)` WITHOUT `confirm` to get a preview
-     of the cascade: which downstream nodes will be invalidated + re-run.
-  2. Look at the preview's `imageOrVideoCount`:
-     - If ≤ 1 image/video node will be rebuilt → call again with
-       `confirm: true` immediately. No need to ask the user.
-     - If > 1 image/video node will be rebuilt → STOP. Present the
-       diagnosis + plan + impact to the user in chat:
+     of the cascade.
+  2. Look at the preview's `realImpactCount` — the number of already-
+     rendered non-text artifacts (image / video / audio) that would be
+     destroyed and rebuilt. This count IGNORES:
+     - text outputs (md/json/text) — those are cheap derivatives
+     - nodes that have never been generated — there's nothing to lose
+
+     Decide based on this count, NOT the full structural cascade:
+     - If `realImpactCount` ≤ 1 → call again with `confirm: true`
+       immediately. No need to ask the user. The user said "fix this
+       shot" → at most one rendered shot image disappears, that's
+       what they asked for.
+     - If `realImpactCount` > 1 → STOP. Present the diagnosis + plan
+       + impact to the user in chat:
        - What was wrong with the broken artifact
        - Which node you propose to critique + the critique itself
-       - The list of nodes (and image/video count) the cascade will hit
+       - The list of already-rendered artifacts the cascade will
+         destroy (the preview gives you this verbatim)
        - Ask: "Proceed?" — wait for explicit consent.
      - Only after consent: call with `confirm: true`.
 
