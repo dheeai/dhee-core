@@ -714,12 +714,87 @@ function computeCascade(bundle: DagBundle, runOnly: string[]): Set<string> {
 }
 
 /** Walk the bundle and run every reachable node to completion. */
-export async function walkBundle(opts: WalkerOptions): Promise<{
+interface WalkResult {
   ok: boolean;
   goal?: { outputRel: string; outputAbs: string };
   error?: string;
   instances: NodeInstance[];
-}> {
+}
+
+/**
+ * Public entry — wraps `walkBundleOnce` with the review-loop. When the
+ * bundle declares `reviewLoopMax > 0`, the walker snapshots
+ * `pendingCritiques` keys at entry, runs the graph once, then checks
+ * if any NEW critique keys appeared (typical source: a `vlm.judge`
+ * runner that wrote `pendingCritiques[refineNode:itemId]` on a fail
+ * verdict). If yes and the iteration cap isn't hit, the walker
+ * re-walks — the freshly-invalidated upstream re-runs, BUG-023's
+ * cascade picks up the dependent re-renders, the review fires again,
+ * and the loop continues until pass-through (no new critiques) or cap.
+ *
+ * Default `reviewLoopMax = 0` preserves single-shot behavior.
+ */
+export async function walkBundle(opts: WalkerOptions): Promise<WalkResult> {
+  return walkBundleWithReviewLoop(opts, 0);
+}
+
+async function walkBundleWithReviewLoop(
+  opts: WalkerOptions,
+  iteration: number,
+): Promise<WalkResult> {
+  const log = opts.log ?? ((m: string) => console.log(m));
+  const projectJsonPath = resolve(opts.projectDir, 'project.json');
+
+  const result = await walkBundleOnce(opts);
+
+  const max = opts.bundle.reviewLoopMax ?? 0;
+  if (max <= 0 || iteration >= max) return result;
+
+  // Rule: re-walk while there are unconsumed pendingCritiques at the
+  // end of the walk. A clean walk (no critiques OR all critiques
+  // consumed by their LLM runners) → exit. A walk that leaves
+  // critique(s) sitting in project.json → another iteration to give
+  // the LLMs a chance to fix them. Bounded by `reviewLoopMax`.
+  //
+  // The legacy single-shot critique flow (dhee_critique_node) is
+  // unchanged: bundles that don't opt in via reviewLoopMax stay at 0
+  // and the wrapper exits after one walk regardless of pending state.
+  let pendingKeys: string[] = [];
+  if (existsSync(projectJsonPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(projectJsonPath, 'utf-8')) as {
+        pendingCritiques?: Record<string, unknown>;
+      };
+      pendingKeys = Object.keys(raw.pendingCritiques ?? {});
+    } catch {}
+  }
+  if (pendingKeys.length === 0) return result;
+
+  // Invalidate the walkState entries targeted by the stamped critiques
+  // so the recursive walk doesn't cache-skip them. Runners that wrote
+  // these critiques (judges, etc.) only need to stamp the critique +
+  // return — the walker handles invalidation here. Decouples the
+  // judge runner from any walkState mutation and avoids races with
+  // the walker's own `persistState` writes during a walk.
+  const { invalidateNodes: invalidate } = await import('./projectRegen.js');
+  const inv = await invalidate({ projectDir: opts.projectDir, nodeIds: pendingKeys });
+  if (inv.error) {
+    log(`walker: review-loop invalidation failed: ${inv.error}; aborting loop`);
+    return result;
+  }
+  log(
+    `walker: review-loop iter ${iteration + 1}/${max} — ${pendingKeys.length} unconsumed critique(s) [${pendingKeys.join(', ')}]; invalidated + re-walking`,
+  );
+  return walkBundleWithReviewLoop(opts, iteration + 1);
+}
+
+/**
+ * Single-pass walker. Performs one topological traversal of the
+ * bundle's DAG, dispatching each node's runner (or cache-skipping when
+ * walkState says it's already done + output exists). See `walkBundle`
+ * for the review-loop wrapper.
+ */
+async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const cli = opts.cli ?? {};
 
