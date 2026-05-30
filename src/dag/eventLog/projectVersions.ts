@@ -15,6 +15,7 @@ import type {
   NodeCompletedPayload,
   VersionSelectedPayload,
 } from './events.js';
+import { branchVisibilityFilter } from './branchFilter.js';
 
 export interface VersionTrayEntry {
   versionId: string;
@@ -38,9 +39,11 @@ export function listVersions(
   const branch = opts.branchId ?? 'main';
   const versions: VersionTrayEntry[] = [];
   let selectedId: string | undefined;
+  const eventList = [...events];
+  const visible = branchVisibilityFilter(eventList, branch);
 
-  for (const e of events) {
-    if (e.branchId !== branch) continue;
+  for (const e of eventList) {
+    if (!visible(e)) continue;
 
     if (e.kind === 'node.completed') {
       const p = e.payload as NodeCompletedPayload;

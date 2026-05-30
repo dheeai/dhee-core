@@ -30,6 +30,7 @@ import type {
   VersionSelectedPayload,
   BundleBoundPayload,
 } from './events.js';
+import { branchVisibilityFilter } from './branchFilter.js';
 
 import type { NodeStateEntry as LegacyNodeStateEntry, NodeRunStatus, WalkState as LegacyWalkState } from '../walkState.js';
 
@@ -84,8 +85,12 @@ export function projectWalkState(
   // is the audit log of all generations and must accumulate.
   const versionsHistory = new Map<string, NodeVersionEntry[]>();
 
-  for (const e of events) {
-    if (e.branchId !== branch) continue;
+  // Branch visibility: include events on `branch` + parent's prefix up
+  // to fork point + recursively up the chain to 'main'.
+  const eventList = [...events];
+  const visible = branchVisibilityFilter(eventList, branch);
+  for (const e of eventList) {
+    if (!visible(e)) continue;
 
     switch (e.kind) {
       case 'bundle.bound': {

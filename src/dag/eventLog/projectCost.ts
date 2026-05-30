@@ -12,6 +12,7 @@
  * spend across a project / branch.
  */
 import type { DheeEvent, NodeCompletedPayload } from './events.js';
+import { branchVisibilityFilter } from './branchFilter.js';
 
 export interface CostLedger {
   totalUsd: number;
@@ -30,9 +31,11 @@ export function computeCostLedger(events: Iterable<DheeEvent>, opts: CostLedgerO
   let computeCount = 0;
   let cacheHits = 0;
   let estimatedSavingsUsd = 0;
+  const eventList = [...events];
+  const visible = branchVisibilityFilter(eventList, branch);
 
-  for (const e of events) {
-    if (e.branchId !== branch) continue;
+  for (const e of eventList) {
+    if (!visible(e)) continue;
     if (e.kind !== 'node.completed') continue;
     const p = e.payload as NodeCompletedPayload;
     if (!p.generation) continue;
