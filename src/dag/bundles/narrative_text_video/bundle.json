@@ -1,0 +1,113 @@
+{
+  "id": "narrative_text_video",
+  "version": "0.1.0",
+  "engineCompat": ">=0.1.0",
+  "description": "Text-only LLM pipeline + ffmpeg shot_clip stub videos. Produces a real, playable ~30s MP4 final cut (3 shots × 10s) without needing GPU/Comfy/LTX. Each shot's clip is an animated colored composition tinted by the project's style (warm for cinematic_realism, cool for noir). Used for end-to-end testing of the event-sourced graph with real binary artifacts.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "ffmpeg.shot_clip": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0"
+    }
+  },
+  "inputs": [
+    { "id": "story_input",    "kind": "file",    "path": "inputs/story.md", "required": true },
+    { "id": "targetDuration", "kind": "project", "field": "targetDuration", "default": 30 },
+    { "id": "style",          "kind": "project", "field": "style",          "default": "cinematic_realism" }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "plot",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": { "format": "md", "pattern": "plans/plot.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": { "promptTemplate": "prompts/plot.md", "tier": "medium", "outputFormat": "markdown", "temperature": 0.7 }
+      },
+      "displayCapability": "plot.outline"
+    },
+    {
+      "id": "scenes_plan",
+      "kind": "stage",
+      "inputs": [{ "from": "plot", "usage": "context" }],
+      "outputs": { "format": "json", "pattern": "plans/scenes_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scenes_plan.md",
+          "outputSchema": "schemas/scenes_plan.schema.json",
+          "tier": "medium", "outputFormat": "json", "temperature": 0.5
+        }
+      },
+      "displayCapability": "scenes.plan"
+    },
+    {
+      "id": "shot_breakdown",
+      "kind": "stage",
+      "inputs": [
+        { "from": "plot", "usage": "context" },
+        { "from": "scenes_plan", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/shot_breakdown.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/shot_breakdown.md",
+          "outputSchema": "schemas/shot_breakdown.schema.json",
+          "tier": "medium", "outputFormat": "json", "temperature": 0.5
+        }
+      },
+      "displayCapability": "shots.breakdown"
+    },
+    {
+      "id": "shot_1_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_1.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 1, "durationSec": 10, "width": 1280, "height": 720 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "shot_2_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_2.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 2, "durationSec": 10, "width": 1280, "height": 720 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "shot_3_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_3.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 3, "durationSec": 10, "width": 1280, "height": 720 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "final_video",
+      "kind": "stage",
+      "inputs": [
+        { "from": "shot_1_video", "usage": "input" },
+        { "from": "shot_2_video", "usage": "input" },
+        { "from": "shot_3_video", "usage": "input" }
+      ],
+      "outputs": { "format": "video", "pattern": "final/the_last_coffee.mp4" },
+      "runner": {
+        "tool": "ffmpeg.concat",
+        "config": {}
+      },
+      "displayCapability": "final.video"
+    }
+  ]
+}

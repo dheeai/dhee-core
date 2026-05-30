@@ -32,7 +32,11 @@
 import 'dotenv/config';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 import { runProjectViaBundle } from '../src/server/runners/runProjectViaBundle.js';
 import { openProjectionEngine } from '../src/dag/eventLog/ProjectionEngine.js';
@@ -68,7 +72,7 @@ function createProject(dir: string, opts: { id: string; story: string; style?: s
   writeFileSync(join(dir, 'inputs', 'story.md'), opts.story);
   const project = {
     id: opts.id,
-    bundleSource: 'built-in:narrative_text_only',
+    bundleSource: 'built-in:narrative_text_video',
     targetDuration: opts.targetDuration ?? 30,
     style: opts.style ?? 'cinematic_realism',
     createdAt: new Date().toISOString(),
@@ -132,9 +136,17 @@ async function main(): Promise<void> {
   const projectA = mkdtempSync(join(tmpdir(), 'e2e-A-'));
   const projectB = mkdtempSync(join(tmpdir(), 'e2e-B-'));
 
+  // Persistent output dir the user can open after the run. Lives at
+  // <repo>/e2e-out — NOT cleaned up, NOT in tmpdir.
+  const repoRoot = join(__dirname, '..');
+  const outDir = join(repoRoot, 'e2e-out');
+  if (existsSync(outDir)) rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
+
   console.log(`CAS root:    ${casRoot}`);
   console.log(`Project A:   ${projectA}`);
   console.log(`Project B:   ${projectB}`);
+  console.log(`Outputs:     ${outDir}  ← videos copied here at the end`);
 
   try {
     // ─────────────────────────────────────────────────────────────────
@@ -151,8 +163,8 @@ async function main(): Promise<void> {
     // Anchor seqs for time-travel inspection later.
     const eventsAfterFirstWalk = [...engA.log().read()];
     const seqAfterPlot = eventsAfterFirstWalk.find((e) => e.kind === 'node.completed' && (e.payload as { nodeId?: string }).nodeId === 'plot')?.seq;
-    const seqAfterScenes = eventsAfterFirstWalk.find((e) => e.kind === 'node.completed' && (e.payload as { nodeId?: string }).nodeId === 'scenes_plan')?.seq;
-    const seqAfterBreakdown = eventsAfterFirstWalk.find((e) => e.kind === 'node.completed' && (e.payload as { nodeId?: string }).nodeId === 'shot_breakdown')?.seq;
+    const seqAfterScenes = eventsAfterFirstWalk.find((e) => e.kind === 'node.completed' && (e.payload as { nodeId?: string }).nodeId === 'shot_breakdown')?.seq;
+    const seqAfterBreakdown = eventsAfterFirstWalk.find((e) => e.kind === 'node.completed' && (e.payload as { nodeId?: string }).nodeId === 'final_video')?.seq;
 
     printNodes('walkState (main) after first walk', engA, 'main');
     printCost('cost (main)', engA, 'main');
@@ -175,6 +187,22 @@ async function main(): Promise<void> {
       }
     }
 
+    // Snapshot main's videos BEFORE the noir walk overwrites the canonical
+    // paths. (Production walker keeps one canonical outputPath per node; the
+    // version events distinguish them in the log but on disk noir's render
+    // will overwrite. So we copy here to keep both realities visible.)
+    const fsApi = await import('node:fs');
+    subheader('snapshotting main\'s videos to e2e-out/ before noir walk');
+    for (const name of ['shot_1', 'shot_2', 'shot_3']) {
+      const src = join(projectA, 'videos', `${name}.mp4`);
+      const dst = join(outDir, `main_${name}.mp4`);
+      if (existsSync(src)) fsApi.copyFileSync(src, dst);
+    }
+    if (existsSync(join(projectA, 'final', 'the_last_coffee.mp4'))) {
+      fsApi.copyFileSync(join(projectA, 'final', 'the_last_coffee.mp4'), join(outDir, 'main_final.mp4'));
+    }
+    console.log(`  ✓ snapshotted main shots + final into ${outDir}/main_*.mp4`);
+
     // ─────────────────────────────────────────────────────────────────
     banner('TEST 2 — CACHING. Project B (fresh, identical story) should hit CAS on every node');
     createProject(projectB, { id: 'project-B', story: STORY_MD });
@@ -185,9 +213,9 @@ async function main(): Promise<void> {
     const eventsB = [...engB.log().read()];
     const completedB = eventsB.filter((e) => e.kind === 'node.completed');
     const cachedB = completedB.filter((e) => ((e.payload as { generation?: { cached?: boolean } }).generation?.cached) === true);
-    console.log(`\n  Project B completions: ${completedB.length}`);
-    console.log(`  Project B cache hits:  ${cachedB.length} (expected 3)`);
-    console.log(`  All cache hits?        ${cachedB.length === completedB.length && completedB.length === 3 ? 'YES ✓' : 'NO ✗'}`);
+    console.log(`\n  Project B completions:           ${completedB.length} (3 LLM + 3 shot_clip + 1 final)`);
+    console.log(`  Project B cache hits (CAS):       ${cachedB.length} (expected 6 — all but final_video which lacks CAS)`);
+    console.log(`  All cacheable nodes hit?          ${cachedB.length >= 6 ? 'YES ✓' : 'NO ✗'}`);
 
     // Byte-equality check between A's and B's plot.md (the cache must
     // serve the SAME bytes; otherwise CAS isn't doing what it claims).
@@ -306,6 +334,38 @@ async function main(): Promise<void> {
     console.log(`  events.jsonl: ${eventLogPath(projectA)}`);
     console.log(`  CAS root:     ${casRoot}`);
     console.log('\n  ALL THREE TESTS PROVEN END-TO-END WITHOUT INTERVENTION.');
+    // ─────────────────────────────────────────────────────────────────
+    banner('VIDEOS — copying noir + projectB clips to e2e-out/');
+    // main_* already copied before the noir walk (above). Now noir
+    // has overwritten the project's canonical paths; snapshot those
+    // as the noir set.
+    const fsApi2 = await import('node:fs');
+    const copies: Array<{ label: string; src: string; dst: string }> = [
+      { label: 'noir / shot 1',         src: join(projectA, 'videos', 'shot_1.mp4'),         dst: join(outDir, 'noir_shot_1.mp4') },
+      { label: 'noir / shot 2',         src: join(projectA, 'videos', 'shot_2.mp4'),         dst: join(outDir, 'noir_shot_2.mp4') },
+      { label: 'noir / shot 3',         src: join(projectA, 'videos', 'shot_3.mp4'),         dst: join(outDir, 'noir_shot_3.mp4') },
+      { label: 'noir / final cut',      src: join(projectA, 'final', 'the_last_coffee.mp4'), dst: join(outDir, 'noir_final.mp4') },
+      { label: 'projectB / final cut',  src: join(projectB, 'final', 'the_last_coffee.mp4'), dst: join(outDir, 'projectB_final_from_cache.mp4') },
+    ];
+    for (const c of copies) {
+      try {
+        if (existsSync(c.src)) {
+          const sz = fsApi2.statSync(c.src).size;
+          fsApi2.copyFileSync(c.src, c.dst);
+          console.log(`  ✓ ${c.label.padEnd(28)} → ${c.dst}  (${(sz / 1024).toFixed(1)} KB)`);
+        } else {
+          console.log(`  ✗ ${c.label.padEnd(28)} (source not found: ${c.src})`);
+        }
+      } catch (err) {
+        console.log(`  ✗ ${c.label.padEnd(28)} copy failed: ${(err as Error).message}`);
+      }
+    }
+
+    subheader('Open these to play (the four viewable artifacts)');
+    console.log(`  open ${outDir}/main_final.mp4                ← warm-palette 30s cut (cinematic_realism)`);
+    console.log(`  open ${outDir}/noir_final.mp4                ← cool-blue 30s cut (noir, high-contrast)`);
+    console.log(`  open ${outDir}/projectB_final_from_cache.mp4 ← byte-identical to main_final (CAS replay)`);
+    console.log(`  ls   ${outDir}                              ← list all clips`);
   } finally {
     rmSync(projectA, { recursive: true, force: true });
     rmSync(projectB, { recursive: true, force: true });

@@ -320,7 +320,13 @@ export function createLlmGenerateRunner(opts?: {
         return false;
       }
     })();
-    if (!cfg.forceRerun && !hasPendingCritique && existsSync(outAbs)) {
+    // Path-based skip — ONLY trustworthy when CAS is disabled. With
+    // CAS on, a file at outputPath may have been produced by a
+    // different branch / project with different inputs; let the CAS
+    // check below decide. The runtime gate is the same env var the
+    // CAS lookup reads later in this function.
+    const casDisabledForPathSkip = process.env['DHEE_DISABLE_CAS'] === '1';
+    if (casDisabledForPathSkip && !cfg.forceRerun && !hasPendingCritique && existsSync(outAbs)) {
       try {
         const st = statSync(outAbs);
         if (st.isFile() && st.size > 0) {

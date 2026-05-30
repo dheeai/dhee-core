@@ -206,8 +206,30 @@ async function reencodePass(
 async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
   const cfg = ctx.node.runner.config as unknown as FfmpegConcatConfig;
 
+  // Auto-discover inputs from ctx.inputs when the bundle hasn't
+  // pre-resolved them in cfg.inputs. The walker exposes binary
+  // upstream artifacts as absolute paths keyed by upstream node id
+  // (see walker.ts ~L1185 isBinary branch), so we sweep ctx.inputs in
+  // ctx.node.inputs declaration order and pick the entries whose
+  // value is a path to an existing video file. This lets bundles wire
+  // up `final_video` with explicit `inputs: [{from:'shot_1_video'},...]`
+  // without duplicating the path list into cfg.inputs.
   if (!cfg.inputs || cfg.inputs.length === 0) {
-    return { ok: false, error: 'ffmpeg.concat: no inputs provided' };
+    const discovered: string[] = [];
+    const videoRe = /\.(mp4|webm|mov)$/i;
+    for (const decl of ctx.node.inputs ?? []) {
+      const v = ctx.inputs[decl.from];
+      if (typeof v === 'string' && videoRe.test(v) && existsSync(v)) {
+        discovered.push(v);
+      }
+    }
+    if (discovered.length > 0) {
+      ctx.log(`ffmpeg.concat: auto-discovered ${discovered.length} input video(s) from ctx.inputs`);
+      cfg.inputs = discovered;
+    }
+  }
+  if (!cfg.inputs || cfg.inputs.length === 0) {
+    return { ok: false, error: 'ffmpeg.concat: no inputs provided (cfg.inputs empty AND no binary inputs in ctx.inputs)' };
   }
   if (!cfg.outputPath) {
     return { ok: false, error: 'ffmpeg.concat: missing outputPath' };

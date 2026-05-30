@@ -12,6 +12,7 @@ import { comfyImageRunner } from './comfyImage.js';
 import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
+import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
 import {
@@ -106,6 +107,18 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Concatenates input video clips into a single final video, optionally with audio overlay and watermark.',
     },
     runner: ffmpegConcatRunner,
+  },
+  {
+    manifest: {
+      tool: 'ffmpeg.shot_clip',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'ffmpeg shot clip (stub)',
+      description:
+        'Synthesizes a 10s MP4 clip for one shot from a shot_breakdown entry. Stand-in for the real LTX video runner — produces real binary artifacts (animated colored boxes; no text overlay) so end-to-end tests flow real videos through events + CAS + branches without needing GPU.',
+    },
+    runner: ffmpegShotClipRunner,
   },
   {
     manifest: {
