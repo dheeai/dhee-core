@@ -23,6 +23,7 @@ import { walkBundle, loadBundle } from '../../dag/walker.js';
 import type { DagBundle, NodeDef } from '../../dag/schema.js';
 import type { GenericProjectFile } from './runProjectViaBundle-stubs.js';
 import type { AssetEvent } from './runProjectViaBundle-stubs.js';
+import { openProjectionEngine } from '../../dag/eventLog/ProjectionEngine.js';
 
 export interface RunProjectViaBundleOpts {
   projectDir: string;
@@ -36,6 +37,11 @@ export interface RunProjectViaBundleOpts {
    * "explicitly run nothing." Used by `dhee_run_to scope=last_invalidated`.
    */
   runOnly?: string[];
+  /**
+   * Branch this walk runs on. Defaults to 'main'. Used by the
+   * event-sourced graph for fork-aware projections.
+   */
+  branchId?: string;
   /** Cooperative abort signal — passed to every runner via ctx.signal. */
   signal?: AbortSignal;
   /** Log sink. Defaults to console. */
@@ -125,10 +131,17 @@ export async function runProjectViaBundle(
   const sceneIds = discoverSceneIdsFromProject(project, bundle);
 
   // 6. Walk the bundle.
+  // The ProjectionEngine writes the event log + the back-compat
+  // walkState snapshot under the hood. Opening it is cheap (just
+  // discovers nextSeq from the file); creating it here means EVERY
+  // production walk gets event-sourced behavior for free.
+  const engine = openProjectionEngine(opts.projectDir);
   const walkResult = await walkBundle({
     projectDir: opts.projectDir,
     bundle,
     bundleSource: project.bundleSource,
+    engine,
+    branchId: opts.branchId ?? 'main',
     ...(bundleDir ? { bundleDir } : {}),
     ...(opts.stopAt ? { stopAt: opts.stopAt } : {}),
     ...(opts.runOnly !== undefined ? { runOnly: opts.runOnly } : {}),

@@ -27,8 +27,10 @@
  * with a tier→purpose mapping (because the router's public API takes
  * purposes, not raw tiers).
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
+import { dirname, extname, resolve } from 'node:path';
+import { openGenerationCache } from '../cas/GenerationCache.js';
+import type { InputsHashKey } from '../cas/inputsHash.js';
 // ajv / ajv-formats ESM<>CJS interop: verbatimModuleSyntax preserves
 // the default import shape, but ajv's CJS exports the constructor
 // directly. The `* as` form lets us reach `.default` defensively.
@@ -342,6 +344,61 @@ export function createLlmGenerateRunner(opts?: {
     const sub = substituteTemplate(template, inputsWithItemId);
     if (!sub.ok) return { ok: false, error: sub.error };
 
+    // 3a. CAS lookup — cross-project replay. The key is content-based:
+    //     - prompt template FILE CONTENTS (so template edits bust)
+    //     - rendered prompt (which folds in all upstream inputs)
+    //     - config (tier, temperature, schema path, etc.)
+    //     - schema FILE CONTENTS when applicable
+    // Hit → link cached file to outputPath, return cached:true with
+    // inputsHash on the metadata so the walker stamps it on
+    // node.completed. Miss → fall through to the live LLM call.
+    const cacheKey: InputsHashKey = {
+      tool: 'llm.generate',
+      toolVersion: '0.1.0',
+      inputs: {
+        renderedPrompt: sub.rendered,
+        promptTemplateFile: { kind: 'file' as const, path: tmplAbs },
+        ...(cfg.outputSchema
+          ? { schemaFile: { kind: 'file' as const, path: resolve(ctx.bundleDir, cfg.outputSchema) } }
+          : {}),
+      },
+      config: {
+        tier: cfg.tier ?? 'medium',
+        ...(cfg.purpose ? { purpose: cfg.purpose } : {}),
+        ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
+        ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
+        outputFormat: cfg.outputFormat ?? 'markdown',
+      },
+    };
+    // CAS kill-switch for tests + opt-out scenarios. Production calls
+    // through this path; vitest sets DHEE_DISABLE_CAS=1 to keep unit
+    // tests isolated from the shared ~/.kshana/cache.
+    const casDisabled = process.env['DHEE_DISABLE_CAS'] === '1';
+    if (!casDisabled && !cfg.forceRerun && !hasPendingCritique) {
+      const cache = openGenerationCache(
+        process.env['DHEE_CACHE_ROOT']
+          ? { cacheRoot: process.env['DHEE_CACHE_ROOT'] }
+          : undefined,
+      );
+      const hit = cache.get(cacheKey);
+      if (hit) {
+        mkdirSync(dirname(outAbs), { recursive: true });
+        copyFileSync(hit.storePath, outAbs);
+        ctx.log(`llm.generate: CAS hit ${hit.hash.slice(0, 8)} → ${cfg.outputPath}`);
+        const inputsHashCS = hit.hash;
+        return {
+          ok: true,
+          outputPath: cfg.outputPath,
+          metadata: {
+            cached: true,
+            inputsHash: inputsHashCS,
+            casHit: true,
+            ...(hit.metadata ?? {}),
+          },
+        };
+      }
+    }
+
     // 3b. Check for a pending critique under
     //     `pendingCritiques[nodeId(:itemId)]` in project.json. When
     //     present, prepend a system message conveying the critique so
@@ -493,6 +550,32 @@ export function createLlmGenerateRunner(opts?: {
     writeFileSync(outAbs, toWrite, 'utf-8');
     ctx.log(`llm.generate: wrote ${cfg.outputPath} (${toWrite.length} bytes)`);
 
+    // 6a. Put into CAS for cross-project replay. Best-effort: a CAS
+    //     write failure must NOT kill the run — the artifact already
+    //     wrote to outputPath. Skipped when the LLM emitted a critique
+    //     fix (different effective prompt than the cached key) OR
+    //     when CAS is disabled (tests / opt-out).
+    let inputsHashForEvent: string | undefined;
+    if (!pendingCritique && !casDisabled) {
+      try {
+        const cache = openGenerationCache(
+          process.env['DHEE_CACHE_ROOT']
+            ? { cacheRoot: process.env['DHEE_CACHE_ROOT'] }
+            : undefined,
+        );
+        const ext = (extname(cfg.outputPath).slice(1) || 'txt');
+        const put = cache.put({
+          key: cacheKey,
+          sourcePath: outAbs,
+          ext,
+          metadata: { model: client.getModel(), bytes: toWrite.length },
+        });
+        inputsHashForEvent = put.hash;
+      } catch {
+        // Best-effort — never fail the run on CAS write errors.
+      }
+    }
+
     // 6b. Clear consumed pending critique. Done AFTER the artifact
     //     write succeeds — if the call failed, the critique survives
     //     for the next attempt (defense-in-depth against a partial
@@ -522,6 +605,8 @@ export function createLlmGenerateRunner(opts?: {
       metadata: {
         model: client.getModel(),
         bytes: toWrite.length,
+        cached: false,
+        ...(inputsHashForEvent ? { inputsHash: inputsHashForEvent } : {}),
         ...(pendingCritique ? { critiqueApplied: true } : {}),
       },
     };

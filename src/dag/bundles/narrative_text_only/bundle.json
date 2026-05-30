@@ -1,0 +1,87 @@
+{
+  "id": "narrative_text_only",
+  "version": "0.1.0",
+  "engineCompat": ">=0.1.0",
+  "description": "Text-only narrative pipeline for end-to-end testing of the event-sourced graph. Produces plot + scenes + per-shot prompts for a ~30s video. No images, no GPU — runs end-to-end against an LLM API in 20-60s.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0"
+    }
+  },
+  "inputs": [
+    {
+      "id": "story_input",
+      "kind": "file",
+      "path": "inputs/story.md",
+      "required": true
+    },
+    {
+      "id": "targetDuration",
+      "kind": "project",
+      "field": "targetDuration",
+      "default": 30
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "cinematic_realism"
+    }
+  ],
+  "goal": "shot_breakdown",
+  "nodes": [
+    {
+      "id": "plot",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": { "format": "md", "pattern": "plans/plot.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/plot.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.7
+        }
+      },
+      "displayCapability": "plot.outline"
+    },
+    {
+      "id": "scenes_plan",
+      "kind": "stage",
+      "inputs": [{ "from": "plot", "usage": "context" }],
+      "outputs": { "format": "json", "pattern": "plans/scenes_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scenes_plan.md",
+          "outputSchema": "schemas/scenes_plan.schema.json",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "scenes.plan"
+    },
+    {
+      "id": "shot_breakdown",
+      "kind": "stage",
+      "inputs": [
+        { "from": "plot", "usage": "context" },
+        { "from": "scenes_plan", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/shot_breakdown.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/shot_breakdown.md",
+          "outputSchema": "schemas/shot_breakdown.schema.json",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "shots.breakdown"
+    }
+  ]
+}

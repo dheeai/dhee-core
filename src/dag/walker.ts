@@ -114,6 +114,20 @@ export interface WalkerOptions {
   bundleDir?: string;
   /** Cooperative cancellation signal — threaded into every runner ctx. */
   signal?: AbortSignal;
+  /**
+   * Optional projection engine for the event-sourced log. When set,
+   * the walker emits node.started/completed/failed events alongside
+   * its existing walkState writes (dual-write). When absent, the
+   * walker behaves exactly as before — no events, no log file.
+   *
+   * The engine's `appendAndProject` writes the back-compat walkState
+   * snapshot to project.json as a side effect of each append, so the
+   * walker's own saveWalkState calls become redundant but harmless
+   * (last writer wins; both produce the same content).
+   */
+  engine?: import('./eventLog/ProjectionEngine.js').ProjectionEngine;
+  /** Branch this walk runs on; events tagged with it. Default 'main'. */
+  branchId?: string;
 }
 
 interface NodeInstance {
@@ -870,6 +884,28 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     log(`walker: resolved ${Object.keys(bundleInputs).length} bundle inputs: ${Object.keys(bundleInputs).join(', ')}`);
   }
 
+  // Emit bundle.bound on the event log so the projection knows which
+  // bundle this run is tied to. Idempotent — if the engine's log
+  // already has a bundle.bound matching this source+version on the
+  // current branch, skip; otherwise append.
+  if (opts.engine && opts.bundleSource) {
+    const branch = opts.branchId ?? 'main';
+    const prior = [...opts.engine.log().read({ branchId: branch })].find((e) => e.kind === 'bundle.bound');
+    const priorPayload = prior?.payload as { bundleSource?: string; bundleVersion?: string } | undefined;
+    if (!prior || priorPayload?.bundleSource !== opts.bundleSource || priorPayload?.bundleVersion !== opts.bundle.version) {
+      opts.engine.appendAndProject({
+        branchId: branch,
+        actor: 'walker',
+        kind: 'bundle.bound',
+        payload: {
+          bundleSource: opts.bundleSource,
+          bundleVersion: opts.bundle.version,
+          engineVersion: '0.1.0',
+        },
+      });
+    }
+  }
+
   // walkState: load + prune stale entries from previous bundles.
   let state: WalkState | null = null;
   if (opts.bundleSource) {
@@ -880,7 +916,14 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         bundleVersion: opts.bundle.version,
         engineVersion: '0.1.0',
       });
-    if (state.bundleSource !== opts.bundleSource) {
+    // When the projection engine is in use, the walkState snapshot is
+    // a projection of the event log on the active branch. A "different
+    // bundleSource" reading is expected after a branch switch (each
+    // branch may project to different bundle metadata), so trust the
+    // engine and skip the destructive reinit. Without the engine
+    // (legacy callers), keep the old behavior — drop incompatible
+    // state to avoid replaying stale entries from a different bundle.
+    if (state.bundleSource !== opts.bundleSource && !opts.engine) {
       log(`walker: walkState bundleSource changed (${state.bundleSource} → ${opts.bundleSource}); reinitializing.`);
       state = initWalkState({
         bundleSource: opts.bundleSource,
@@ -1218,6 +1261,14 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         state.nodes[stateKey] = { status: 'in_progress', startedAt: Date.now() };
         persistState();
       }
+      if (opts.engine) {
+        opts.engine.appendAndProject({
+          branchId: opts.branchId ?? 'main',
+          actor: 'walker',
+          kind: 'node.started',
+          payload: { nodeId: node.id, ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}) },
+        });
+      }
 
       log(`→ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} via ${node.runner.tool}`);
       let result: RunnerResult;
@@ -1233,6 +1284,18 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         if (state) {
           state.nodes[stateKey] = { status: 'failed', error: result.error };
           persistState();
+        }
+        if (opts.engine) {
+          opts.engine.appendAndProject({
+            branchId: opts.branchId ?? 'main',
+            actor: 'walker',
+            kind: 'node.failed',
+            payload: {
+              nodeId: node.id,
+              ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+              error: result.error,
+            },
+          });
         }
         return { ok: false, error: result.error, instances: allInstances };
       }
@@ -1250,6 +1313,36 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           ...(result.metadata ? { metadata: result.metadata } : {}),
         };
         persistState();
+      }
+      if (opts.engine) {
+        // The runner stamps cache state + inputsHash via metadata.
+        // We propagate them onto the event so projections (cost,
+        // lineage) can reason about cache hits and replayability.
+        const md = result.metadata ?? {};
+        const cached = Boolean(md['cached']);
+        const inputsHash = typeof md['inputsHash'] === 'string' ? (md['inputsHash'] as string) : undefined;
+        const costUsd = typeof md['costUsd'] === 'number' ? (md['costUsd'] as number) : undefined;
+        const versionId = `v${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        opts.engine.appendAndProject({
+          branchId: opts.branchId ?? 'main',
+          actor: 'walker',
+          kind: 'node.completed',
+          payload: {
+            nodeId: node.id,
+            ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+            versionId,
+            outputPath: result.outputPath,
+            artifact: { format: node.outputs.format },
+            generation: {
+              tool: node.runner.tool,
+              toolVersion: '0.1.0',
+              cached,
+              ...(inputsHash ? { inputsHash } : {}),
+              ...(costUsd !== undefined ? { costUsd } : {}),
+            },
+            ...(result.metadata ? { metadata: result.metadata } : {}),
+          },
+        });
       }
       // BUG-023: record that this node had its runner invoked in
       // this walk. Downstream cache-skip will see this and force a
