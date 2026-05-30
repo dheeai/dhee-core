@@ -290,6 +290,34 @@ prompted the migration are documented in the commit history of the
 
 ---
 
+### BUG-025 — `vlm.judge` runner does too many things; violates single-purpose rule
+- **Status:** open — tech debt; functionally correct, architecturally wrong
+- **Discovered:** 2026-05-30
+- **Reporter:** ganaraj (memory `feedback-runner-isolation` reinforcement)
+- **Symptom:** `src/dag/runners/vlmJudge.ts:run()` does FIVE distinct verbs inside one runner:
+  1. Read image from canonical path
+  2. Stash current image to `.attempts/{item}_attempt_N.png`
+  3. Call VLM (mimo) and parse verdict
+  4. Pick best-of-N across all stashed attempts
+  5. Copy best-attempt stash back over the canonical path
+  6. Stamp `pendingCritiques[refineNode:itemId]` in project.json on fail
+  - Per the memory: *"A runner that does a refinement pass with VLM + prompt edit + Qwen is wrong. That's doing 3 things. The 3 things should be done in the graph. Not inside a runner."* The judge runner has the same shape — verdict + stash + best-of-N selection + canonical-path mutation + walkState side-effect, all in one `run()`.
+- **Suspected root cause:** I conflated "the judge node" with "everything that supports best-of-N across iterations". Stashing, selection, and pendingCritique stamping are walker-loop concerns, not judge concerns. The judge should produce ONE verdict per call and nothing else.
+- **Manifestations / what to test:**
+  - Bundle author cannot swap in a different VLM provider without inheriting the stash + restore + select code.
+  - Cannot reuse the stash/select logic with a different judge (e.g. multi-judge ensemble) — it's locked inside one file.
+  - Restoration writes outside the runner's own outputPath — violates the runner-output invariant.
+- **Proper fix (deferred):** Split into three concerns:
+  1. **`vlm.judge` runner** — pure: read image + context, call VLM, write verdict JSON to outputPath. Nothing else.
+  2. **Walker review-loop** — own the per-iteration stash (snapshot image to `.attempts/`) and the best-of-N selection (compare verdicts after each walk, restore best to canonical path).
+  3. **Walker pendingCritique stamping** — already mostly walker territory; move the final stamp out of the judge runner into the walker's post-judge step (driven by the verdict JSON the runner just wrote).
+  - Bundle stays exactly the same shape (one review node per upstream); the loop infrastructure absorbs the now-extracted concerns.
+- **Workaround in the meantime:** the current implementation IS functionally correct — the experiment we just ran (17-shot batch refinement) used the right test transport (the dedicated scripts `refineImageViaQwen` / `refineImageViaKlein`, NOT the vlm.judge runner). So nothing in production depends on the conflated runner yet — only the smoke tests.
+- **Test:** pending — write a test that asserts judge runner output is verdict-only (no file mutation beyond outputPath, no project.json writes) when the refactor lands.
+- **Fix commit:** (pending — see plan above)
+
+---
+
 ### BUG-021 — Walker with `runOnly: [downstream-node]` doesn't hydrate upstream completed instances
 - **Status:** fixed
 - **Discovered:** 2026-05-29
