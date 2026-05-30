@@ -75,7 +75,11 @@ export function openGenerationCache(opts?: { cacheRoot?: string }): GenerationCa
   }
 
   function metadataPath(hash: string): string {
-    return join(shardDir(hash), `${hash}.json`);
+    // NOTE: must NOT collide with the content file when the content's
+    // ext is 'json'. Original impl used '.json' here and silently
+    // overwrote the content. Use a sidecar extension that can't
+    // appear as a runner output format.
+    return join(shardDir(hash), `${hash}.meta`);
   }
 
   function readMetadata(hash: string): { ext: string; metadata?: Record<string, unknown> } | null {

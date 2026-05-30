@@ -28,6 +28,8 @@ export interface VersionTrayEntry {
 
 export interface ListVersionsOpts {
   branchId?: string;
+  /** Time travel: fold only events with seq <= asOfSeq. */
+  asOfSeq?: number;
 }
 
 export function listVersions(
@@ -41,8 +43,10 @@ export function listVersions(
   let selectedId: string | undefined;
   const eventList = [...events];
   const visible = branchVisibilityFilter(eventList, branch);
+  const asOf = opts.asOfSeq;
 
   for (const e of eventList) {
+    if (asOf !== undefined && e.seq > asOf) continue;
     if (!visible(e)) continue;
 
     if (e.kind === 'node.completed') {

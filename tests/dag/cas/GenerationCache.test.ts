@@ -94,6 +94,26 @@ describe('GenerationCache', () => {
     expect(existsSync(root)).toBe(true);
   });
 
+  it('BUG: ext=json must not collide with metadata sidecar file (both used to write <hash>.json)', () => {
+    // Regression: original impl wrote <hash>.<ext> as content and
+    // <hash>.json as metadata. When ext='json' the metadata write
+    // overwrote the content. This test pins the fix.
+    const cache = openGenerationCache({ cacheRoot });
+    const src = join(workDir, 'src.json');
+    writeFileSync(src, '{"realContent":true,"shots":[1,2,3]}');
+    cache.put({
+      key: { tool: 'llm', toolVersion: '1', inputs: {}, config: {} },
+      sourcePath: src,
+      ext: 'json',
+      metadata: { costUsd: 0.05 },
+    });
+    const hit = cache.get({ tool: 'llm', toolVersion: '1', inputs: {}, config: {} });
+    expect(hit).not.toBeNull();
+    const got = JSON.parse(readFileSync(hit!.storePath, 'utf-8')) as { realContent?: boolean; shots?: number[] };
+    expect(got.realContent).toBe(true);
+    expect(got.shots).toEqual([1, 2, 3]);
+  });
+
   it('same inputs, different tool → independent cache entries', () => {
     const cache = openGenerationCache({ cacheRoot });
     const src1 = join(workDir, 'a.md');

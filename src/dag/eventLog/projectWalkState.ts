@@ -61,6 +61,12 @@ export interface ProjectedWalkState extends LegacyWalkState {
 export interface ProjectWalkStateOpts {
   /** Branch to project. Defaults to 'main'. */
   branchId?: string;
+  /**
+   * Time travel: fold only events with seq <= asOfSeq. Omit to fold
+   * the entire log (current state). Useful for "show me what this
+   * looked like at step N" inspection and replay-debugging.
+   */
+  asOfSeq?: number;
 }
 
 function keyFor(nodeId: string, itemId?: string): string {
@@ -89,7 +95,9 @@ export function projectWalkState(
   // to fork point + recursively up the chain to 'main'.
   const eventList = [...events];
   const visible = branchVisibilityFilter(eventList, branch);
+  const asOf = opts.asOfSeq;
   for (const e of eventList) {
+    if (asOf !== undefined && e.seq > asOf) continue;
     if (!visible(e)) continue;
 
     switch (e.kind) {
