@@ -18,12 +18,16 @@ import { dheeApplyWorkflowAliasesTool, makeApplyWorkflowAliasesTool } from './dh
 import { dheeCheckWorkflowTool, makeCheckWorkflowTool } from './dheeCheckWorkflow.js';
 import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProject.js';
 import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
+import { dheeForkTool, makeForkTool } from './dheeFork.js';
 import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
+import { dheeListVersionsTool, makeListVersionsTool } from './dheeListVersions.js';
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
 import { dheeRunBundleTool, makeRunBundleTool } from './dheeRunBundle.js';
+import { dheeSelectVersionTool, makeSelectVersionTool } from './dheeSelectVersion.js';
 import { dheeShowFileTool, makeShowFileTool } from './dheeShowFile.js';
 import { dheeShowNodeOutputTool, makeShowNodeOutputTool } from './dheeShowNodeOutput.js';
+import { dheeSwapRunnerTool, makeSwapRunnerTool } from './dheeSwapRunner.js';
 
 export const DHEE_TOOL_NAMES = [
   'dhee_create_project',
@@ -36,6 +40,10 @@ export const DHEE_TOOL_NAMES = [
   'dhee_read_artifact',
   'dhee_show_node_output',
   'dhee_show_file',
+  'dhee_list_versions',
+  'dhee_select_version',
+  'dhee_fork',
+  'dhee_swap_runner',
 ] as const;
 
 export {
@@ -43,22 +51,30 @@ export {
   dheeCheckWorkflowTool,
   dheeCreateProjectTool,
   dheeCritiqueNodeTool,
+  dheeForkTool,
   dheeGetStatusTool,
+  dheeListVersionsTool,
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
   dheeRunBundleTool,
+  dheeSelectVersionTool,
   dheeShowFileTool,
   dheeShowNodeOutputTool,
+  dheeSwapRunnerTool,
   makeApplyWorkflowAliasesTool,
   makeCheckWorkflowTool,
   makeCreateProjectTool,
   makeCritiqueNodeTool,
+  makeForkTool,
   makeGetStatusTool,
+  makeListVersionsTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
   makeRunBundleTool,
+  makeSelectVersionTool,
   makeShowFileTool,
   makeShowNodeOutputTool,
+  makeSwapRunnerTool,
 };
 
 /**
@@ -76,4 +92,9 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeReadArtifactTool);
   pi.registerTool(dheeShowNodeOutputTool);
   pi.registerTool(dheeShowFileTool);
+  // Event-sourced graph tools (feat/event-sourced-graph)
+  pi.registerTool(dheeListVersionsTool);
+  pi.registerTool(dheeSelectVersionTool);
+  pi.registerTool(dheeForkTool);
+  pi.registerTool(dheeSwapRunnerTool);
 }
