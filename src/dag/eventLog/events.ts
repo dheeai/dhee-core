@@ -1,0 +1,156 @@
+/**
+ * Event types for the kshana event log.
+ *
+ * Per docs/event-sourced-graph-design.md, every behavior emits events;
+ * projections fold them; readers query projections.
+ *
+ * Envelope is fixed across all kinds; the payload union is per-kind.
+ */
+
+export type EventActor = 'walker' | 'agent' | 'user' | 'runner';
+
+export type EventKind =
+  | 'project.created'
+  | 'bundle.bound'
+  | 'inputs.provided'
+  | 'node.started'
+  | 'node.completed'
+  | 'node.failed'
+  | 'node.invalidated'
+  | 'version.added'
+  | 'version.selected'
+  | 'branch.created'
+  | 'runner.swap_suggested'
+  | 'runner.swapped'
+  | 'critique.added';
+
+export interface NodeStartedPayload {
+  nodeId: string;
+  itemId?: string;
+}
+
+export interface NodeCompletedPayload {
+  nodeId: string;
+  itemId?: string;
+  versionId: string;
+  outputPath: string;
+  artifact?: {
+    storeHash?: string;
+    format: 'md' | 'json' | 'image' | 'video' | 'audio' | 'text';
+    bytes?: number;
+  };
+  generation?: {
+    tool: string;
+    toolVersion: string;
+    inputsHash?: string;
+    seed?: number | string;
+    costUsd?: number;
+    cached: boolean;
+  };
+  metadata?: Record<string, unknown>;
+}
+
+export interface NodeFailedPayload {
+  nodeId: string;
+  itemId?: string;
+  error: string;
+}
+
+export interface NodeInvalidatedPayload {
+  nodeId: string;
+  itemId?: string;
+  reason?: string;
+}
+
+export interface VersionAddedPayload {
+  nodeId: string;
+  itemId?: string;
+  versionId: string;
+  parentVersionId?: string;
+}
+
+export interface VersionSelectedPayload {
+  nodeId: string;
+  itemId?: string;
+  versionId: string;
+}
+
+export interface BranchCreatedPayload {
+  branchId: string;
+  label?: string;
+  parentBranchId?: string;
+  forkedFromEventId: string;
+}
+
+export interface ProjectCreatedPayload {
+  projectDir: string;
+}
+
+export interface BundleBoundPayload {
+  bundleSource: string;
+  bundleVersion: string;
+  engineVersion: string;
+}
+
+export interface InputsProvidedPayload {
+  inputs: Record<string, unknown>;
+}
+
+export interface RunnerSwapSuggestedPayload {
+  nodeId: string;
+  itemId?: string;
+  suggestedTool: string;
+  reason: string;
+  confidence?: number;
+}
+
+export interface RunnerSwappedPayload {
+  nodeId: string;
+  itemId?: string;
+  fromTool: string;
+  toTool: string;
+  reason: string;
+  configOverride?: Record<string, unknown>;
+}
+
+export interface CritiqueAddedPayload {
+  nodeId: string;
+  itemId?: string;
+  verdict: 'pass' | 'fail' | 'unsure';
+  critique?: string;
+  judgeTool?: string;
+}
+
+/**
+ * Union of payloads, indexed by kind. Each kind keeps its narrow payload
+ * shape; consumers can switch over `event.kind` and the type is narrowed.
+ */
+export interface PayloadByKind {
+  'project.created': ProjectCreatedPayload;
+  'bundle.bound': BundleBoundPayload;
+  'inputs.provided': InputsProvidedPayload;
+  'node.started': NodeStartedPayload;
+  'node.completed': NodeCompletedPayload;
+  'node.failed': NodeFailedPayload;
+  'node.invalidated': NodeInvalidatedPayload;
+  'version.added': VersionAddedPayload;
+  'version.selected': VersionSelectedPayload;
+  'branch.created': BranchCreatedPayload;
+  'runner.swap_suggested': RunnerSwapSuggestedPayload;
+  'runner.swapped': RunnerSwappedPayload;
+  'critique.added': CritiqueAddedPayload;
+}
+
+export interface DheeEvent<K extends EventKind = EventKind> {
+  seq: number;
+  id: string;
+  ts: number;
+  branchId: string;
+  parentEventId?: string;
+  actor: EventActor;
+  kind: K;
+  payload: PayloadByKind[K];
+}
+
+/** Shape accepted by EventLog.append — seq/id/ts are assigned by the log. */
+export type EventAppendInput<K extends EventKind = EventKind> = Omit<DheeEvent<K>, 'seq' | 'id' | 'ts'>;
