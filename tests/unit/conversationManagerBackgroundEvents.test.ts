@@ -68,10 +68,13 @@ describe('ConversationManager — backgroundEvents pin survives agent-turn end',
 
     const toolStreamingCalls: Array<{ chunk: string; toolName?: string }> = [];
     const toolResultCalls: Array<{ result: unknown; isError?: boolean }> = [];
-    const assetCalls: Array<{ kind: string; path: string }> = [];
+    const toolCallCalls: Array<{ toolName: string; args: Record<string, unknown> }> = [];
+    const assetCalls: Array<{ kind: string; path: string; projectDir?: string }> = [];
 
     const events: ConversationEvents = {
-      onToolCall: () => {},
+      onToolCall: (_sid, _id, toolName, args) => {
+        toolCallCalls.push({ toolName, args });
+      },
       onToolStreaming: (_sid, _id, chunk, _done, _wf, toolName) => {
         toolStreamingCalls.push({ chunk, ...(toolName ? { toolName } : {}) });
       },
@@ -82,7 +85,7 @@ describe('ConversationManager — backgroundEvents pin survives agent-turn end',
         });
       },
       onMediaGenerated: (_sid, ev) => {
-        assetCalls.push({ kind: ev.kind, path: ev.path });
+        assetCalls.push({ kind: ev.kind, path: ev.path, projectDir: ev.projectDir });
       },
     };
 
@@ -100,7 +103,7 @@ describe('ConversationManager — backgroundEvents pin survives agent-turn end',
           kind: 'run_to',
           projectName: 'test',
           sessionId,
-          params: {},
+          params: { projectDir: '/tmp/docs/test' },
         });
         // Wait one microtask so the runner's executor has captured
         // hooks and the 'started' event has propagated.
@@ -160,6 +163,14 @@ describe('ConversationManager — backgroundEvents pin survives agent-turn end',
     expect(internalSession.activeEvents).toBeUndefined();
     expect(internalSession.backgroundEvents).toBeDefined();
     expect(capturedHooks).not.toBeNull();
+    expect(toolCallCalls[0]).toMatchObject({
+      toolName: 'dhee_run_to',
+      args: {
+        project: 'test',
+        projectDir: '/tmp/docs/test',
+        background: true,
+      },
+    });
 
     // Post-condition #2: events emitted by the still-running task
     // route through backgroundEvents, not activeEvents.
@@ -179,7 +190,7 @@ describe('ConversationManager — backgroundEvents pin survives agent-turn end',
       true,
     );
     expect(assetCalls).toEqual([
-      { kind: 'image', path: 'assets/images/x.png' },
+      { kind: 'image', path: 'assets/images/x.png', projectDir: '/tmp/docs/test' },
     ]);
 
     // Post-condition #3: completing the task fires onToolResult AND

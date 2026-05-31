@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { extname, isAbsolute, join, sep } from "node:path";
 import { Type, type Static } from "typebox";
 import { defineTool, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
@@ -22,35 +23,57 @@ interface ManifestEntry {
 export interface ShowDetails {
   /** Path relative to <project>.dhee/. The frontend renders inline when this matches an image/video extension. */
   file_path: string;
+  /** Absolute project root used to resolve this asset. */
+  projectDir?: string;
+  /** Absolute on-disk path for renderers/tools that should not rediscover the project root. */
+  absolute_file_path?: string;
   asset_id: string;
   asset_type: string;
   created_at: number;
 }
 
-async function loadProject(projectName: string): Promise<Record<string, unknown> | null> {
+interface LoadedProject {
+  project: Record<string, unknown>;
+  projectDir: string;
+}
+
+interface LoadedManifest {
+  entries: ManifestEntry[];
+  projectDir?: string;
+}
+
+async function loadProject(
+  projectName: string,
+  projectDirOverride?: string,
+): Promise<LoadedProject | null> {
   try {
     const projectDir = resolveProjectDir({
       name: projectName,
       basePath: getProjectsDir(),
+      ...(projectDirOverride ? { projectDir: projectDirOverride } : {}),
     });
     const raw = await readFile(join(projectDir, "project.json"), "utf8");
-    return JSON.parse(raw) as Record<string, unknown>;
+    return { project: JSON.parse(raw) as Record<string, unknown>, projectDir };
   } catch {
     return null;
   }
 }
 
-async function loadManifest(projectName: string): Promise<ManifestEntry[]> {
+async function loadManifest(
+  projectName: string,
+  projectDirOverride?: string,
+): Promise<LoadedManifest> {
   try {
     const projectDir = resolveProjectDir({
       name: projectName,
       basePath: getProjectsDir(),
+      ...(projectDirOverride ? { projectDir: projectDirOverride } : {}),
     });
     const raw = await readFile(join(projectDir, "assets", "manifest.json"), "utf8");
     const parsed = JSON.parse(raw) as { assets?: ManifestEntry[] };
-    return parsed.assets ?? [];
+    return { entries: parsed.assets ?? [], projectDir };
   } catch {
-    return [];
+    return { entries: [] };
   }
 }
 
@@ -62,15 +85,28 @@ function shotFilenamePrefix(scene: number, shot: number): string {
   return `s${scene}shot${shot}_`;
 }
 
+function absoluteAssetPath(projectDir: string, path: string): string {
+  return isAbsolute(path) ? path : join(projectDir, path);
+}
+
 function frameResult(
   ref: { path: string; createdAt: number } | undefined,
   notFound: string,
+  projectDir?: string,
 ): AgentToolResult<ShowDetails | { found: false }> {
-  if (!ref) return { content: [{ type: "text", text: notFound }], details: { found: false } };
+  if (!ref) {
+    return {
+      content: [{ type: "text", text: notFound }],
+      details: { found: false, ...(projectDir ? { projectDir } : {}) },
+    };
+  }
   return {
     content: [{ type: "text", text: `${ref.path} (created ${new Date(ref.createdAt).toISOString()})` }],
     details: {
       file_path: ref.path,
+      ...(projectDir
+        ? { projectDir, absolute_file_path: absoluteAssetPath(projectDir, ref.path) }
+        : {}),
       asset_id: ref.path,
       asset_type: "scene_image",
       created_at: ref.createdAt,
@@ -81,12 +117,21 @@ function frameResult(
 function manifestResult(
   entry: ManifestEntry | undefined,
   notFound: string,
+  projectDir?: string,
 ): AgentToolResult<ShowDetails | { found: false }> {
-  if (!entry) return { content: [{ type: "text", text: notFound }], details: { found: false } };
+  if (!entry) {
+    return {
+      content: [{ type: "text", text: notFound }],
+      details: { found: false, ...(projectDir ? { projectDir } : {}) },
+    };
+  }
   return {
     content: [{ type: "text", text: `${entry.path} (created ${new Date(entry.createdAt).toISOString()})` }],
     details: {
       file_path: entry.path,
+      ...(projectDir
+        ? { projectDir, absolute_file_path: absoluteAssetPath(projectDir, entry.path) }
+        : {}),
       asset_id: entry.id,
       asset_type: entry.type,
       created_at: entry.createdAt,
@@ -96,6 +141,12 @@ function manifestResult(
 
 const ShotFrameParams = Type.Object({
   project: Type.String({ description: "Project name" }),
+  projectDir: Type.Optional(
+    Type.String({
+      description:
+        "Absolute path to the project folder. Pass when the host has already focused a workspace folder outside the default projects directory.",
+    }),
+  ),
   scene: Type.Number({ description: "Scene number, e.g. 1" }),
   shot: Type.Number({ description: "Shot number within the scene, e.g. 2" }),
 });
@@ -151,20 +202,21 @@ export function createShowFirstFrameTool(opts: ShowAssetOpts = {}): ToolDefiniti
     parameters: ShotFrameParams,
     async execute(_id, params: Static<typeof ShotFrameParams>) {
       validateShotFrameParams(params, "kshana_show_first_frame");
-      const project = await loadProject(params.project);
-      const shot = project ? findShot(project, params.scene, params.shot) : undefined;
-      if (shot?.firstFrame) {
+      const loaded = await loadProject(params.project, params.projectDir);
+      const shot = loaded ? findShot(loaded.project, params.scene, params.shot) : undefined;
+      if (loaded && shot?.firstFrame) {
         opts.onMedia?.({
           kind: "image",
           project: params.project,
+          projectDir: loaded.projectDir,
           path: shot.firstFrame.path,
           source: "dhee_show_first_frame",
         });
-        return frameResult(shot.firstFrame, "");
+        return frameResult(shot.firstFrame, "", loaded.projectDir);
       }
-      const entries = await loadManifest(params.project);
+      const manifest = await loadManifest(params.project, params.projectDir);
       const prefix = shotFilenamePrefix(params.scene, params.shot);
-      const matches = entries.filter(
+      const matches = manifest.entries.filter(
         (e) => e.type === "scene_image" && e.path.includes(`${prefix}first_frame`),
       );
       const latest = pickLatest(matches);
@@ -172,6 +224,7 @@ export function createShowFirstFrameTool(opts: ShowAssetOpts = {}): ToolDefiniti
         opts.onMedia?.({
           kind: "image",
           project: params.project,
+          ...(manifest.projectDir ? { projectDir: manifest.projectDir } : {}),
           path: latest.path,
           source: "dhee_show_first_frame",
         });
@@ -179,6 +232,7 @@ export function createShowFirstFrameTool(opts: ShowAssetOpts = {}): ToolDefiniti
       return manifestResult(
         latest,
         `No first-frame image found for scene ${params.scene} shot ${params.shot} in '${params.project}'.`,
+        manifest.projectDir,
       );
     },
   });
@@ -193,20 +247,21 @@ export function createShowLastFrameTool(opts: ShowAssetOpts = {}): ToolDefinitio
     parameters: ShotFrameParams,
     async execute(_id, params: Static<typeof ShotFrameParams>) {
       validateShotFrameParams(params, "kshana_show_last_frame");
-      const project = await loadProject(params.project);
-      const shot = project ? findShot(project, params.scene, params.shot) : undefined;
-      if (shot?.lastFrame) {
+      const loaded = await loadProject(params.project, params.projectDir);
+      const shot = loaded ? findShot(loaded.project, params.scene, params.shot) : undefined;
+      if (loaded && shot?.lastFrame) {
         opts.onMedia?.({
           kind: "image",
           project: params.project,
+          projectDir: loaded.projectDir,
           path: shot.lastFrame.path,
           source: "dhee_show_last_frame",
         });
-        return frameResult(shot.lastFrame, "");
+        return frameResult(shot.lastFrame, "", loaded.projectDir);
       }
-      const entries = await loadManifest(params.project);
+      const manifest = await loadManifest(params.project, params.projectDir);
       const prefix = shotFilenamePrefix(params.scene, params.shot);
-      const matches = entries.filter(
+      const matches = manifest.entries.filter(
         (e) => e.type === "scene_image" && e.path.includes(`${prefix}last_frame`),
       );
       const latest = pickLatest(matches);
@@ -214,6 +269,7 @@ export function createShowLastFrameTool(opts: ShowAssetOpts = {}): ToolDefinitio
         opts.onMedia?.({
           kind: "image",
           project: params.project,
+          ...(manifest.projectDir ? { projectDir: manifest.projectDir } : {}),
           path: latest.path,
           source: "dhee_show_last_frame",
         });
@@ -221,6 +277,7 @@ export function createShowLastFrameTool(opts: ShowAssetOpts = {}): ToolDefinitio
       return manifestResult(
         latest,
         `No last-frame image found for scene ${params.scene} shot ${params.shot} in '${params.project}'.`,
+        manifest.projectDir,
       );
     },
   });
@@ -235,12 +292,13 @@ export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinitio
     parameters: ShotFrameParams,
     async execute(_id, params: Static<typeof ShotFrameParams>) {
       validateShotFrameParams(params, "kshana_show_shot_video");
-      const project = await loadProject(params.project);
-      const shot = project ? findShot(project, params.scene, params.shot) : undefined;
-      if (shot?.video) {
+      const loaded = await loadProject(params.project, params.projectDir);
+      const shot = loaded ? findShot(loaded.project, params.scene, params.shot) : undefined;
+      if (loaded && shot?.video) {
         opts.onMedia?.({
           kind: "video",
           project: params.project,
+          projectDir: loaded.projectDir,
           path: shot.video.path,
           source: "dhee_show_shot_video",
         });
@@ -248,15 +306,17 @@ export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinitio
           content: [{ type: "text", text: `${shot.video.path} (created ${new Date(shot.video.createdAt).toISOString()})` }],
           details: {
             file_path: shot.video.path,
+            projectDir: loaded.projectDir,
+            absolute_file_path: absoluteAssetPath(loaded.projectDir, shot.video.path),
             asset_id: shot.video.path,
             asset_type: "scene_video",
             created_at: shot.video.createdAt,
           },
         };
       }
-      const entries = await loadManifest(params.project);
+      const manifest = await loadManifest(params.project, params.projectDir);
       const prefix = shotFilenamePrefix(params.scene, params.shot);
-      const matches = entries.filter(
+      const matches = manifest.entries.filter(
         (e) => e.type === "scene_video" && e.path.includes(prefix),
       );
       const latest = pickLatest(matches);
@@ -264,6 +324,7 @@ export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinitio
         opts.onMedia?.({
           kind: "video",
           project: params.project,
+          ...(manifest.projectDir ? { projectDir: manifest.projectDir } : {}),
           path: latest.path,
           source: "dhee_show_shot_video",
         });
@@ -271,6 +332,7 @@ export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinitio
       return manifestResult(
         latest,
         `No video clip found for scene ${params.scene} shot ${params.shot} in '${params.project}'.`,
+        manifest.projectDir,
       );
     },
   });
@@ -278,6 +340,12 @@ export function createShowShotVideoTool(opts: ShowAssetOpts = {}): ToolDefinitio
 
 const FinalVideoParams = Type.Object({
   project: Type.String({ description: "Project name" }),
+  projectDir: Type.Optional(
+    Type.String({
+      description:
+        "Absolute path to the project folder. Pass when the host has already focused a workspace folder outside the default projects directory.",
+    }),
+  ),
 });
 
 export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefinition {
@@ -288,12 +356,13 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
       "Show the assembled final video for a project. Reads project.finalVideo first, falls back to manifest. Renders inline.",
     parameters: FinalVideoParams,
     async execute(_id, params: Static<typeof FinalVideoParams>) {
-      const project = await loadProject(params.project);
-      const finalVideo = project?.["finalVideo"] as { path: string; createdAt: number } | undefined;
-      if (finalVideo) {
+      const loaded = await loadProject(params.project, params.projectDir);
+      const finalVideo = loaded?.project["finalVideo"] as { path: string; createdAt: number } | undefined;
+      if (loaded && finalVideo) {
         opts.onMedia?.({
           kind: "video",
           project: params.project,
+          projectDir: loaded.projectDir,
           path: finalVideo.path,
           source: "dhee_show_final_video",
         });
@@ -301,19 +370,22 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
           content: [{ type: "text", text: `${finalVideo.path} (created ${new Date(finalVideo.createdAt).toISOString()})` }],
           details: {
             file_path: finalVideo.path,
+            projectDir: loaded.projectDir,
+            absolute_file_path: absoluteAssetPath(loaded.projectDir, finalVideo.path),
             asset_id: finalVideo.path,
             asset_type: "final_video",
             created_at: finalVideo.createdAt,
           },
         };
       }
-      const entries = await loadManifest(params.project);
-      const matches = entries.filter((e) => e.type === "final_video");
+      const manifest = await loadManifest(params.project, params.projectDir);
+      const matches = manifest.entries.filter((e) => e.type === "final_video");
       const latest = pickLatest(matches);
       if (latest) {
         opts.onMedia?.({
           kind: "video",
           project: params.project,
+          ...(manifest.projectDir ? { projectDir: manifest.projectDir } : {}),
           path: latest.path,
           source: "dhee_show_final_video",
         });
@@ -321,6 +393,7 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
       return manifestResult(
         latest,
         `No final video found for '${params.project}'.`,
+        manifest.projectDir,
       );
     },
   });
@@ -344,6 +417,12 @@ export function createShowFinalVideoTool(opts: ShowAssetOpts = {}): ToolDefiniti
 // resolved against the project directory.
 const ShowImageParams = Type.Object({
   project: Type.String({ description: "Project name." }),
+  projectDir: Type.Optional(
+    Type.String({
+      description:
+        "Absolute path to the project folder. Pass when the host has already focused a workspace folder outside the default projects directory.",
+    }),
+  ),
   path: Type.String({
     description:
       "Image path. Absolute paths are used as-is; relative paths are resolved against the project directory. PNG / JPG / WEBP / GIF.",
@@ -351,9 +430,6 @@ const ShowImageParams = Type.Object({
 });
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
-
-import { existsSync } from "node:fs";
-import { isAbsolute, extname, sep } from "node:path";
 
 export function createShowImageTool(opts: ShowAssetOpts = {}): ToolDefinition {
   return defineTool({
@@ -383,6 +459,7 @@ export function createShowImageTool(opts: ShowAssetOpts = {}): ToolDefinition {
         projectDir = resolveProjectDir({
           name: params.project,
           basePath: getProjectsDir(),
+          ...(params.projectDir ? { projectDir: params.projectDir } : {}),
         });
       } catch (err) {
         return {
@@ -392,6 +469,7 @@ export function createShowImageTool(opts: ShowAssetOpts = {}): ToolDefinition {
           }],
           details: {
             file_path: params.path,
+            ...(params.projectDir ? { projectDir: params.projectDir } : {}),
             asset_id: params.path,
             asset_type: "image",
             created_at: 0,
@@ -407,6 +485,8 @@ export function createShowImageTool(opts: ShowAssetOpts = {}): ToolDefinition {
           }],
           details: {
             file_path: params.path,
+            projectDir,
+            absolute_file_path: absPath,
             asset_id: params.path,
             asset_type: "image",
             created_at: 0,
@@ -423,6 +503,7 @@ export function createShowImageTool(opts: ShowAssetOpts = {}): ToolDefinition {
       opts.onMedia?.({
         kind: "image",
         project: params.project,
+        projectDir,
         path: emitPath,
         source: "dhee_show_image",
       });
@@ -430,6 +511,8 @@ export function createShowImageTool(opts: ShowAssetOpts = {}): ToolDefinition {
         content: [{ type: "text", text: `Showed image: ${emitPath}` }],
         details: {
           file_path: emitPath,
+          projectDir,
+          absolute_file_path: absPath,
           asset_id: absPath,
           asset_type: "image",
           created_at: 0,

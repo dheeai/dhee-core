@@ -55,6 +55,7 @@ const Params = Type.Object({
 });
 
 export interface DescribeImageDetails {
+  projectDir: string;
   resolvedPath: string;
   vlmConfigured: boolean;
 }
@@ -104,13 +105,13 @@ export const dheeDescribeImage = defineTool({
         "must also be on.";
       return {
         content: [{ type: "text", text }],
-        details: { resolvedPath: target, vlmConfigured: false },
+        details: { projectDir, resolvedPath: target, vlmConfigured: false },
       };
     }
 
     return {
       content: [{ type: "text", text: description }],
-      details: { resolvedPath: target, vlmConfigured: true },
+      details: { projectDir, resolvedPath: target, vlmConfigured: true },
     };
   },
 });

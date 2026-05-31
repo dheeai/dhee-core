@@ -145,9 +145,9 @@ export interface ConversationEvents {
   /** User-facing notification */
   onNotification?: (sessionId: string, data: { level: 'info' | 'warning' | 'error'; message: string }) => void;
   /** Agent (or user) focused a project — frontend should treat it as the active project. */
-  onProjectFocused?: (sessionId: string, data: { projectName: string; templateId: string; style: string; duration: number; tools: string[] }) => void;
+  onProjectFocused?: (sessionId: string, data: { projectName: string; projectDir?: string; templateId: string; style: string; duration: number; tools: string[] }) => void;
   /** A long-running tool produced an asset (image / video) — surface it as a standalone chat event. */
-  onMediaGenerated?: (sessionId: string, data: { kind: 'image' | 'video'; project: string; path: string; source: string }) => void;
+  onMediaGenerated?: (sessionId: string, data: { kind: 'image' | 'video'; project: string; projectDir?: string; path: string; source: string }) => void;
   /**
    * Session lifecycle transitions — emitted on every change of
    * `session.state.status` (idle / running / awaiting_input / completed
@@ -257,6 +257,8 @@ interface ActiveSession {
   backgroundEvents?: ConversationEvents;
   /** Currently-focused project name (no .dhee suffix), set by dhee_focus_project. */
   focusedProject?: string;
+  /** Absolute on-disk root for the focused project, when known. */
+  focusedProjectDir?: string;
   /**
    * Path to a pi-coding-agent JSONL session to reopen on first agent
    * construction. Set when the WebSocket layer reconstructs a stale
@@ -312,6 +314,10 @@ export class ConversationManager {
     const runner = getBackgroundTaskRunner();
     const fakeToolCallIdForTask = (taskId: string): string =>
       `task:${taskId}`;
+    const projectDirFromTask = (task: BackgroundTaskRunnerEvents['started']['task']): string | undefined =>
+      typeof task.spec.params['projectDir'] === 'string'
+        ? task.spec.params['projectDir']
+        : undefined;
     // Pick the events sink that's still alive. Prefer the background
     // pin (set on 'started' and held for the task's lifetime) and
     // fall back to activeEvents for the rare case where the agent's
@@ -340,14 +346,21 @@ export class ConversationManager {
 
     runner.on('started', ({ task }: BackgroundTaskRunnerEvents['started']) => {
       const session = touchSessionActivity(task.spec.sessionId);
+      const taskProjectDir = projectDirFromTask(task);
+      const syntheticArgs: Record<string, unknown> = {
+        project: task.spec.projectName,
+        ...task.spec.params,
+        ...(taskProjectDir ? { projectDir: taskProjectDir } : {}),
+        background: true,
+      };
       captureToolCallStarted({
         sessionId: task.spec.sessionId,
         toolCallId: fakeToolCallIdForTask(task.id),
         toolName: `dhee_${task.spec.kind}`,
         agentName: session ? this.getWorkflowName(session) : 'background-task',
-        args: task.spec.params,
+        args: syntheticArgs,
         startedAt: new Date(task.startedAt).toISOString(),
-        projectDir: task.spec.projectName,
+        ...(taskProjectDir ? { projectDir: taskProjectDir } : {}),
         workflowName: 'background_task',
       });
       captureWorkflowStarted({
@@ -373,7 +386,7 @@ export class ConversationManager {
         task.spec.sessionId,
         fakeToolCallIdForTask(task.id),
         `dhee_${task.spec.kind}`,
-        task.spec.params,
+        syntheticArgs,
         this.getWorkflowName(session),
       );
     });
@@ -429,20 +442,23 @@ export class ConversationManager {
         'dhee_run_to',
       );
     });
-    runner.on('asset', ({ task, kind, filePath }: BackgroundTaskRunnerEvents['asset']) => {
+    runner.on('asset', ({ task, kind, filePath, projectDir }: BackgroundTaskRunnerEvents['asset']) => {
       const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
       if (!session || !events) return;
+      const taskProjectDir = projectDir ?? projectDirFromTask(task);
       events.onMediaGenerated?.(task.spec.sessionId, {
         kind,
         path: filePath,
         project: task.spec.projectName,
+        ...(taskProjectDir ? { projectDir: taskProjectDir } : {}),
         source: 'dhee_run_to',
       });
     });
     runner.on('completed', ({ task }: BackgroundTaskRunnerEvents['completed']) => {
       const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
+      const taskProjectDir = projectDirFromTask(task);
       const completedAt = new Date(task.completedAt ?? Date.now()).toISOString();
       const durationMs = Math.max(0, (task.completedAt ?? Date.now()) - task.startedAt);
       captureToolCallCompleted({
@@ -454,7 +470,7 @@ export class ConversationManager {
         durationMs,
         startedAt: new Date(task.startedAt).toISOString(),
         completedAt,
-        projectDir: task.spec.projectName,
+        ...(taskProjectDir ? { projectDir: taskProjectDir } : {}),
         workflowName: 'background_task',
       });
       captureWorkflowCompleted({
@@ -479,6 +495,7 @@ export class ConversationManager {
     runner.on('failed', ({ task, error }: BackgroundTaskRunnerEvents['failed']) => {
       const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
+      const taskProjectDir = projectDirFromTask(task);
       const completedAt = new Date(task.completedAt ?? Date.now()).toISOString();
       const durationMs = Math.max(0, (task.completedAt ?? Date.now()) - task.startedAt);
       captureToolCallCompleted({
@@ -491,7 +508,7 @@ export class ConversationManager {
         errorMessage: error,
         startedAt: new Date(task.startedAt).toISOString(),
         completedAt,
-        projectDir: task.spec.projectName,
+        ...(taskProjectDir ? { projectDir: taskProjectDir } : {}),
         workflowName: 'background_task',
       });
       captureWorkflowFailed({
@@ -517,6 +534,7 @@ export class ConversationManager {
     runner.on('cancelled', ({ task }: BackgroundTaskRunnerEvents['cancelled']) => {
       const session = touchSessionActivity(task.spec.sessionId);
       const events = sinkFor(session);
+      const taskProjectDir = projectDirFromTask(task);
       const completedAt = new Date(task.completedAt ?? Date.now()).toISOString();
       const durationMs = Math.max(0, (task.completedAt ?? Date.now()) - task.startedAt);
       captureToolCallCompleted({
@@ -528,7 +546,7 @@ export class ConversationManager {
         durationMs,
         startedAt: new Date(task.startedAt).toISOString(),
         completedAt,
-        projectDir: task.spec.projectName,
+        ...(taskProjectDir ? { projectDir: taskProjectDir } : {}),
         workflowName: 'background_task',
       });
       if (session && events) {
@@ -812,6 +830,7 @@ export class ConversationManager {
             basePath: defaultBasePath(),
           });
           const projectDirName = nodePath.basename(projectDirAbs);
+          resumed.focusedProjectDir = projectDirAbs;
           resumed.sessionContext = mode === 'remote' && remoteFs
             ? createRemoteSession(sessionId, projectDirName, remoteFs)
             : createLocalSession(sessionId, projectDirName);
@@ -876,7 +895,7 @@ export class ConversationManager {
     runInSession(session.sessionContext, () => {
       if (!session.agent) {
         const slug = projectDirName
-          ? projectDirName.replace(/\.dhee$/, '')
+          ? nodePath.basename(projectDirName).replace(/\.(?:dhee|kshana)$/, '')
           : (session.focusedProject ?? AMBIENT_PROJECT_SLUG);
         session.agent = new PiSessionAgent({
           role: session.role,
@@ -884,6 +903,10 @@ export class ConversationManager {
           projectSlug: slug,
           ...(session.resumeSessionFile ? { resumeSessionFile: session.resumeSessionFile } : {}),
           focusProject: (name) => this.focusSessionProject(sessionId, name),
+          getFocusedProject: () => ({
+            projectName: session.focusedProject,
+            projectDir: session.focusedProjectDir,
+          }),
           onMedia: (event) => {
             const s = this.sessions.get(sessionId);
             s?.activeEvents?.onMediaGenerated?.(sessionId, event);
@@ -897,7 +920,18 @@ export class ConversationManager {
     });
 
     if (projectDirName) {
-      session.focusedProject = projectDirName.replace(/\.dhee$/, '');
+      session.focusedProject = nodePath.basename(projectDirName).replace(/\.(?:dhee|kshana)$/, '');
+      try {
+        session.focusedProjectDir = resolveProjectDir({
+          name: session.focusedProject,
+          basePath: defaultBasePath(),
+          ...(nodePath.isAbsolute(projectDirName) ? { projectDir: projectDirName } : {}),
+        });
+      } catch {
+        session.focusedProjectDir = nodePath.isAbsolute(projectDirName)
+          ? projectDirName
+          : undefined;
+      }
       // Keep the sessionStore record's projectSlug current so per-project
       // resume queries see the latest focus. Best-effort — failure here
       // shouldn't break the configure call.
@@ -937,6 +971,10 @@ export class ConversationManager {
           projectSlug: slug,
           ...(session.resumeSessionFile ? { resumeSessionFile: session.resumeSessionFile } : {}),
           focusProject: (name) => this.focusSessionProject(sessionId, name),
+          getFocusedProject: () => ({
+            projectName: session.focusedProject,
+            projectDir: session.focusedProjectDir,
+          }),
           onMedia: (event) => {
             const s = this.sessions.get(sessionId);
             s?.activeEvents?.onMediaGenerated?.(sessionId, event);
@@ -1410,7 +1448,12 @@ export class ConversationManager {
 
       // Announce the focused project on the first turn after it changes — pi
       // remembers it in its conversation context, so we only inject once.
-      const announced = applyProjectAnnouncement(task, session.focusedProject, session.announcedProject);
+      const announced = applyProjectAnnouncement(
+        task,
+        session.focusedProject,
+        session.announcedProject,
+        session.focusedProjectDir,
+      );
       session.announcedProject = announced.announcedProject;
       const effectiveTask = announced.task;
 
@@ -1542,8 +1585,9 @@ export class ConversationManager {
    * filesystem context, persists the project's stored config, and notifies
    * the frontend so panels (storyboard / phase / timeline) can populate.
    */
-  async focusSessionProject(sessionId: string, projectName: string): Promise<{
+  async focusSessionProject(sessionId: string, projectName: string, projectDir?: string): Promise<{
     projectName: string;
+    projectDir: string;
     title?: string;
     style?: string;
     phase?: string;
@@ -1563,6 +1607,7 @@ export class ConversationManager {
       projectDirAbs = resolveProjectDir({
         name: projectName,
         basePath: defaultBasePath(),
+        ...(projectDir ? { projectDir } : {}),
       });
     } catch (err) {
       const detail =
@@ -1633,6 +1678,7 @@ export class ConversationManager {
     }
 
     session.focusedProject = projectName;
+    session.focusedProjectDir = projectDirAbs;
     try {
       setSessionProject(sessionId, projectName);
     } catch {
@@ -1661,6 +1707,7 @@ export class ConversationManager {
     const tools = session.agent?.getToolNames() ?? [];
     session.activeEvents?.onProjectFocused?.(sessionId, {
       projectName,
+      projectDir: projectDirAbs,
       templateId,
       style,
       duration,
@@ -1669,6 +1716,7 @@ export class ConversationManager {
 
     return {
       projectName,
+      projectDir: projectDirAbs,
       title: project.title,
       style: project.style,
       phase: project.currentPhase,
@@ -1780,7 +1828,7 @@ export class ConversationManager {
     events?: ConversationEvents
   ): void {
     const session = this.sessions.get(sessionId);
-    const projectDir = session?.sessionContext?.projectDir;
+    const projectDir = session?.focusedProjectDir ?? session?.sessionContext?.projectDir;
     const workflowName = session ? this.getWorkflowName(session) : 'unknown';
 
     if (!events) return;
@@ -2505,6 +2553,7 @@ export class ConversationManager {
           effectiveEvents?.onMediaGenerated?.(sessionId, {
             kind: event.kind,
             project: session.focusedProject ?? '',
+            ...(session.focusedProjectDir ? { projectDir: session.focusedProjectDir } : {}),
             path: event.filePath,
             source: 'dhee_regen',
           });

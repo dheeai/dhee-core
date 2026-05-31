@@ -41,6 +41,7 @@ export interface TaskStatusDetails {
   taskId?: string;
   kind?: string;
   projectName?: string;
+  projectDir?: string;
   startedAt?: number;
   log: string;
   /** True when this response was served from the cooldown gate rather
@@ -69,7 +70,7 @@ interface ExecutorStateSnapshot {
   nodes?: Record<string, { status?: string } | undefined>;
 }
 
-function readLifecycleFromProject(projectName: string | undefined): {
+function readLifecycleFromProject(projectName: string | undefined, projectDirOverride?: string): {
   lifecycle: 'running' | 'blocked' | 'idle';
   inProgress: number;
   failed: number;
@@ -80,7 +81,11 @@ function readLifecycleFromProject(projectName: string | undefined): {
   const fallback = { lifecycle: 'idle' as const, inProgress: 0, failed: 0 };
   if (!projectName) return fallback;
   try {
-    const projectDir = resolveProjectDir({ name: projectName, basePath: getProjectsDir() });
+    const projectDir = resolveProjectDir({
+      name: projectName,
+      basePath: getProjectsDir(),
+      ...(projectDirOverride ? { projectDir: projectDirOverride } : {}),
+    });
     const projectJsonPath = join(projectDir, 'project.json');
     if (!existsSync(projectJsonPath)) return fallback;
     const raw = readFileSync(projectJsonPath, 'utf-8');
@@ -114,6 +119,10 @@ export const dheeTaskStatus = defineTool({
     const sinceLast = now - lastCallAt;
     const runner = getBackgroundTaskRunner();
     const active = runner.getActive();
+    const activeProjectDir =
+      typeof active?.spec.params['projectDir'] === 'string'
+        ? active.spec.params['projectDir']
+        : undefined;
 
     // Throttle path: within cooldown, return the bare-minimum
     // information plus a strong directive telling pi-agent to stop
@@ -130,6 +139,7 @@ export const dheeTaskStatus = defineTool({
         content: [{ type: "text", text: summary }],
         details: {
           active: !!active,
+          ...(activeProjectDir ? { projectDir: activeProjectDir } : {}),
           log: summary,
           throttled: true,
         },
@@ -155,7 +165,10 @@ export const dheeTaskStatus = defineTool({
       };
     }
     const elapsedSec = Math.round((now - active.startedAt) / 1000);
-    const { lifecycle, inProgress, failed } = readLifecycleFromProject(active.spec.projectName);
+    const { lifecycle, inProgress, failed } = readLifecycleFromProject(
+      active.spec.projectName,
+      activeProjectDir,
+    );
 
     // Bug 15: distinguish 'running' from 'blocked' in the agent-facing
     // text. A task that's "active" from the runner's perspective but
@@ -187,6 +200,7 @@ export const dheeTaskStatus = defineTool({
         taskId: active.id,
         kind: active.spec.kind,
         projectName: active.spec.projectName,
+        ...(activeProjectDir ? { projectDir: activeProjectDir } : {}),
         startedAt: active.startedAt,
         log: summary,
         lifecycle,

@@ -110,4 +110,64 @@ describe("ConversationManager.focusSessionProject reads project.json from dhee_P
     expect(internal.focusedProject).toBe("demo");
     expect(internal.announcedProject).toBeUndefined();
   });
+
+  it("keeps an explicit focused projectDir even when dhee_PROJECTS_DIR changes afterward", async () => {
+    const docsRoot = mkdtempSync(join(tmpdir(), "dhee-focus-docs-"));
+    const otherProjectsDir = mkdtempSync(join(tmpdir(), "dhee-focus-other-"));
+    const explicitProjectDir = join(docsRoot, "cyberpunk-2");
+    mkdirSync(explicitProjectDir, { recursive: true });
+    writeFileSync(
+      join(explicitProjectDir, "project.json"),
+      JSON.stringify({
+        version: "3.0",
+        name: "cyberpunk-2",
+        templateId: "narrative",
+        style: "cyberpunk",
+        targetDuration: 240,
+      }),
+    );
+
+    try {
+      process.env["dhee_PROJECTS_DIR"] = otherProjectsDir;
+      const cm = new ConversationManager({
+        llmConfig: { baseUrl: "x", apiKey: "x", model: "x" } as never,
+      });
+      const session = cm.createSession();
+
+      const focusSessionProject = (
+        cm as unknown as {
+          focusSessionProject: (
+            sessionId: string,
+            projectName: string,
+            projectDir?: string,
+          ) => Promise<{ projectName: string; projectDir?: string }>;
+        }
+      ).focusSessionProject.bind(cm);
+      const result = await focusSessionProject(session.id, "cyberpunk-2", explicitProjectDir);
+      expect(result.projectName).toBe("cyberpunk-2");
+      expect(result.projectDir).toBe(explicitProjectDir);
+
+      process.env["dhee_PROJECTS_DIR"] = projectsDir;
+
+      const sessions = (
+        cm as unknown as {
+          sessions: Map<
+            string,
+            {
+              focusedProject?: string;
+              focusedProjectDir?: string;
+              announcedProject?: string;
+            }
+          >;
+        }
+      ).sessions;
+      const internal = sessions.get(session.id)!;
+      expect(internal.focusedProject).toBe("cyberpunk-2");
+      expect(internal.focusedProjectDir).toBe(explicitProjectDir);
+      expect(internal.announcedProject).toBeUndefined();
+    } finally {
+      rmSync(docsRoot, { recursive: true, force: true });
+      rmSync(otherProjectsDir, { recursive: true, force: true });
+    }
+  });
 });

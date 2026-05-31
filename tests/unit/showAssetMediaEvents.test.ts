@@ -38,10 +38,12 @@ interface MediaCall {
   kind: "image" | "video";
   path: string;
   project: string;
+  projectDir?: string;
   source: string;
 }
 
 let projectsDir: string;
+let projectDir: string;
 let originalEnv: string | undefined;
 let mediaCalls: MediaCall[];
 
@@ -49,15 +51,15 @@ beforeEach(() => {
   projectsDir = mkdtempSync(join(tmpdir(), "dhee-show-media-"));
   // Bare-name folder (no .dhee suffix) — mirrors dhee-desktop's
   // NewProjectDialog default.
-  const proj = join(projectsDir, "TheVillage");
-  mkdirSync(join(proj, "assets"), { recursive: true });
+  projectDir = join(projectsDir, "TheVillage");
+  mkdirSync(join(projectDir, "assets"), { recursive: true });
   writeFileSync(
-    join(proj, "assets", "manifest.json"),
+    join(projectDir, "assets", "manifest.json"),
     JSON.stringify({ assets: [] }, null, 2),
     "utf8",
   );
   writeFileSync(
-    join(proj, "project.json"),
+    join(projectDir, "project.json"),
     JSON.stringify(
       {
         version: "3.0",
@@ -113,11 +115,16 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
     const tool = createShowFirstFrameTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/images/s1shot1_first.png");
+    expect(r.details["absolute_file_path"]).toBe(
+      join(projectDir, "assets/images/s1shot1_first.png"),
+    );
+    expect(r.details["projectDir"]).toBe(projectDir);
     expect(mediaCalls).toEqual([
       {
         kind: "image",
         path: "assets/images/s1shot1_first.png",
         project: "TheVillage",
+        projectDir,
         source: "dhee_show_first_frame",
       },
     ]);
@@ -127,11 +134,16 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
     const tool = createShowLastFrameTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/images/s1shot1_last.png");
+    expect(r.details["absolute_file_path"]).toBe(
+      join(projectDir, "assets/images/s1shot1_last.png"),
+    );
+    expect(r.details["projectDir"]).toBe(projectDir);
     expect(mediaCalls).toEqual([
       {
         kind: "image",
         path: "assets/images/s1shot1_last.png",
         project: "TheVillage",
+        projectDir,
         source: "dhee_show_last_frame",
       },
     ]);
@@ -141,11 +153,16 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
     const tool = createShowShotVideoTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage", scene: 1, shot: 1 });
     expect(r.details["file_path"]).toBe("assets/videos/shots/s1shot1.mp4");
+    expect(r.details["absolute_file_path"]).toBe(
+      join(projectDir, "assets/videos/shots/s1shot1.mp4"),
+    );
+    expect(r.details["projectDir"]).toBe(projectDir);
     expect(mediaCalls).toEqual([
       {
         kind: "video",
         path: "assets/videos/shots/s1shot1.mp4",
         project: "TheVillage",
+        projectDir,
         source: "dhee_show_shot_video",
       },
     ]);
@@ -155,11 +172,16 @@ describe("showAsset tools resolve bare-name folders + emit onMedia", () => {
     const tool = createShowFinalVideoTool({ onMedia });
     const r = await exec(tool, { project: "TheVillage" });
     expect(r.details["file_path"]).toBe("assets/videos/final/final.mp4");
+    expect(r.details["absolute_file_path"]).toBe(
+      join(projectDir, "assets/videos/final/final.mp4"),
+    );
+    expect(r.details["projectDir"]).toBe(projectDir);
     expect(mediaCalls).toEqual([
       {
         kind: "video",
         path: "assets/videos/final/final.mp4",
         project: "TheVillage",
+        projectDir,
         source: "dhee_show_final_video",
       },
     ]);
@@ -201,11 +223,14 @@ describe("dhee_show_image — generic image-by-path tool", () => {
     const r = await exec(tool, { project: "TheVillage", path: relPath });
 
     expect(r.details["file_path"]).toBe(relPath);
+    expect(r.details["absolute_file_path"]).toBe(join(projDir, relPath));
+    expect(r.details["projectDir"]).toBe(projectDir);
     expect(mediaCalls).toEqual([
       {
         kind: "image",
         path: relPath,
         project: "TheVillage",
+        projectDir,
         source: "dhee_show_image",
       },
     ]);

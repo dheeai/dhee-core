@@ -46,6 +46,50 @@ function envNumber(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+interface FocusedProjectContext {
+  projectName?: string;
+  projectDir?: string;
+}
+
+function normalizeProjectName(name: string): string {
+  return name.replace(/\.(?:dhee|kshana)$/, '');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function injectFocusedProjectDir(
+  tool: ToolDefinition,
+  getFocusedProject: () => FocusedProjectContext | undefined,
+): ToolDefinition {
+  if (!tool.name.startsWith('dhee_') || tool.name === 'dhee_focus_project') {
+    return tool;
+  }
+
+  return {
+    ...tool,
+    async execute(id: string, params: unknown, signal?: unknown, onUpdate?: unknown, context?: unknown) {
+      let nextParams = params;
+      const existingProjectDir = isRecord(params) ? params['projectDir'] : undefined;
+      const hasProjectDir =
+        typeof existingProjectDir === 'string' && existingProjectDir.trim().length > 0;
+      if (isRecord(params) && typeof params['project'] === 'string' && !hasProjectDir) {
+        const focused = getFocusedProject();
+        if (
+          focused?.projectDir &&
+          focused.projectName &&
+          normalizeProjectName(focused.projectName) === normalizeProjectName(params['project'])
+        ) {
+          nextParams = { ...params, projectDir: focused.projectDir };
+        }
+      }
+      const execute = tool.execute as unknown as (...args: unknown[]) => unknown;
+      return execute(id, nextParams, signal, onUpdate, context);
+    },
+  } as ToolDefinition;
+}
+
 /**
  * Build an `openai-completions` Model with explicit baseUrl/apiKey/model from
  * the given env-var prefix. Used for both the legacy `OPENAI_*` route and the
@@ -191,6 +235,8 @@ export class PiSessionAgent extends TypedEventEmitter {
     focusProject?: FocusProjectCallback;
     /** Called whenever a long-running tool surfaces a newly-generated asset. */
     onMedia?: MediaCallback;
+    /** Returns the currently-focused project so dhee_* tools can inherit its absolute root. */
+    getFocusedProject?: () => FocusedProjectContext | undefined;
     /**
      * Session id to embed in `dhee_dispatch_*` tools so the
      * background task runner tags emitted events with this id, and
@@ -266,6 +312,10 @@ export class PiSessionAgent extends TypedEventEmitter {
     if (opts?.sessionId) {
       const dispatchRunTo = createDispatchRunToTool({ sessionId: opts.sessionId });
       baseTools = [...baseTools, dispatchRunTo];
+    }
+
+    if (opts?.getFocusedProject) {
+      baseTools = baseTools.map((tool) => injectFocusedProjectDir(tool, opts.getFocusedProject!));
     }
 
     this.tools = opts?.focusProject

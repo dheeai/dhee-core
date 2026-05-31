@@ -63,6 +63,7 @@ const Params = Type.Object({
 
 export interface InvalidateDetails {
   status: "completed" | "failed";
+  projectDir?: string;
   log: string;
   invalidated: string[];
   notFound: string[];
@@ -142,6 +143,7 @@ export const dheeInvalidate = defineTool({
       content: [{ type: "text", text: summary }],
       details: {
         status: "completed",
+        projectDir,
         log: summary,
         invalidated: result.invalidated,
         notFound: result.notFound,

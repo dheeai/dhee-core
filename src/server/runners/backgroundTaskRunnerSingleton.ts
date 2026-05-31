@@ -138,6 +138,7 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
             ctx.hooks.onAsset?.({
               kind: event.kind,
               filePath: event.filePath,
+              projectDir,
               ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
               ...(event.nodeId !== undefined ? { nodeId: event.nodeId } : {}),
             });

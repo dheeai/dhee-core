@@ -8,6 +8,12 @@ import { resolveProjectDir, ProjectDirNotFoundError } from "./resolveProjectDir.
 
 const Params = Type.Object({
   project: Type.String({ description: "Project name" }),
+  projectDir: Type.Optional(
+    Type.String({
+      description:
+        "Absolute path to the project folder. Pass when the host has already focused a workspace folder outside the default projects directory.",
+    }),
+  ),
   type: Type.Optional(
     Type.String({ description: "Filter by node typeId, e.g. shot_image, shot_video_prompt" }),
   ),
@@ -21,6 +27,7 @@ const Params = Type.Object({
 
 export interface ListItemsDetails {
   status: string;
+  projectDir?: string;
   log: string;
   total: number;
   matches: number;
@@ -55,6 +62,7 @@ export const dheeListItems = defineTool({
       projectDir = resolveProjectDir({
         name: params.project,
         basePath: getProjectsDir(),
+        ...(params.projectDir ? { projectDir: params.projectDir } : {}),
       });
     } catch (err) {
       if (err instanceof ProjectDirNotFoundError) return failure(err.message);
@@ -96,7 +104,7 @@ export const dheeListItems = defineTool({
     const text = [`${header}${filterLine}`, ...lines].join('\n');
     return {
       content: [{ type: "text", text }],
-      details: { status: "completed", log: text, total: nodes.length, matches: filtered.length },
+      details: { status: "completed", projectDir, log: text, total: nodes.length, matches: filtered.length },
     };
   },
 });

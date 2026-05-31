@@ -68,4 +68,32 @@ describe("PiSessionAgent registers a media-aware show_shot when constructed with
     const agent = new PiSessionAgent({ systemPrompt: "test" });
     expect(agent.getToolNames()).toContain("dhee_show_shot");
   });
+
+  it("injects the focused projectDir into dhee_* calls when the project name matches", async () => {
+    const projectDir = join(projectsDir, "demo.dhee");
+    const wrongProjectsDir = mkdtempSync(join(tmpdir(), "dhee-show-e2e-wrong-"));
+    process.env["dhee_PROJECTS_DIR"] = wrongProjectsDir;
+
+    try {
+      const agent = new PiSessionAgent({
+        systemPrompt: "test",
+        getFocusedProject: () => ({ projectName: "demo", projectDir }),
+      });
+      const showShot = (agent as unknown as { tools: Array<{ name: string; execute: Function }> }).tools.find(
+        (t) => t.name === "dhee_show_shot",
+      );
+      expect(showShot).toBeTruthy();
+      const result = await showShot!.execute(
+        "test",
+        { project: "demo", scene: 1, shot: 1 },
+        undefined,
+        undefined,
+        {},
+      );
+
+      expect(result.details).toMatchObject({ projectDir, count: 2 });
+    } finally {
+      rmSync(wrongProjectsDir, { recursive: true, force: true });
+    }
+  });
 });

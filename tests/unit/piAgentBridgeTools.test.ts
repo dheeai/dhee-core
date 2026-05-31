@@ -215,7 +215,7 @@ describe('pi-agent runTo tool — bridge to runExecutor', () => {
   });
 
   it('translates runExecutor onAsset → onMedia callback when host provided one', async () => {
-    makeProject('myproj', { templateId: 'narrative' });
+    const projectDir = makeProject('myproj', { templateId: 'narrative' });
     mockedRunExecutor.mockImplementation(async (opts) => {
       opts.onAsset?.({
         kind: 'image',
@@ -238,6 +238,7 @@ describe('pi-agent runTo tool — bridge to runExecutor', () => {
       kind: 'image',
       path: '/abs/foo.png',
       project: 'myproj',
+      projectDir,
       source: 'dhee_run_to',
     });
   });

@@ -101,6 +101,7 @@ export interface TaskExecutionHooks {
   onAsset?: (info: {
     kind: 'image' | 'video';
     filePath: string;
+    projectDir?: string;
     toolName?: string;
     nodeId?: string;
   }) => void;
@@ -147,6 +148,7 @@ export interface BackgroundTaskRunnerEvents {
     task: TaskRecord;
     kind: 'image' | 'video';
     filePath: string;
+    projectDir?: string;
     toolName?: string;
     nodeId?: string;
   };
@@ -315,6 +317,11 @@ export class BackgroundTaskRunner {
           task: { ...record },
           kind: info.kind,
           filePath: info.filePath,
+          ...(typeof info.projectDir === 'string'
+            ? { projectDir: info.projectDir }
+            : typeof record.spec.params['projectDir'] === 'string'
+              ? { projectDir: record.spec.params['projectDir'] }
+              : {}),
           ...(info.toolName !== undefined ? { toolName: info.toolName } : {}),
           ...(info.nodeId !== undefined ? { nodeId: info.nodeId } : {}),
         }),

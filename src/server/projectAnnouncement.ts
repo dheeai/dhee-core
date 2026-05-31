@@ -12,12 +12,14 @@ export function applyProjectAnnouncement(
   task: string,
   focusedProject: string | undefined,
   announcedProject: string | undefined,
+  focusedProjectDir?: string | undefined,
 ): { task: string; announcedProject: string | undefined } {
   if (!focusedProject || focusedProject === announcedProject) {
     return { task, announcedProject };
   }
+  const root = focusedProjectDir ? ` Project root: ${focusedProjectDir}.` : '';
   return {
-    task: `(Active project: ${focusedProject}. Use this project for the user's request unless they specify a different one.)\n\n${task}`,
+    task: `(Active project: ${focusedProject}.${root} Use this project for the user's request unless they specify a different one.)\n\n${task}`,
     announcedProject: focusedProject,
   };
 }

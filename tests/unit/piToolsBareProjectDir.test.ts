@@ -94,10 +94,11 @@ describe("pi-agent tools resolve bare-name project folders (no .dhee suffix)", (
       { project: PROJECT_NAME } as never,
       undefined as never,
       undefined as never,
-    )) as ToolResult;
+    )) as ToolResult & { details?: { projectDir?: string } };
     const text = textOf(result);
     expect(text.toLowerCase()).not.toContain("project not found");
     expect(text.toLowerCase()).not.toContain("project.json not found");
+    expect(result.details?.projectDir).toBe(projectDir);
   });
 
   it("dhee_list_items accepts a bare-name folder with project.json", async () => {
@@ -106,10 +107,11 @@ describe("pi-agent tools resolve bare-name project folders (no .dhee suffix)", (
       { project: PROJECT_NAME } as never,
       undefined as never,
       undefined as never,
-    )) as ToolResult;
+    )) as ToolResult & { details?: { projectDir?: string } };
     const text = textOf(result);
     expect(text.toLowerCase()).not.toContain("project not found");
     expect(text.toLowerCase()).not.toContain("project.json not found");
+    expect(result.details?.projectDir).toBe(projectDir);
   });
 
   it("dhee_list_projects enumerates bare-name folders that contain a project.json", async () => {
@@ -127,10 +129,13 @@ describe("pi-agent tools resolve bare-name project folders (no .dhee suffix)", (
       {} as never,
       undefined as never,
       undefined as never,
-    )) as ToolResult & { details?: { projects?: Array<{ name: string }> } };
+    )) as ToolResult & { details?: { projects?: Array<{ name: string; projectDir?: string }> } };
     const names = (result.details?.projects ?? []).map((p) => p.name).sort();
     expect(names).toContain(PROJECT_NAME);
     expect(names).toContain("OtherProj");
+    expect(result.details?.projects?.find((p) => p.name === PROJECT_NAME)?.projectDir).toBe(
+      projectDir,
+    );
   });
 
   it("dhee_show_shot finds a shot in a bare-name folder with project.json", async () => {
@@ -144,12 +149,13 @@ describe("pi-agent tools resolve bare-name project folders (no .dhee suffix)", (
       { project: PROJECT_NAME, scene: 1, shot: 1 } as never,
       undefined as never,
       undefined as never,
-    )) as ToolResult & { details?: { found?: boolean } };
+    )) as ToolResult & { details?: { found?: boolean; projectDir?: string } };
     // The fixture's executorState describes scene_1_shot_1 but
     // doesn't populate firstFrame/lastFrame/video paths — a real
     // run would. The contract we pin: tool MUST find the project,
     // i.e. response is NOT the "no shot found" failure shape that
     // pi-agent shows when loadProject returned null.
     expect(result.details).not.toEqual({ found: false });
+    expect(result.details?.projectDir).toBe(projectDir);
   });
 });

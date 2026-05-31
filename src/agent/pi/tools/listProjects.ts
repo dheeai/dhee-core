@@ -9,6 +9,7 @@ const Params = Type.Object({});
 
 export interface ProjectSummary {
   name: string;
+  projectDir: string;
   title?: string;
   style?: string;
   phase?: string;
@@ -57,8 +58,9 @@ export const dheeListProjects = defineTool({
     const summaries: ProjectSummary[] = [];
     for (const dirname of projectDirs) {
       const name = dirname.replace(/\.dhee$/, "");
-      const projectJson = join(getProjectsDir(), dirname, "project.json");
-      let summary: ProjectSummary = { name, hasProjectJson: false };
+      const projectDir = join(getProjectsDir(), dirname);
+      const projectJson = join(projectDir, "project.json");
+      let summary: ProjectSummary = { name, projectDir, hasProjectJson: false };
       try {
         await stat(projectJson);
         const raw = await readFile(projectJson, "utf8");
@@ -70,6 +72,7 @@ export const dheeListProjects = defineTool({
         };
         summary = {
           name,
+          projectDir,
           title: parsed.title,
           style: parsed.style,
           phase: parsed.currentPhase,

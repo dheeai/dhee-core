@@ -18,6 +18,7 @@ const Params = Type.Object({
 
 export interface StatusDetails {
   status: string;
+  projectDir?: string;
   summary?: StatusSummary;
   log: string;
 }
@@ -74,7 +75,7 @@ export const dheeStatus = defineTool({
     const text = formatSummary(summary);
     return {
       content: [{ type: "text", text }],
-      details: { status: "completed", summary, log: text },
+      details: { status: "completed", projectDir, summary, log: text },
     };
   },
 });

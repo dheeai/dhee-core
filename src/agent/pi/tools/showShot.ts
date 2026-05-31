@@ -10,23 +10,34 @@ import { resolveProjectDir } from "./resolveProjectDir.js";
 
 const Params = Type.Object({
   project: Type.String({ description: "Project name" }),
+  projectDir: Type.Optional(
+    Type.String({
+      description:
+        "Absolute path to the project folder. Pass when the host has already focused a workspace folder outside the default projects directory.",
+    }),
+  ),
   scene: Type.Number({ description: "Scene number, e.g. 1" }),
   shot: Type.Number({ description: "Shot number within the scene, e.g. 2" }),
 });
 
 interface ShownDetails {
+  projectDir: string;
   shown: { firstFrame?: string; lastFrame?: string; midFrame?: string; video?: string };
   count: number;
 }
 
-async function loadProject(projectName: string): Promise<Record<string, unknown> | null> {
+async function loadProject(
+  projectName: string,
+  projectDirOverride?: string,
+): Promise<{ project: Record<string, unknown>; projectDir: string } | null> {
   try {
     const projectDir = resolveProjectDir({
       name: projectName,
       basePath: getProjectsDir(),
+      ...(projectDirOverride ? { projectDir: projectDirOverride } : {}),
     });
     const raw = await readFile(join(projectDir, "project.json"), "utf8");
-    return JSON.parse(raw) as Record<string, unknown>;
+    return { project: JSON.parse(raw) as Record<string, unknown>, projectDir };
   } catch {
     return null;
   }
@@ -53,21 +64,27 @@ export function createShowShotTool(opts: { onMedia?: MediaCallback }): ToolDefin
           `kshana_show_shot: 'shot' is required and must be a positive number (got ${JSON.stringify(params.shot)}). If you don't know the shot, call kshana_list_items to enumerate them first.`,
         );
       }
-      const project = await loadProject(params.project);
-      const shot = project ? findShot(project, params.scene, params.shot) : undefined;
-      if (!shot) {
+      const loaded = await loadProject(params.project, params.projectDir);
+      const shot = loaded ? findShot(loaded.project, params.scene, params.shot) : undefined;
+      if (!loaded || !shot) {
         return {
           content: [{
             type: "text",
             text: `No shot found at scene ${params.scene} shot ${params.shot} in '${params.project}'.`,
           }],
-          details: { found: false },
+          details: { found: false, ...(loaded ? { projectDir: loaded.projectDir } : {}) },
         };
       }
 
       const shown: ShownDetails["shown"] = {};
       const emit = (kind: "image" | "video", path: string) =>
-        opts.onMedia?.({ kind, project: params.project, path, source: "dhee_show_shot" });
+        opts.onMedia?.({
+          kind,
+          project: params.project,
+          projectDir: loaded.projectDir,
+          path,
+          source: "dhee_show_shot",
+        });
 
       if (shot.firstFrame?.path) {
         emit("image", shot.firstFrame.path);
@@ -97,7 +114,7 @@ export function createShowShotTool(opts: { onMedia?: MediaCallback }): ToolDefin
 
       return {
         content: [{ type: "text", text: summary }],
-        details: { shown, count: parts.length },
+        details: { projectDir: loaded.projectDir, shown, count: parts.length },
       };
     },
   });

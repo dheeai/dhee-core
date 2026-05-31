@@ -2,6 +2,11 @@ import { Type, type Static } from "typebox";
 import { defineTool, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { getBackgroundTaskRunner } from "../../../server/runners/backgroundTaskRunnerSingleton.js";
+import { getProjectsDir } from "../paths.js";
+import {
+  ProjectDirNotFoundError,
+  resolveProjectDir,
+} from "./resolveProjectDir.js";
 
 /**
  * Dispatch a `run_to` job to the background task runner. Returns
@@ -44,6 +49,7 @@ const Params = Type.Object({
 
 export interface DispatchDetails {
   status: "started" | "rejected" | "failed";
+  projectDir?: string;
   taskId?: string;
   reason?: string;
   activeTaskId?: string;
@@ -67,13 +73,18 @@ export function createDispatchRunToTool(opts: {
     parameters: Params,
     async execute(_id, params: Static<typeof Params>): Promise<AgentToolResult<DispatchDetails>> {
       try {
+        const projectDir = resolveProjectDir({
+          name: params.project,
+          basePath: getProjectsDir(),
+          ...(params.projectDir ? { projectDir: params.projectDir } : {}),
+        });
         const runner = getBackgroundTaskRunner();
         const result = runner.dispatch({
           kind: "run_to",
           projectName: params.project,
           sessionId: opts.sessionId,
           params: {
-            ...(params.projectDir ? { projectDir: params.projectDir } : {}),
+            projectDir,
             ...(params.stage ? { stage: params.stage } : {}),
             ...(params.skip_media ? { skip_media: params.skip_media } : {}),
           },
@@ -83,7 +94,7 @@ export function createDispatchRunToTool(opts: {
           const summary = `Started run_to task ${result.taskId} on project '${params.project}'${params.stage ? ` (stage='${params.stage}')` : ""}. Progress will stream below.`;
           return {
             content: [{ type: "text", text: summary }],
-            details: { status: "started", taskId: result.taskId, log: summary },
+            details: { status: "started", projectDir, taskId: result.taskId, log: summary },
           };
         }
 
@@ -93,6 +104,7 @@ export function createDispatchRunToTool(opts: {
           content: [{ type: "text", text: summary }],
           details: {
             status: "rejected",
+            projectDir,
             reason: result.reason,
             activeTaskId: result.activeTaskId,
             activeTaskKind: result.activeTaskKind,
@@ -102,9 +114,13 @@ export function createDispatchRunToTool(opts: {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        const hint =
+          err instanceof ProjectDirNotFoundError
+            ? `${message}. Pass projectDir as an absolute path if the project lives outside the default projects directory; do NOT rename the folder.`
+            : message;
         return {
-          content: [{ type: "text", text: `Dispatch failed: ${message}` }],
-          details: { status: "failed", log: message },
+          content: [{ type: "text", text: `Dispatch failed: ${hint}` }],
+          details: { status: "failed", log: hint },
         };
       }
     },

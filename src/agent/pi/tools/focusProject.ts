@@ -4,6 +4,7 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 
 export interface FocusProjectResult {
   projectName: string;
+  projectDir: string;
   title?: string;
   style?: string;
   phase?: string;
@@ -31,6 +32,7 @@ export function createFocusProjectTool(callback: FocusProjectCallback): ToolDefi
         const r = await callback(params.project);
         const lines = [
           `Focused on project: ${r.projectName}`,
+          `  projectDir: ${r.projectDir}`,
           r.title ? `  title: ${r.title}` : null,
           r.style ? `  style: ${r.style}` : null,
           r.phase ? `  phase: ${r.phase}` : null,

@@ -154,7 +154,7 @@ function buildHistoryFromEntries(entries: SessionEntry[]): HistoryData {
       // custom_message entry. Best-effort decode — if the shape doesn't
       // match, fall through to a plain text bubble so we don't drop it.
       const details = entry.details as
-        | { kind?: 'image' | 'video'; path?: string; project?: string; source?: string }
+        | { kind?: 'image' | 'video'; path?: string; project?: string; projectDir?: string; source?: string }
         | undefined;
       if (details?.kind && details?.path && details?.project) {
         messages.push({
@@ -166,6 +166,7 @@ function buildHistoryFromEntries(entries: SessionEntry[]): HistoryData {
             kind: details.kind,
             path: details.path,
             project: details.project,
+            ...(details.projectDir ? { projectDir: details.projectDir } : {}),
             ...(details.source ? { source: details.source } : {}),
           },
         });

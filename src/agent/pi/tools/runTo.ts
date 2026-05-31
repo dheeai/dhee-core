@@ -16,6 +16,8 @@ import type { AssetEvent } from "./parseAssetLines.js";
 export interface MediaEvent extends AssetEvent {
   /** Project name (no .dhee suffix) — captured from the tool params. */
   project: string;
+  /** Absolute project root used for this media event, when known. */
+  projectDir?: string;
   /** Tool that produced this asset, for downstream display. */
   source: string;
 }
@@ -49,6 +51,7 @@ const Params = Type.Object({
 
 interface RunToDetails {
   status: string;
+  projectDir?: string;
   stopReason: string | null;
   log: string;
 }
@@ -86,13 +89,28 @@ export function createRunToTool(opts?: {
         const { getBackgroundTaskRunner } = await import(
           "../../../server/runners/backgroundTaskRunnerSingleton.js"
         );
+        let projectDir: string;
+        try {
+          projectDir = resolveProjectDir({
+            name: params.project,
+            basePath: getProjectsDir(),
+            ...(params.projectDir ? { projectDir: params.projectDir } : {}),
+          });
+        } catch (err) {
+          if (err instanceof ProjectDirNotFoundError) {
+            return failure(
+              `${err.message}. Pass projectDir as an absolute path if the project lives outside the default projects directory; do NOT rename the folder.`,
+            );
+          }
+          return failure((err as Error).message);
+        }
         const runner = getBackgroundTaskRunner();
         const result = runner.dispatch({
           kind: "run_to",
           projectName: params.project,
           sessionId: opts.sessionId,
           params: {
-            ...(params.projectDir ? { projectDir: params.projectDir } : {}),
+            projectDir,
             ...(params.stage ? { stage: params.stage } : {}),
             ...(params.skip_media ? { skip_media: params.skip_media } : {}),
             ...(params.scope ? { scope: params.scope } : {}),
@@ -102,13 +120,13 @@ export function createRunToTool(opts?: {
           const text = `Started run_to task ${result.taskId}${params.stage ? ` (stage='${params.stage}')` : ""}. Progress will stream below.`;
           return {
             content: [{ type: "text", text }],
-            details: { status: "running", stopReason: null, log: text },
+            details: { status: "running", projectDir, stopReason: null, log: text },
           };
         }
         const text = `Cannot start: task ${result.activeTaskId} (${result.activeTaskKind}) is already running on '${result.activeProjectName}'. Use dhee_task_cancel to abort it, or wait.`;
         return {
           content: [{ type: "text", text }],
-          details: { status: "rejected", stopReason: null, log: text },
+          details: { status: "rejected", projectDir, stopReason: null, log: text },
         };
       }
 
@@ -211,6 +229,7 @@ export function createRunToTool(opts?: {
                   kind: event.kind,
                   path: event.filePath,
                   project: params.project,
+                  projectDir,
                   source: "dhee_run_to",
                 });
               },
@@ -230,6 +249,7 @@ export function createRunToTool(opts?: {
         content: [{ type: "text", text: summary }],
         details: {
           status: result.status,
+          projectDir,
           stopReason: result.stopReason,
           log: logLines.join("\n"),
         },
