@@ -18,6 +18,7 @@ import { dheeApplyWorkflowAliasesTool, makeApplyWorkflowAliasesTool } from './dh
 import { dheeCheckWorkflowTool, makeCheckWorkflowTool } from './dheeCheckWorkflow.js';
 import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProject.js';
 import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
+import { dheeDescribeBundleTool, makeDescribeBundleTool } from './dheeDescribeBundle.js';
 import { dheeForkTool, makeForkTool } from './dheeFork.js';
 import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
 import { dheeListBundlesTool, makeListBundlesTool } from './dheeListBundles.js';
@@ -35,6 +36,7 @@ import { dheeWriteNodeContentTool, makeWriteNodeContentTool } from './dheeWriteN
 export const DHEE_TOOL_NAMES = [
   'dhee_create_project',
   'dhee_list_bundles',
+  'dhee_describe_bundle',
   'dhee_run_bundle',
   'dhee_get_status',
   'dhee_regenerate_node',
@@ -57,6 +59,7 @@ export {
   dheeCheckWorkflowTool,
   dheeCreateProjectTool,
   dheeCritiqueNodeTool,
+  dheeDescribeBundleTool,
   dheeForkTool,
   dheeGetStatusTool,
   dheeListBundlesTool,
@@ -74,6 +77,7 @@ export {
   makeCheckWorkflowTool,
   makeCreateProjectTool,
   makeCritiqueNodeTool,
+  makeDescribeBundleTool,
   makeForkTool,
   makeGetStatusTool,
   makeListBundlesTool,
@@ -96,6 +100,7 @@ export {
 export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeCreateProjectTool);
   pi.registerTool(dheeListBundlesTool);
+  pi.registerTool(dheeDescribeBundleTool);
   pi.registerTool(dheeRunBundleTool);
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);
