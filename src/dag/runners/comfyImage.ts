@@ -90,6 +90,7 @@ const KLEIN_MAX_REFS = 4;
 // ── Endpoint resolution ────────────────────────────────────────────────
 
 import { resolveEndpointUrl } from './endpointResolver.js';
+import { extractShotReferences } from './extractShotReferences.js';
 
 // ── Default client factory (uses ComfyUIClient) ────────────────────────
 
@@ -282,12 +283,18 @@ export function createComfyImageRunner(opts?: {
     if (typeof ctx.inputs['shot_image_last_frame'] === 'string') {
       cfgWithUpstream['_fl2v_last_frame'] = ctx.inputs['shot_image_last_frame'];
     }
+    // When we resolve the prompt from ctx.inputs below, remember it
+    // so we can emit a precise `metadata.dependencies` set on success
+    // — only the refs this shot ACTUALLY consumed, not every char +
+    // setting the bundle's scope='all' makes available.
+    let extractedPrompt: { imagePrompt?: string; references?: Array<{ id?: string; type?: string }> } | null = null;
     if (!cfgWithUpstream['prompt']) {
       for (const v of Object.values(ctx.inputs)) {
         if (v && typeof v === 'object' && 'imagePrompt' in (v as Record<string, unknown>)) {
           const p = v as { imagePrompt?: string; references?: Array<{ id: string; type: string }>; aspectRatio?: string };
           if (typeof p.imagePrompt === 'string') {
             cfgWithUpstream['prompt'] = p.imagePrompt;
+            extractedPrompt = p;
             // Resolve references against character_image / setting_image
             // outputs already produced. We look up the upstream node by
             // ref.id and ref.type to find the rendered image path.
@@ -362,10 +369,19 @@ export function createComfyImageRunner(opts?: {
         mkdirSync(dirname(outAbs), { recursive: true });
         copyFileSync(hit.storePath, outAbs);
         ctx.log(`comfy.image: CAS hit ${hit.hash.slice(0, 8)} → ${cfg.outputPath}`);
+        const cachedDeps = extractedPrompt
+          ? extractShotReferences({ promptItemId: ctx.itemId ?? '', prompt: extractedPrompt })
+          : null;
         return {
           ok: true,
           outputPath: cfg.outputPath,
-          metadata: { cached: true, inputsHash: hit.hash, casHit: true, ...(hit.metadata ?? {}) },
+          metadata: {
+            cached: true,
+            inputsHash: hit.hash,
+            casHit: true,
+            ...(hit.metadata ?? {}),
+            ...(cachedDeps ? { dependencies: cachedDeps } : {}),
+          },
         };
       }
     }
@@ -378,7 +394,17 @@ export function createComfyImageRunner(opts?: {
       try {
         if (statSync(outAbs).size > 0) {
           ctx.log(`comfy.image: cached → ${cfg.outputPath}`);
-          return { ok: true, outputPath: cfg.outputPath, metadata: { cached: true } };
+          const pathCachedDeps = extractedPrompt
+            ? extractShotReferences({ promptItemId: ctx.itemId ?? '', prompt: extractedPrompt })
+            : null;
+          return {
+            ok: true,
+            outputPath: cfg.outputPath,
+            metadata: {
+              cached: true,
+              ...(pathCachedDeps ? { dependencies: pathCachedDeps } : {}),
+            },
+          };
         }
       } catch {
         // fall through
@@ -578,6 +604,15 @@ export function createComfyImageRunner(opts?: {
       }
     }
 
+    // Stamp the precise dep list when the resolved prompt has a
+    // `references[]` field — only what we actually consumed gets
+    // recorded on node.completed.dependencies. Other char/setting
+    // items the walker exposed via scope='all' are NOT in this list,
+    // so cascade-invalidation stays surgical.
+    const preciseDeps = extractedPrompt
+      ? extractShotReferences({ promptItemId: ctx.itemId ?? '', prompt: extractedPrompt })
+      : null;
+
     return {
       ok: true,
       outputPath: cfg.outputPath,
@@ -585,6 +620,7 @@ export function createComfyImageRunner(opts?: {
         comfyOutput: imageOut.filename,
         cached: false,
         ...(inputsHashForEvent ? { inputsHash: inputsHashForEvent } : {}),
+        ...(preciseDeps ? { dependencies: preciseDeps } : {}),
       },
     };
   }

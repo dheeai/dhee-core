@@ -1445,11 +1445,20 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         const inputsHash = typeof md['inputsHash'] === 'string' ? (md['inputsHash'] as string) : undefined;
         const costUsd = typeof md['costUsd'] === 'number' ? (md['costUsd'] as number) : undefined;
         const versionId = `v${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-        // Dedupe dependencies — the same upstream may appear under
-        // multiple roles in a single resolve pass; keep the first.
+        // Dependency source-of-truth: if the runner stamped a precise
+        // dep list on metadata.dependencies, prefer it. Otherwise fall
+        // back to the walker's own collection (which is over-broad for
+        // scope='all' inputs — every item gets recorded, including
+        // ones the runner ignored). The runner-stamped list is what
+        // the cascade-invalidator and the Inspector hover-blast use
+        // to stay surgical.
+        const runnerDeps = result.metadata && typeof result.metadata === 'object'
+          ? (result.metadata as { dependencies?: Array<{ nodeId: string; itemId?: string; role?: 'input' | 'context' | 'reference' | 'aggregate' }> }).dependencies
+          : undefined;
+        const sourceDeps = Array.isArray(runnerDeps) ? runnerDeps : dependenciesUsed;
         const depSeen = new Set<string>();
         const depsForEvent: typeof dependenciesUsed = [];
-        for (const d of dependenciesUsed) {
+        for (const d of sourceDeps) {
           const k = `${d.nodeId}:${d.itemId ?? ''}:${d.role ?? ''}`;
           if (depSeen.has(k)) continue;
           depSeen.add(k);
