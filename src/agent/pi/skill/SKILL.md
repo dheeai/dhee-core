@@ -52,6 +52,16 @@ Call `dhee_list_bundles()` to get the live catalog with descriptions
 the user can read. Call `dhee_describe_bundle(bundleId)` for the
 specific bundle the user picks to learn its inputs + DAG shape.
 
+**Trust the descriptions.** Do NOT `read`, `ls`, `find`, or otherwise
+grep the bundles directory (`src/dag/bundles/`) to second-guess what
+`dhee_list_bundles` returned. The descriptions are authored by the
+bundle authors and are the canonical user-facing copy; reading the
+bundle.json yourself wastes ~10 tool calls per onboarding and produces
+text that's no better than what was already in your hand. If a
+description is genuinely missing context you need to answer the
+user's question, `dhee_describe_bundle` is the right next step — not
+the filesystem tools.
+
 ## Onboarding a fresh project
 
 When the focused project is fresh (no `project.json` yet — the desktop
