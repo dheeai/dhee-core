@@ -430,6 +430,138 @@ describe('dhee_write_node_content', () => {
     expect(storyPreserved).toBeDefined();
   });
 
+  it('16. BUG: per-instance cascade only — overriding shot_image_prompt:scene_1_shot_3 must NOT clear sibling shot walkState entries', async () => {
+    // Real-world regression: user critiqued shot 3 via dhee_critique_node,
+    // which writes shot_image_prompt:scene_1_shot_3 then cascades. The
+    // pre-fix cascade was bare-node-id based, so it cleared ALL items
+    // of every downstream node (shot_image:scene_1_shot_1..7 + scene_clip
+    // + final_video). Result: user said "fix shot 3" but shots 6, 7 got
+    // rerendered too. The fix uses cascadeInvalidationKeys (per-instance).
+
+    const { projectDir } = setupProject({
+      walkState: {
+        nodes: {
+          // Upstream — untouched.
+          characters_plan: { status: 'completed', outputPath: 'plans/characters_plan.json' },
+          // shot_image_prompt items: 1..7.
+          'shot_image_prompt:scene_1_shot_1': { status: 'completed', outputPath: 'prompts/shot_image/scene_1_shot_1.json' },
+          'shot_image_prompt:scene_1_shot_2': { status: 'completed', outputPath: 'prompts/shot_image/scene_1_shot_2.json' },
+          'shot_image_prompt:scene_1_shot_3': { status: 'completed', outputPath: 'prompts/shot_image/scene_1_shot_3.json' },
+          'shot_image_prompt:scene_1_shot_4': { status: 'completed', outputPath: 'prompts/shot_image/scene_1_shot_4.json' },
+          'shot_image_prompt:scene_1_shot_5': { status: 'completed', outputPath: 'prompts/shot_image/scene_1_shot_5.json' },
+          'shot_image_prompt:scene_1_shot_6': { status: 'completed', outputPath: 'prompts/shot_image/scene_1_shot_6.json' },
+          'shot_image_prompt:scene_1_shot_7': { status: 'completed', outputPath: 'prompts/shot_image/scene_1_shot_7.json' },
+          // shot_image items: 1..7.
+          'shot_image:scene_1_shot_1': { status: 'completed', outputPath: 'assets/images/scene_1_shot_1.png' },
+          'shot_image:scene_1_shot_2': { status: 'completed', outputPath: 'assets/images/scene_1_shot_2.png' },
+          'shot_image:scene_1_shot_3': { status: 'completed', outputPath: 'assets/images/scene_1_shot_3.png' },
+          'shot_image:scene_1_shot_4': { status: 'completed', outputPath: 'assets/images/scene_1_shot_4.png' },
+          'shot_image:scene_1_shot_5': { status: 'completed', outputPath: 'assets/images/scene_1_shot_5.png' },
+          'shot_image:scene_1_shot_6': { status: 'completed', outputPath: 'assets/images/scene_1_shot_6.png' },
+          'shot_image:scene_1_shot_7': { status: 'completed', outputPath: 'assets/images/scene_1_shot_7.png' },
+        },
+        lastInvalidatedIds: [],
+      },
+    });
+    dirs.push(projectDir);
+    mkdirSync(join(projectDir, 'prompts/shot_image'), { recursive: true });
+    mkdirSync(join(projectDir, 'assets/images'), { recursive: true });
+    // Seed all the canonical artifacts on disk so preserveAsVersion has something to rename.
+    for (const i of [1, 2, 3, 4, 5, 6, 7]) {
+      writeFileSync(join(projectDir, `prompts/shot_image/scene_1_shot_${i}.json`), `{"old":${i}}`);
+      writeFileSync(join(projectDir, `assets/images/scene_1_shot_${i}.png`), `IMG${i}`);
+    }
+    // Seed events.jsonl with per-instance deps so cascadeInvalidationKeys
+    // has a graph to walk: shot_image:N consumes shot_image_prompt:N only.
+    const { openEventLog } = await import('../../src/dag/eventLog/EventLog.js');
+    const log = openEventLog(projectDir);
+    for (const i of [1, 2, 3, 4, 5, 6, 7]) {
+      log.append({
+        kind: 'node.completed',
+        actor: 'walker',
+        branchId: 'main',
+        payload: {
+          nodeId: 'shot_image_prompt',
+          itemId: `scene_1_shot_${i}`,
+          versionId: `sip-${i}`,
+          outputPath: `prompts/shot_image/scene_1_shot_${i}.json`,
+          dependencies: [{ nodeId: 'characters_plan', role: 'context' }],
+        },
+      });
+      log.append({
+        kind: 'node.completed',
+        actor: 'walker',
+        branchId: 'main',
+        payload: {
+          nodeId: 'shot_image',
+          itemId: `scene_1_shot_${i}`,
+          versionId: `si-${i}`,
+          outputPath: `assets/images/scene_1_shot_${i}.png`,
+          dependencies: [{ nodeId: 'shot_image_prompt', itemId: `scene_1_shot_${i}`, role: 'input' }],
+        },
+      });
+    }
+
+    // Bundle: characters_plan -> shot_image_prompt -> shot_image
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => {
+        const bundle = fakeBundle([
+          node('characters_plan', 'plans/characters_plan.json', 'json'),
+          {
+            ...node('shot_image_prompt', 'prompts/shot_image/{{item_id}}.json', 'json', [{ from: 'characters_plan' }]),
+            kind: 'collection',
+          } as unknown as NodeDef,
+          {
+            ...node('shot_image', 'assets/images/{{item_id}}.png', 'image', [{ from: 'shot_image_prompt' }]),
+            kind: 'collection',
+          } as unknown as NodeDef,
+        ]);
+        return bundle;
+      },
+    }) as unknown as ToolLike;
+
+    // Override shot 3 only.
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'shot_image_prompt',
+      itemId: 'scene_1_shot_3',
+      payload: { kind: 'text', content: '{"new":3}' },
+    });
+
+    const ws = readWalkState(projectDir);
+
+    // shot 3's prompt is user-completed (just written).
+    expect(ws.nodes['shot_image_prompt:scene_1_shot_3']?.status).toBe('completed');
+    expect(ws.nodes['shot_image_prompt:scene_1_shot_3']?.generation?.tool).toBe('user');
+
+    // shot 3's image MUST be cleared (downstream of the edit).
+    expect(ws.nodes['shot_image:scene_1_shot_3']).toBeUndefined();
+
+    // shots 1, 2, 4, 5, 6, 7 are SIBLINGS — not downstream of shot 3.
+    // Their walkState entries MUST remain intact.
+    for (const i of [1, 2, 4, 5, 6, 7]) {
+      expect(
+        ws.nodes[`shot_image_prompt:scene_1_shot_${i}`],
+        `shot_image_prompt:scene_1_shot_${i} must NOT be cleared by an edit on shot 3`,
+      ).toBeDefined();
+      expect(
+        ws.nodes[`shot_image:scene_1_shot_${i}`],
+        `shot_image:scene_1_shot_${i} must NOT be cleared by an edit on shot 3`,
+      ).toBeDefined();
+    }
+
+    // Same on disk: sibling artifacts must survive.
+    for (const i of [1, 2, 4, 5, 6, 7]) {
+      expect(
+        existsSync(join(projectDir, `assets/images/scene_1_shot_${i}.png`)),
+        `shot_image:scene_1_shot_${i}.png must survive an edit on shot 3`,
+      ).toBe(true);
+    }
+
+    // Upstream entry untouched.
+    expect(ws.nodes.characters_plan?.status).toBe('completed');
+  });
+
   it('13. node not in bundle → error', async () => {
     const { projectDir } = setupProject();
     dirs.push(projectDir);

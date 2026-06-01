@@ -27,6 +27,7 @@ import { openEventLog } from '../../../dag/eventLog/EventLog.js';
 import { preserveAsVersion } from '../../../dag/preserveAsVersion.js';
 import { loadBundle } from '../../../dag/walker.js';
 import { parseBundleSource, resolveBundleDir } from '../../../dag/bundleSource.js';
+import { cascadeInvalidationKeys, type CascadeTarget } from '../../../dag/cascadeInvalidationKeys.js';
 import type { DagBundle, NodeDef } from '../../../dag/schema.js';
 import { resolveWritePayload, WritePayloadSchema, type WritePayload } from './writePayload.js';
 
@@ -81,33 +82,91 @@ function applyPattern(pattern: string, ctx: Record<string, string>): string {
 }
 
 /**
- * Forward-walk the bundle DAG from `startNodeId`, returning every
- * transitively downstream node id (not including the start). Edges
- * come from `node.inputs[].from` (consumer-declared upstream pointer);
- * we invert into an adjacency list `from → to[]` and BFS.
+ * Per-instance cascade keys for a target (`nodeId` or `nodeId:itemId`).
+ * Reads the project's event log and uses cascadeInvalidationKeys —
+ * the same helper invalidateNodes uses. Returns the cascade with the
+ * TARGET itself excluded (we don't clear the entry we're about to
+ * write). When the event log is unreadable or empty, falls back to a
+ * structural BFS over bundle edges — but at INSTANCE granularity
+ * (downstream items with the same itemId). This matches the runtime
+ * dep semantics for typical per-shot bundles where shot_image:N
+ * consumes shot_image_prompt:N.
+ *
+ * Pre-fix (the bug this fixes): cascade was a bare-node-id BFS that
+ * cleared ALL items of every downstream node — editing shot 3 wiped
+ * shots 1..N of shot_image, scene_clip, and final_video. With
+ * cascadeInvalidationKeys, only the items actually consuming the
+ * edited target get cleared.
  */
-function downstreamNodes(bundle: DagBundle, startNodeId: string): string[] {
-  const downstream = new Map<string, Set<string>>();
+function cascadeDownstreamKeys(
+  projectDir: string,
+  bundle: DagBundle,
+  target: CascadeTarget,
+): CascadeTarget[] {
+  let cascade: CascadeTarget[] = [];
+  try {
+    const log = openEventLog(projectDir);
+    cascade = cascadeInvalidationKeys([...log.read()], target);
+  } catch {
+    cascade = [{ nodeId: target.nodeId, ...(target.itemId !== undefined ? { itemId: target.itemId } : {}) }];
+  }
+  // Empty cascade (or cascade with only the target) means the event log
+  // has no per-instance dep info for this target. Fall back to the
+  // structural BFS so a project that's never recorded events still
+  // cascades correctly. Match itemId where possible: if the target
+  // carries an itemId, propagate it to downstream items of collection
+  // nodes (typical per-shot pattern). For singleton-to-collection or
+  // collection-to-singleton edges, we just use the bare nodeId.
+  const cascadeHasNonTarget = cascade.some(
+    (k) => !(k.nodeId === target.nodeId && k.itemId === target.itemId),
+  );
+  if (!cascadeHasNonTarget) {
+    cascade = structuralCascade(bundle, target);
+  }
+  // Exclude the target itself — we just (or are about to) write it.
+  return cascade.filter(
+    (k) => !(k.nodeId === target.nodeId && k.itemId === target.itemId),
+  );
+}
+
+/**
+ * Structural fallback when the event log can't tell us per-instance
+ * deps. BFS over `node.inputs[].from`; for each downstream collection
+ * node we propagate the target's itemId (the typical shot pattern).
+ * For non-collection downstream nodes the itemId is dropped.
+ */
+function structuralCascade(bundle: DagBundle, target: CascadeTarget): CascadeTarget[] {
+  const downstreamByNodeId = new Map<string, Set<string>>();
+  const kindByNodeId = new Map<string, string>();
   for (const n of bundle.nodes as NodeDef[]) {
+    kindByNodeId.set(n.id, n.kind);
     for (const inp of (n.inputs ?? []) as Array<{ from?: string }>) {
       if (!inp.from) continue;
-      const list = downstream.get(inp.from) ?? new Set<string>();
+      const list = downstreamByNodeId.get(inp.from) ?? new Set<string>();
       list.add(n.id);
-      downstream.set(inp.from, list);
+      downstreamByNodeId.set(inp.from, list);
     }
   }
-  const visited = new Set<string>([startNodeId]);
-  const queue = [startNodeId];
+  const out: CascadeTarget[] = [];
+  const visitedNodeIds = new Set<string>([target.nodeId]);
+  const queue: string[] = [target.nodeId];
+  out.push({ nodeId: target.nodeId, ...(target.itemId !== undefined ? { itemId: target.itemId } : {}) });
   while (queue.length > 0) {
     const cur = queue.shift()!;
-    for (const next of downstream.get(cur) ?? []) {
-      if (visited.has(next)) continue;
-      visited.add(next);
+    for (const next of downstreamByNodeId.get(cur) ?? []) {
+      if (visitedNodeIds.has(next)) continue;
+      visitedNodeIds.add(next);
       queue.push(next);
+      // Collection downstream + we have an itemId → assume per-instance
+      // dep (shot pattern). Else bare.
+      if (kindByNodeId.get(next) === 'collection' && target.itemId !== undefined) {
+        out.push({ nodeId: next, itemId: target.itemId });
+      } else {
+        out.push({ nodeId: next });
+      }
     }
   }
-  visited.delete(startNodeId);
-  return [...visited];
+  return out;
 }
 
 interface WalkStateEntry {
@@ -252,47 +311,54 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
         generation: { tool: 'user', toolVersion: '0.1.0' },
       };
 
-      const downstream = downstreamNodes(bundle, params.nodeId);
+      // Per-instance cascade. `cascadeDownstreamKeys` reads the event
+      // log + uses cascadeInvalidationKeys, so an edit on
+      // shot_image_prompt:scene_1_shot_3 invalidates ONLY
+      // shot_image:scene_1_shot_3 and its true downstream — not
+      // sibling shots. The target itself is excluded (we just wrote it).
+      const target: CascadeTarget = {
+        nodeId: params.nodeId,
+        ...(itemId ? { itemId } : {}),
+      };
+      const downstreamCascade = cascadeDownstreamKeys(params.projectDir, bundle, target);
       const invalidatedKeys: string[] = [];
-      for (const downId of downstream) {
-        // Clear EVERY key matching `<downId>` or `<downId>:*` since
-        // collection nodes may have many items registered.
-        for (const k of Object.keys(walkState.nodes)) {
-          const bare = k.includes(':') ? k.split(':')[0] : k;
-          if (bare !== downId) continue;
-          const entry = walkState.nodes[k];
-          const op = entry?.outputPath;
-          if (typeof op === 'string' && op.length > 0) {
-            const abs = resolve(params.projectDir, op);
-            try {
-              // Preserve as versioned sibling instead of unlinking —
-              // the downstream artifact survives in the version tray
-              // so the user can roll back or compare.
-              const preserved = preserveAsVersion(abs);
-              if (preserved) {
-                const relPreserved = relative(resolve(params.projectDir), preserved);
-                const downItemId = k.includes(':') ? k.split(':').slice(1).join(':') : undefined;
-                log.append({
-                  kind: 'version.added',
-                  actor: 'agent',
-                  branchId: 'main',
-                  payload: {
-                    nodeId: downId,
-                    ...(downItemId ? { itemId: downItemId } : {}),
-                    versionId: `preserved-${Date.now()}-${k}`,
-                    outputPath: relPreserved,
-                    source: 'runner',
-                    reason: `preserved by cascade from ${params.nodeId} override`,
-                  },
-                });
-              }
-            } catch {
-              /* best-effort */
+      const downstreamNodeIdsSeen = new Set<string>();
+      for (const dk of downstreamCascade) {
+        const dKey = dk.itemId !== undefined ? `${dk.nodeId}:${dk.itemId}` : dk.nodeId;
+        downstreamNodeIdsSeen.add(dk.nodeId);
+        const entry = walkState.nodes[dKey];
+        if (!entry) continue; // never completed; nothing to preserve/clear
+        const op = entry.outputPath;
+        if (typeof op === 'string' && op.length > 0) {
+          const abs = resolve(params.projectDir, op);
+          try {
+            const preserved = preserveAsVersion(abs);
+            if (preserved) {
+              const relPreserved = relative(resolve(params.projectDir), preserved);
+              log.append({
+                kind: 'version.added',
+                actor: 'agent',
+                branchId: 'main',
+                payload: {
+                  nodeId: dk.nodeId,
+                  ...(dk.itemId ? { itemId: dk.itemId } : {}),
+                  versionId: `preserved-${Date.now()}-${dKey}`,
+                  outputPath: relPreserved,
+                  source: 'runner',
+                  reason: `preserved by cascade from ${params.nodeId} override`,
+                },
+              });
             }
+          } catch {
+            /* best-effort */
           }
-          delete walkState.nodes[k];
-          invalidatedKeys.push(k);
         }
+        delete walkState.nodes[dKey];
+        invalidatedKeys.push(dKey);
+      }
+      // lastInvalidatedIds is keyed by bare nodeId — track every distinct
+      // downstream node we touched (matches the old behavior).
+      for (const downId of downstreamNodeIdsSeen) {
         if (!walkState.lastInvalidatedIds.includes(downId)) {
           walkState.lastInvalidatedIds.push(downId);
         }
@@ -318,20 +384,21 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
           ...(params.reason ? { metadata: { reason: params.reason } } : {}),
         },
       });
-      for (const downId of downstream) {
+      for (const dk of downstreamCascade) {
         log.append({
           kind: 'node.invalidated',
           actor: 'agent',
           branchId: 'main',
           payload: {
-            nodeId: downId,
+            nodeId: dk.nodeId,
+            ...(dk.itemId ? { itemId: dk.itemId } : {}),
             reason: `cascade from user override of ${params.nodeId}`,
           },
         });
       }
 
       return textResult(
-        `Wrote ${bytes.length} bytes to ${outputPath} for ${key}. Invalidated ${invalidatedKeys.length} downstream entr${invalidatedKeys.length === 1 ? 'y' : 'ies'} (${downstream.join(', ') || 'none'}). Call dhee_run_bundle to cascade.`,
+        `Wrote ${bytes.length} bytes to ${outputPath} for ${key}. Invalidated ${invalidatedKeys.length} downstream entr${invalidatedKeys.length === 1 ? 'y' : 'ies'} (${[...downstreamNodeIdsSeen].join(', ') || 'none'}). Call dhee_run_bundle to cascade.`,
       );
     },
   });
