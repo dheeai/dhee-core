@@ -13,7 +13,9 @@
  * bundle. See docs/dag-bundles-sketch.md "Backward walker" section.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
+import { openEventLog } from './eventLog/EventLog.js';
+import { preserveAsVersion } from './preserveAsVersion.js';
 
 function formatSrtTime(totalSeconds: number): string {
   const ms = Math.floor((totalSeconds % 1) * 1000);
@@ -1331,6 +1333,49 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       }
 
       log(`→ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} via ${node.runner.tool}`);
+
+      // Non-destructive overwrite: if a canonical artifact already
+      // sits at the runner's outputPath, rename it to a versioned
+      // sibling (.v<N>.<ext>) so the prior render survives. Skip when
+      // there's nothing to preserve (first-time render). Emit a
+      // version.added event so the projection records the rename.
+      // We write the event via openEventLog (not opts.engine) so
+      // preservation events land even when the caller didn't attach
+      // a ProjectionEngine — keeps preservation consistent with the
+      // other sites (invalidateNodes, dhee_write_node_content).
+      const cfgOutputPath = (cfg as Record<string, unknown>)['outputPath'];
+      if (typeof cfgOutputPath === 'string' && cfgOutputPath.length > 0) {
+        const canonicalAbs = resolve(opts.projectDir, cfgOutputPath);
+        if (existsSync(canonicalAbs)) {
+          try {
+            const preservedAbs = preserveAsVersion(canonicalAbs);
+            if (preservedAbs) {
+              const preservedRel = relative(resolve(opts.projectDir), preservedAbs);
+              try {
+                const log = openEventLog(opts.projectDir);
+                log.append({
+                  branchId: opts.branchId ?? 'main',
+                  actor: 'walker',
+                  kind: 'version.added',
+                  payload: {
+                    nodeId: node.id,
+                    ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+                    versionId: `preserved-${Date.now()}-${node.id}${inst.itemId ? '-' + inst.itemId : ''}`,
+                    outputPath: preservedRel,
+                    source: 'runner',
+                    reason: 'preserved before walker re-render',
+                  },
+                });
+              } catch {
+                // event log open/append best-effort
+              }
+            }
+          } catch {
+            // best-effort — never block the re-render on a preservation issue
+          }
+        }
+      }
+
       let result: RunnerResult;
       try {
         result = await runner.run(ctx);
