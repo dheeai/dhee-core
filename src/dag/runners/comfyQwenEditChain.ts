@@ -56,11 +56,7 @@ interface ChainConfig {
   forceRerun?: boolean;
 }
 
-function resolveEndpointUrl(name: string): string | null {
-  const key = `ENDPOINT_${name.replace(/\./g, '_')}`;
-  const v = process.env[key];
-  return v && v.trim().length > 0 ? v.trim() : null;
-}
+import { resolveEndpointUrl } from './endpointResolver.js';
 
 async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   const cfg = ctx.node.runner.config as unknown as ChainConfig;

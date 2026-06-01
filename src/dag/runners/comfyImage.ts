@@ -89,11 +89,7 @@ const KLEIN_MAX_REFS = 4;
 
 // ── Endpoint resolution ────────────────────────────────────────────────
 
-function resolveEndpointUrl(endpointName: string): string | null {
-  const envKey = `ENDPOINT_${endpointName.replace(/\./g, '_')}`;
-  const url = process.env[envKey];
-  return url && url.trim().length > 0 ? url.trim() : null;
-}
+import { resolveEndpointUrl } from './endpointResolver.js';
 
 // ── Default client factory (uses ComfyUIClient) ────────────────────────
 

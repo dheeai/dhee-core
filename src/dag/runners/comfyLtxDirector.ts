@@ -74,11 +74,7 @@ interface LtxDirectorConfig {
  * the env key (env names can't contain dots). So `self.local` reads
  * `ENDPOINT_self_local`.
  */
-function resolveEndpointUrl(endpointName: string): string | null {
-  const envKey = `ENDPOINT_${endpointName.replace(/\./g, '_')}`;
-  const url = process.env[envKey];
-  return url && url.trim().length > 0 ? url.trim() : null;
-}
+import { resolveEndpointUrl } from './endpointResolver.js';
 
 // ── Prompt-shaping helpers (ported verbatim from probe-ltx-director.ts) ──
 
