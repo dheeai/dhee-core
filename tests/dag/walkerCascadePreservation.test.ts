@@ -1,16 +1,23 @@
 /**
- * Walker cascade preservation — TDD.
+ * Cascade preservation — TDD.
  *
- * When a downstream node re-runs because an upstream changed (BUG-023's
- * cache-bypass-on-upstream-rerun path), the walker MUST preserve the
- * old canonical artifact as a `.v<N>.<ext>` sibling before the runner
- * writes the new bytes. Without this, regenerating one shot wipes out
- * every downstream artifact (scene clips, final video) without leaving
- * an audit trail or rollback path.
+ * When a downstream node is cleared because an upstream changed
+ * (cascade invalidation through invalidateNodes), the old canonical
+ * artifact MUST be preserved as a `.v<N>.<ext>` sibling before the
+ * runner writes new bytes. Without this, regenerating one shot wipes
+ * out every downstream artifact (scene clips, final video) with no
+ * audit trail or rollback path.
+ *
+ * Pre-cascade implementation hooked preservation into the walker's
+ * downstream-cache-bypass step (BUG-023). Post-cascade, preservation
+ * happens in invalidateNodes (projectRegen.ts) via preserveAsVersion
+ * for every cascade key with an outputPath, BEFORE the walk. The
+ * walker then runs against a clean slate.
  *
  * Failure modes:
- *  1. Downstream re-render preserves the old canonical as .v1.<ext>.
- *  2. The new canonical holds the fresh runner output.
+ *  1. Cascade invalidation preserves the old canonical of each
+ *     downstream as .v1.<ext>.
+ *  2. The new canonical holds the fresh runner output after walk.
  *  3. The version event log records the preserved path.
  *  4. Regression-guard: a node that ISN'T re-run (no upstream change,
  *     file present) still cache-skips — no preservation churn.
@@ -23,12 +30,13 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
-  unlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { walkBundle } from '../../src/dag/walker.js';
+import { invalidateNodes } from '../../src/dag/projectRegen.js';
+import { openEventLog } from '../../src/dag/eventLog/EventLog.js';
 import {
   __resetGlobalRegistryForTesting,
   getGlobalRegistry,
@@ -113,6 +121,29 @@ function seed(): void {
     },
   };
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2));
+
+  // Seed events so cascadeInvalidationKeys has a per-instance dep graph:
+  // middle ← upstream, final ← middle. Without these, cascade falls
+  // back to the requested key only and downstream entries stay intact.
+  const log = openEventLog(projectDir);
+  log.append({
+    kind: 'node.completed', actor: 'runner', branchId: 'main',
+    payload: { nodeId: 'upstream', outputPath: 'plans/upstream.json', versionId: 'u1' },
+  });
+  log.append({
+    kind: 'node.completed', actor: 'runner', branchId: 'main',
+    payload: {
+      nodeId: 'middle', outputPath: 'plans/middle.md', versionId: 'm1',
+      dependencies: [{ nodeId: 'upstream' }],
+    },
+  });
+  log.append({
+    kind: 'node.completed', actor: 'runner', branchId: 'main',
+    payload: {
+      nodeId: 'final', outputPath: 'assets/final.mp4', versionId: 'f1',
+      dependencies: [{ nodeId: 'middle' }],
+    },
+  });
 }
 
 beforeEach(() => {
@@ -132,12 +163,11 @@ afterEach(() => {
 describe('walker: cascade preservation', () => {
   it('1. downstream re-render preserves old canonical as .v1.<ext>', async () => {
     seed();
-    // Invalidate upstream to drive cascade.
-    const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
-    delete proj.walkState.nodes.upstream;
-    proj.walkState.lastInvalidatedIds = ['upstream'];
-    writeFileSync(join(projectDir, 'project.json'), JSON.stringify(proj));
-    unlinkSync(join(projectDir, 'plans/upstream.json'));
+    // Cascade invalidation does the preservation work BEFORE the walk.
+    await invalidateNodes({ projectDir, nodeIds: ['upstream'] });
+    // Removing the upstream file is no longer required — invalidateNodes
+    // moved it to .v1 already. But the original test removed it; mirror
+    // that by checking the .v1 sibling instead.
 
     await walkBundle({
       projectDir,
@@ -154,11 +184,7 @@ describe('walker: cascade preservation', () => {
 
   it('2. new canonical holds the fresh runner output', async () => {
     seed();
-    const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
-    delete proj.walkState.nodes.upstream;
-    proj.walkState.lastInvalidatedIds = ['upstream'];
-    writeFileSync(join(projectDir, 'project.json'), JSON.stringify(proj));
-    unlinkSync(join(projectDir, 'plans/upstream.json'));
+    await invalidateNodes({ projectDir, nodeIds: ['upstream'] });
 
     await walkBundle({
       projectDir,
@@ -172,11 +198,7 @@ describe('walker: cascade preservation', () => {
 
   it('3. version.added events recorded for each cascade preservation', async () => {
     seed();
-    const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
-    delete proj.walkState.nodes.upstream;
-    proj.walkState.lastInvalidatedIds = ['upstream'];
-    writeFileSync(join(projectDir, 'project.json'), JSON.stringify(proj));
-    unlinkSync(join(projectDir, 'plans/upstream.json'));
+    await invalidateNodes({ projectDir, nodeIds: ['upstream'] });
 
     await walkBundle({
       projectDir,

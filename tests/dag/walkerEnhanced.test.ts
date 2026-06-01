@@ -337,11 +337,19 @@ describe('stopAt', () => {
   });
 });
 
-// ── runOnly + cascade ──────────────────────────────────────────────────
+// ── runOnly (now a back-compat no-op) ──────────────────────────────────
+//
+// `runOnly` used to drive a cascade filter inside the walker, forcing
+// re-runs of the named nodes + their dependents. With cascade-
+// invalidation moved out into invalidateNodes (projectRegen.ts), the
+// walker is state-as-truth: pending → run, completed (with file) →
+// skip. `runOnly` is accepted only for back-compat with old callers;
+// it does NOT cause any cache bypass. Tests below assert the new
+// contract.
 
-describe('runOnly', () => {
-  it('runs only the named node(s) and their direct dependents', async () => {
-    // Seed all 3 as completed.
+describe('runOnly (back-compat — now a no-op)', () => {
+  it('does NOT force a re-run when all nodes are already completed', async () => {
+    // Seed all 3 as completed with files on disk.
     mkdirSync(join(projectDir, 'plans'), { recursive: true });
     writeFileSync(join(projectDir, 'plans/story.md'), 's');
     writeFileSync(join(projectDir, 'plans/beats.json'), '{}');
@@ -364,8 +372,9 @@ describe('runOnly', () => {
       }),
     );
 
-    // runOnly=['beats'] should re-run beats AND final (which depends on beats),
-    // but NOT story (which is upstream of beats).
+    // Pre-cascade walker would re-run beats + final. State-as-truth
+    // walker skips everything — all completed, files on disk. The
+    // caller's job (invalidateNodes) is to clear walkState first.
     const result = await walkBundle({
       projectDir,
       bundle: TINY_BUNDLE,
@@ -373,10 +382,24 @@ describe('runOnly', () => {
       runOnly: ['beats'],
     });
     expect(result.ok).toBe(true);
-    expect(ranNodes).toEqual(['beats', 'final']);
+    expect(ranNodes).toEqual([]);
   });
 
-  it('runOnly with empty array runs nothing (explicit caller choice)', async () => {
+  it('still runs every pending node, regardless of what runOnly names', async () => {
+    // Empty walkState — everything is pending. runOnly should NOT
+    // restrict the walk; this is the v1 onboarding-path behavior
+    // (someone calling regenerate before any prior run finished).
+    const result = await walkBundle({
+      projectDir,
+      bundle: TINY_BUNDLE,
+      bundleSource: 'built-in:tiny',
+      runOnly: ['beats'],
+    });
+    expect(result.ok).toBe(true);
+    expect(ranNodes).toEqual(['story', 'beats', 'final']);
+  });
+
+  it('empty runOnly array is a no-op (does not block pending nodes)', async () => {
     const result = await walkBundle({
       projectDir,
       bundle: TINY_BUNDLE,
@@ -384,10 +407,10 @@ describe('runOnly', () => {
       runOnly: [],
     });
     expect(result.ok).toBe(true);
-    expect(ranNodes).toEqual([]);
+    expect(ranNodes).toEqual(['story', 'beats', 'final']);
   });
 
-  it('runOnly node id that does not exist in the bundle fails clearly', async () => {
+  it('runOnly node id that does not exist in the bundle fails clearly (validation kept for fast feedback)', async () => {
     const result = await walkBundle({
       projectDir,
       bundle: TINY_BUNDLE,

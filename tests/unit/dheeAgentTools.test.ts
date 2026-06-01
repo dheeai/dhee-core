@@ -455,7 +455,7 @@ describe('dhee_regenerate_node', () => {
     return projectDir;
   }
 
-  it('clears the node entry and runs runProjectViaBundle with runOnly=[nodeId]', async () => {
+  it('clears the node entry + dispatches runProjectViaBundle (no runOnly — cascade-invalidation does the work)', async () => {
     const dir = makeProjectWithState('regen', {
       story: { status: 'completed', outputPath: 'plans/story.md' },
     });
@@ -470,7 +470,11 @@ describe('dhee_regenerate_node', () => {
       ctx,
     );
     expect(out.isError).toBeFalsy();
-    expect(runSpy).toHaveBeenCalledWith(expect.objectContaining({ projectDir: dir, runOnly: ['story'] }));
+    expect(runSpy).toHaveBeenCalledWith(expect.objectContaining({ projectDir: dir }));
+    // Post-cascade: invalidateNodes cascaded through the event-derived
+    // dep graph BEFORE dispatch, so the walker re-runs everything
+    // pending without a runOnly hint.
+    expect(runSpy).toHaveBeenCalledWith(expect.not.objectContaining({ runOnly: expect.anything() }));
 
     // After invalidation, the story node entry should be gone from walkState
     // (the walker re-creates it on re-run).

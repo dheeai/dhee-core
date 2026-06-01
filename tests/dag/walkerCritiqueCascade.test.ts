@@ -1,29 +1,19 @@
 /**
  * Regression: BUG-023 — when an upstream LLM node is invalidated +
- * re-run via the `pendingCritiques` mechanism, the downstream
- * non-text artifact (image / video) MUST also be re-rendered. The
- * walker was treating a present file at the downstream node's
- * outputPath as a cache-hit and skipping the runner, even though the
- * upstream re-run produced a new prompt.
+ * re-run via the critique flow, the downstream non-text artifact
+ * (image / video) MUST also be re-rendered.
  *
- * Real-world repro: 22 broken `shot_image_prompt` entries critiqued
- * in batch via `applyOnly:true`, then `dhee_run_bundle` called. The
- * LLM phase ran (new prompt JSONs landed on disk), but the Qwen
- * `shot_image` phase was silently skipped because the cloned PNGs
- * were still sitting at their expected outputPaths. The downstream
- * LTX `scene_clip` cascade then fired against the OLD images,
- * producing scene videos with the unchanged broken shots.
+ * Pre-cascade implementation lived inside the walker: an
+ * `upstreamReRun` cache-bypass detected upstream re-runs in the same
+ * walk and forced downstream re-render. That branch is gone.
  *
- * Failure modes covered:
- *  - Stage upstream → collection downstream: stamping a critique on
- *    the upstream stage MUST invalidate every collection-item
- *    downstream so the runner is re-invoked.
- *  - Per-item: a critique on `node:item` must re-render
- *    `downstream:item` ONLY (not `downstream:other_item`).
- *  - Regression-guard: an untouched downstream (no upstream change)
- *    is still cache-skipped via the file-exists check — the fix is
- *    "force re-render when upstream re-ran in this walk", not
- *    "always re-render".
+ * Post-cascade: invalidateNodes (projectRegen.ts) cascades the
+ * event-derived dep graph BEFORE the walk, clearing both upstream
+ * AND every transitive consumer. The walker then trivially re-runs
+ * both because both are pending. This file's BUG-023 test was
+ * rewritten to exercise the new contract (full critique flow,
+ * including invalidateNodes-driven cascade), so the regression
+ * surface is preserved with cleaner semantics.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -37,6 +27,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { walkBundle } from '../../src/dag/walker.js';
+import { invalidateNodes } from '../../src/dag/projectRegen.js';
+import { openEventLog } from '../../src/dag/eventLog/EventLog.js';
 import {
   __resetGlobalRegistryForTesting,
   getGlobalRegistry,
@@ -158,6 +150,33 @@ function seedCompletedProject(items: string[]): void {
     },
   };
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2));
+
+  // Seed events.jsonl so cascadeInvalidationKeys has a per-instance
+  // dep graph: image_node consumes prompt_node. Without these,
+  // cascade falls back to the requested keys only and downstream is
+  // NOT cleared (which would mask the regression we want to catch).
+  const log = openEventLog(projectDir);
+  log.append({
+    kind: 'node.completed',
+    actor: 'runner',
+    branchId: 'main',
+    payload: {
+      nodeId: 'prompt_node',
+      outputPath: 'prompts/prompt.json',
+      versionId: 'prompt-v1',
+    },
+  });
+  log.append({
+    kind: 'node.completed',
+    actor: 'runner',
+    branchId: 'main',
+    payload: {
+      nodeId: 'image_node',
+      outputPath: 'assets/images/single.png',
+      versionId: 'image-v1',
+      dependencies: [{ nodeId: 'prompt_node' }],
+    },
+  });
 }
 
 function readProject(): Record<string, unknown> {
@@ -171,15 +190,15 @@ describe('BUG-023 — pendingCritique on upstream forces downstream non-text re-
   it('downstream image_node is re-invoked when upstream prompt_node is invalidated by a critique', async () => {
     seedCompletedProject([]);
 
-    // Simulate dhee_critique_node(applyOnly:true) — stamp the
-    // critique + invalidate ONLY the upstream prompt_node. The
-    // walker is responsible for cascading.
+    // Stamp the critique like runCritique would. invalidateNodes
+    // cascades through the event-derived dep graph and clears both
+    // prompt_node AND image_node from walkState.
     const project = readProject();
     project['pendingCritiques'] = { prompt_node: 'restructure for full character anchoring' };
-    (project['walkState'] as { nodes: Record<string, unknown> }).nodes['prompt_node'] = {
-      status: 'invalidated',
-    };
     writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2));
+    const inv = await invalidateNodes({ projectDir, nodeIds: ['prompt_node'] });
+    expect(inv.invalidated).toContain('prompt_node');
+    expect(inv.invalidated).toContain('image_node');
 
     const result = await walkBundle({
       projectDir,
@@ -188,16 +207,13 @@ describe('BUG-023 — pendingCritique on upstream forces downstream non-text re-
     });
     expect(result.ok).toBe(true);
 
-    // Upstream MUST have re-run (the critique demands it).
+    // Both re-run — upstream because the critique demanded it,
+    // downstream because cascade-invalidation cleared its walkState
+    // entry. The walker is state-as-truth: both pending → both run.
     expect(runCalls.find((c) => c.nodeId === 'prompt_node')).toBeDefined();
-
-    // Downstream image_node MUST have been re-invoked — this is the
-    // bug. Pre-fix: zero image_node runs because the PNG file already
-    // existed at outputPath.
     expect(runCalls.find((c) => c.nodeId === 'image_node')).toBeDefined();
 
-    // And the on-disk file should reflect the new run, not the
-    // OLD-IMAGE placeholder we seeded.
+    // The on-disk file reflects the new run.
     const content = readFileSync(join(projectDir, 'assets/images/single.png'), 'utf8');
     expect(content).toBe('output of image_node');
   });

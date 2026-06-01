@@ -16,8 +16,10 @@
  *  - Happy path (collection w/ itemId): writes pendingCritiques key
  *    as `nodeId:itemId` and invalidates that item only.
  *  - Idempotency: calling twice with the same critique just overwrites.
- *  - The runner dispatch is invoked with runOnly: [nodeId] on the
- *    bare node id (not the item-keyed one).
+ *  - The runner dispatch is invoked with NO runOnly argument —
+ *    cascade-invalidation does all the work before dispatch, walker
+ *    is state-as-truth. (Pre-cascade walker required runOnly as a
+ *    force-rerun hint; that's a no-op now.)
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -131,7 +133,7 @@ describe('runCritique', () => {
     expect(result.error).toMatch(/project\.json/i);
   });
 
-  it('happy path singleton: writes pendingCritiques + invalidates + dispatches with runOnly bare id', async () => {
+  it('happy path singleton: writes pendingCritiques + invalidates + dispatches (no runOnly — cascade did the work)', async () => {
     const dir = makeProjectDir({
       nodes: {
         characters_plan: { status: 'completed', outputPath: 'plans/characters_plan.json' },
@@ -139,7 +141,7 @@ describe('runCritique', () => {
       },
     });
     cleanupDirs.push(dir);
-    const dispatch = vi.fn(async () => ({ ok: true }) as never);
+    const dispatch = vi.fn(async (_args: { projectDir: string; runOnly?: string[] }) => ({ ok: true }) as never);
     const result = await runCritique({
       projectDir: dir,
       bundle: makeBundle(),
@@ -156,8 +158,11 @@ describe('runCritique', () => {
     expect(ws.lastInvalidatedIds).toContain('characters_plan');
 
     expect(dispatch).toHaveBeenCalledTimes(1);
-    const dispatchArg = dispatch.mock.calls[0]![0] as { projectDir: string; runOnly?: string[] };
-    expect(dispatchArg.runOnly).toEqual(['characters_plan']);
+    const dispatchArg = dispatch.mock.calls[0]![0];
+    // Post-cascade: dispatch carries projectDir only. invalidateNodes
+    // already cleared characters_plan + all transitive consumers; the
+    // walker re-runs everything pending without a runOnly hint.
+    expect(dispatchArg.runOnly).toBeUndefined();
     expect(dispatchArg.projectDir).toBe(dir);
   });
 
@@ -169,7 +174,7 @@ describe('runCritique', () => {
       },
     });
     cleanupDirs.push(dir);
-    const dispatch = vi.fn(async () => ({ ok: true }) as never);
+    const dispatch = vi.fn(async (_args: { projectDir: string; runOnly?: string[] }) => ({ ok: true }) as never);
     const result = await runCritique({
       projectDir: dir,
       bundle: makeBundle(),
@@ -187,7 +192,10 @@ describe('runCritique', () => {
     // The other item is untouched.
     expect(ws.nodes['shot_image_prompt:scene_1_shot_4']).toBeDefined();
 
-    expect(dispatch.mock.calls[0]![0]).toMatchObject({ runOnly: ['shot_image_prompt'] });
+    // Post-cascade: no runOnly on dispatch. invalidateNodes cascaded
+    // the per-item dep graph; walker re-runs whatever's pending.
+    const dispatchArg = dispatch.mock.calls[0]![0];
+    expect(dispatchArg.runOnly).toBeUndefined();
   });
 
   it('overwrites a prior critique for the same key (idempotent re-call)', async () => {

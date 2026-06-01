@@ -7,7 +7,9 @@
  *
  * `runProjectViaBundle` is dependency-injected so we don't actually
  * boot a bundle in tests; we assert the helper mutates walkState
- * correctly and dispatches with the right runOnly.
+ * correctly and dispatches the bundle. Post-cascade-refactor: dispatch
+ * carries no `runOnly` — invalidateNodes does the per-instance cascade
+ * BEFORE dispatch and the walker is state-as-truth.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -47,7 +49,7 @@ afterEach(() => {
 });
 
 describe('regenerateNode', () => {
-  it('clears the node entry, marks it lastInvalidated, then dispatches runProjectViaBundle with runOnly=[nodeId]', async () => {
+  it('clears the node entry, marks it lastInvalidated, then dispatches runProjectViaBundle (no runOnly — cascade did the work)', async () => {
     projectDir = makeProject({
       story: { status: 'completed', outputPath: 'plans/story.md' },
     });
@@ -60,7 +62,10 @@ describe('regenerateNode', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(runSpy).toHaveBeenCalledWith(expect.objectContaining({ projectDir, runOnly: ['story'] }));
+    // Dispatch carries projectDir but NO runOnly — cascade-invalidation
+    // already cleared the target + downstream, walker is state-as-truth.
+    expect(runSpy).toHaveBeenCalledWith(expect.objectContaining({ projectDir }));
+    expect(runSpy).toHaveBeenCalledWith(expect.not.objectContaining({ runOnly: expect.anything() }));
 
     const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
     expect(after.walkState.nodes.story).toBeUndefined();

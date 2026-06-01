@@ -1,23 +1,28 @@
 /**
- * Walker user-version pin — TDD coverage.
+ * Walker + user-version pin — post-cascade contract.
  *
- * When a node's walkState entry has `generation.tool === 'user'`, the
- * walker MUST NOT re-fire the runner — even if an upstream was re-run
- * in the same walk. The user's hand-edited content is pinned. The only
- * way to clear the pin is an explicit invalidate (dhee_regenerate_node).
+ * Pre-cascade, the walker had a special `isUserPinned` branch that
+ * preserved `generation.tool='user'` artifacts through an
+ * upstream-rerun-in-this-walk. That worked because cascade
+ * invalidation didn't exist — the walker had to detect upstream
+ * changes itself.
  *
- * Without this, dhee_write_node_content's effect is lost as soon as
- * any upstream changes: the BUG-023 cache-bypass-on-upstream-rerun
- * fires and clobbers the user-supplied artifact.
+ * Post-cascade (cascadeInvalidationKeys + invalidateNodes), the
+ * walker is pure state-as-truth: completed + file on disk → skip,
+ * pending or missing → run. There is NO pin-specific branch. The
+ * user feedback that drove this refactor:
  *
- * Failure modes:
- *  1. Pinned + upstream re-run → walker SKIPS the pinned node.
- *  2. Pinned + explicitly listed in runOnly → walker re-fires (the
- *     user is consciously asking to regen, pin breaks).
- *  3. Pinned but file gone from disk → walker re-fires (no artifact
- *     to preserve).
- *  4. Regression-guard: non-pinned completed downstream + upstream
- *     re-run → still re-fires (BUG-023 behavior preserved).
+ *   "user pinned nodes will also have to be invalidated when
+ *    upstream changes. Even though user explicitly pinned a shot if
+ *    later the user changes character ref image, it should cascade
+ *    right? Else the downstream fixes will all be with wrong
+ *    character."
+ *
+ * → pins do NOT survive cascade. invalidateNodes clears every
+ * transitive consumer (whether `generation.tool='user'` or not),
+ * matching user intent.
+ *
+ * Tests below assert the new contract.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -33,6 +38,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { walkBundle } from '../../src/dag/walker.js';
+import { invalidateNodes } from '../../src/dag/projectRegen.js';
+import { openEventLog } from '../../src/dag/eventLog/EventLog.js';
 import {
   __resetGlobalRegistryForTesting,
   getGlobalRegistry,
@@ -108,6 +115,9 @@ function makeBundle(): DagBundle {
 /**
  * Seed: upstream + downstream completed, both files on disk.
  * downstream optionally marked as user-pinned.
+ *
+ * Also seeds the event log with node.completed events so cascade-
+ * invalidation has a per-instance dep graph to walk.
  */
 function seedProject(opts: { pinDownstream: boolean }): void {
   const upPath = join(projectDir, 'plans/upstream.json');
@@ -138,23 +148,52 @@ function seedProject(opts: { pinDownstream: boolean }): void {
             : { tool: 'stub.counting', toolVersion: '0.1.0' },
         },
       },
-      lastInvalidatedIds: ['upstream'],
+      lastInvalidatedIds: [],
     },
   };
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2));
+
+  // Seed events so cascadeInvalidationKeys has a dep graph: downstream
+  // consumes upstream. Without these, cascade falls back to the
+  // requested keys only.
+  const log = openEventLog(projectDir);
+  log.append({
+    kind: 'node.completed',
+    actor: 'runner',
+    branchId: 'main',
+    payload: {
+      nodeId: 'upstream',
+      outputPath: 'plans/upstream.json',
+      versionId: 'upstream-v1',
+    },
+  });
+  log.append({
+    kind: 'node.completed',
+    actor: 'runner',
+    branchId: 'main',
+    payload: {
+      nodeId: 'downstream',
+      outputPath: 'plans/downstream.md',
+      versionId: 'downstream-v1',
+      dependencies: [{ nodeId: 'upstream' }],
+    },
+  });
 }
 
-describe('walker: user-version pinned nodes are not re-fired by upstream cascade', () => {
-  it('1. pinned downstream + upstream re-run → walker SKIPS pinned node', async () => {
+describe('walker: state-as-truth (no special pin branch)', () => {
+  it('1. pin survives an upstream re-run when cascade is NOT used (raw walkState mutation)', async () => {
+    // This documents what state-as-truth gives you for free: if
+    // walkState says downstream is completed + the file is on disk,
+    // walker skips it. The pin is incidental — any completed entry
+    // would skip. Test 2 shows what happens when cascade IS used.
     seedProject({ pinDownstream: true });
-    // Invalidate upstream so the next walk re-fires it. Walker's
-    // upstream-rerun detection then triggers the cache bypass for
-    // downstream — but pin should override.
+    // Caller clears ONLY upstream's walkState entry (skipping cascade
+    // via invalidateNodes). Walker re-runs upstream, leaves
+    // downstream alone (completed + file on disk).
     const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
     delete proj.walkState.nodes.upstream;
     proj.walkState.lastInvalidatedIds = ['upstream'];
     writeFileSync(join(projectDir, 'project.json'), JSON.stringify(proj));
-    // Remove upstream artifact too so it definitely re-runs.
     unlinkSync(join(projectDir, 'plans/upstream.json'));
 
     await walkBundle({
@@ -163,31 +202,38 @@ describe('walker: user-version pinned nodes are not re-fired by upstream cascade
       bundleSource: 'built-in:pin-test',
     });
 
-    // Upstream re-fired.
     expect(runCalls.find((c) => c.nodeId === 'upstream')).toBeTruthy();
-    // Downstream did NOT re-fire (pinned).
     expect(runCalls.find((c) => c.nodeId === 'downstream')).toBeUndefined();
-    // Pinned content preserved on disk.
     expect(readFileSync(join(projectDir, 'plans/downstream.md'), 'utf8')).toBe('USER hand-edited');
   });
 
-  it('2. pinned + listed in runOnly → walker RE-FIRES (explicit override)', async () => {
+  it('2. cascade-invalidation clears the pinned downstream — pins do NOT survive cascade', async () => {
+    // User feedback: changing the character ref must cascade to
+    // every shot that consumes it, even shots the user pinned.
+    // invalidateNodes(upstream) now clears downstream too via the
+    // event-derived dep graph.
     seedProject({ pinDownstream: true });
 
+    await invalidateNodes({ projectDir, nodeIds: ['upstream'] });
+
+    // Now walk — both should re-fire (cascade cleared both walkState
+    // entries; walker is state-as-truth).
     await walkBundle({
       projectDir,
       bundle: makeBundle(),
       bundleSource: 'built-in:pin-test',
-      runOnly: ['downstream'],
     });
 
-    // Downstream DID re-fire even though pinned — explicit ask.
+    expect(runCalls.find((c) => c.nodeId === 'upstream')).toBeTruthy();
     expect(runCalls.find((c) => c.nodeId === 'downstream')).toBeTruthy();
+    // Pin was overwritten — the new auto-generated content sits in
+    // its place. This matches user intent: "downstream fixes will
+    // all be with wrong character" if pin survived cascade.
+    expect(readFileSync(join(projectDir, 'plans/downstream.md'), 'utf8')).toMatch(/runner-output downstream/);
   });
 
   it('3. pinned but file missing → walker re-fires (nothing to preserve)', async () => {
     seedProject({ pinDownstream: true });
-    // Pull the pinned file from disk.
     unlinkSync(join(projectDir, 'plans/downstream.md'));
 
     await walkBundle({
@@ -198,14 +244,13 @@ describe('walker: user-version pinned nodes are not re-fired by upstream cascade
     expect(runCalls.find((c) => c.nodeId === 'downstream')).toBeTruthy();
   });
 
-  it('4. regression-guard: non-pinned downstream + upstream re-run → re-fires (BUG-023)', async () => {
+  it('4. non-pinned downstream behaves identically — there is no pin-specific code path', async () => {
+    // The walker no longer reads generation.tool. Pin and auto are
+    // indistinguishable to the resume logic — state + file presence
+    // is the entire contract.
     seedProject({ pinDownstream: false });
-    // Invalidate upstream.
-    const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
-    delete proj.walkState.nodes.upstream;
-    proj.walkState.lastInvalidatedIds = ['upstream'];
-    writeFileSync(join(projectDir, 'project.json'), JSON.stringify(proj));
-    unlinkSync(join(projectDir, 'plans/upstream.json'));
+
+    await invalidateNodes({ projectDir, nodeIds: ['upstream'] });
 
     await walkBundle({
       projectDir,
@@ -213,10 +258,8 @@ describe('walker: user-version pinned nodes are not re-fired by upstream cascade
       bundleSource: 'built-in:pin-test',
     });
 
-    // Non-pinned: upstream re-run BYPASSES downstream cache (BUG-023
-    // fix). Downstream MUST re-fire.
+    expect(runCalls.find((c) => c.nodeId === 'upstream')).toBeTruthy();
     expect(runCalls.find((c) => c.nodeId === 'downstream')).toBeTruthy();
-    // And the new auto output replaces the prior auto output.
     expect(existsSync(join(projectDir, 'plans/downstream.md'))).toBe(true);
   });
 });

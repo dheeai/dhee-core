@@ -113,13 +113,14 @@ export async function runCritique(opts: RunCritiqueOpts): Promise<RunCritiqueRes
   //     runs the bundle once at the end.
   if (opts.applyOnly) return { ok: true };
 
-  // 5b. Dispatch bundle with runOnly on the bare node id. Walker handles
-  //     item-level + downstream cascade.
+  // 5b. Dispatch the bundle. Walker is state-as-truth — invalidateNodes
+  // above already cleared the target item + every transitive consumer,
+  // so a plain topo walk re-runs exactly what's pending. No `runOnly`
+  // force-rerun needed; the old pre-cascade walker required it.
   const dispatch = opts.runProjectViaBundle ?? defaultDispatcher;
   try {
     const runResult = await dispatch({
       projectDir,
-      runOnly: [nodeId],
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
     return { ok: true, runResult };

@@ -1,20 +1,22 @@
 /**
- * Regression: BUG-021 — walker with `runOnly: [downstream-node]`
- * must still hydrate UPSTREAM completed instances from walkState so
- * the targeted downstream node can read their outputs as inputs.
+ * Regression: BUG-021 — when only the downstream node needs to be
+ * re-run (its walkState entry was cleared), the walker must still
+ * hydrate UPSTREAM completed instances from walkState so the
+ * downstream runner can read their outputs as inputs.
  *
- * Repro: bundle with story → shot_prompt. First, run end-to-end so
- * walkState records story=completed with outputPath. Then run with
- * runOnly=['shot_prompt']. The walker should:
- *  - skip the upstream story node (no re-run)
- *  - BUT make story's outputPath available to shot_prompt's runner
- *    via ctx.inputs.
+ * Pre-cascade flow: caller passed `runOnly: [downstream]` and a
+ * cascadeSet filter inside the walker skipped upstream entirely while
+ * hydrating its outputPath for downstream consumption.
  *
- * Before the fix, shot_prompt saw `inputs = {}` because the walker
- * `continue`-d over the upstream skip and never hydrated
- * instancesById['story'] from walkState. The downstream LLM runner
- * then complained "prompt template references variable(s) that were
- * not provided: story".
+ * Post-cascade flow: caller invalidates the downstream node (clearing
+ * only its walkState entry, leaving upstream completed). Walker is
+ * state-as-truth — upstream skips via the resume short-circuit which
+ * also hydrates its outputPath onto the instance — and downstream
+ * re-runs with the upstream input populated.
+ *
+ * The hydration path itself is the regression surface: a future
+ * refactor that drops the in-loop hydration would silently break
+ * downstream inputs again.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -22,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { walkBundle } from '../../src/dag/walker.js';
+import { invalidateNodes } from '../../src/dag/projectRegen.js';
 import {
   __resetGlobalRegistryForTesting,
   getGlobalRegistry,
@@ -92,8 +95,8 @@ function makeBundle(): DagBundle {
   };
 }
 
-describe('BUG-021 — runOnly hydrates upstream completed instances for downstream inputs', () => {
-  it('completes a fresh run then re-runs with runOnly=[downstream]; downstream sees upstream outputs', async () => {
+describe('BUG-021 — downstream re-run after invalidate hydrates upstream inputs', () => {
+  it('completes a fresh run, invalidates downstream only, re-walks; downstream sees upstream outputs', async () => {
     // Pass 1: end-to-end. Populates walkState for both nodes.
     const r1 = await walkBundle({
       projectDir,
@@ -106,15 +109,19 @@ describe('BUG-021 — runOnly hydrates upstream completed instances for downstre
 
     inputsByNodeId = {};
 
-    // Pass 2: runOnly the downstream. The walker should hydrate
-    // story's completed state from walkState and pass its output to
-    // shot_prompt as ctx.inputs.story — even though story itself is
-    // outside the cascade and won't be re-run.
+    // Invalidate downstream only. Cascade has no downstream-of-
+    // shot_prompt nodes to clear; upstream's walkState entry stays
+    // completed.
+    await invalidateNodes({ projectDir, nodeIds: ['shot_prompt'] });
+
+    // Pass 2: re-walk. State-as-truth — story is completed + file on
+    // disk → skip via short-circuit (which hydrates its outputPath
+    // onto the instance). shot_prompt is pending → run, with story's
+    // output populated via ctx.inputs.story.
     const r2 = await walkBundle({
       projectDir,
       bundle: makeBundle(),
       bundleSource: 'built-in:bug-021-test',
-      runOnly: ['shot_prompt'],
     });
     expect(r2.ok).toBe(true);
     expect(inputsByNodeId['story']).toBeUndefined(); // story was NOT re-run

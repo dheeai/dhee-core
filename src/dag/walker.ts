@@ -716,47 +716,6 @@ function buildRunnerConfig(
   return base;
 }
 
-/**
- * Compute the cascade set for runOnly: the requested nodes plus every
- * node that transitively depends on any of them. Returns a Set of node
- * ids (bundle-level, not per-instance).
- *
- * Throws when a requested node isn't in the bundle — callers turn this
- * into ok:false at the walkBundle boundary.
- */
-function computeCascade(bundle: DagBundle, runOnly: string[]): Set<string> {
-  const bundleNodeIds = new Set(bundle.nodes.map((n) => n.id));
-  for (const id of runOnly) {
-    if (!bundleNodeIds.has(id)) {
-      throw new Error(`runOnly node id '${id}' is not in bundle (valid nodes: ${[...bundleNodeIds].join(', ')})`);
-    }
-  }
-  // Build reverse adjacency: who points AT each node?
-  const dependents = new Map<string, Set<string>>();
-  for (const n of bundle.nodes) {
-    for (const inp of n.inputs) {
-      let s = dependents.get(inp.from);
-      if (!s) {
-        s = new Set();
-        dependents.set(inp.from, s);
-      }
-      s.add(n.id);
-    }
-  }
-  // BFS from each runOnly id over dependents.
-  const cascade = new Set<string>();
-  const queue = [...runOnly];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    if (cascade.has(id)) continue;
-    cascade.add(id);
-    for (const d of dependents.get(id) ?? []) {
-      queue.push(d);
-    }
-  }
-  return cascade;
-}
-
 /** Walk the bundle and run every reachable node to completion. */
 interface WalkResult {
   ok: boolean;
@@ -869,12 +828,22 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       instances: [],
     };
   }
-  let cascadeSet: Set<string> | null = null;
-  if (opts.runOnly !== undefined) {
-    try {
-      cascadeSet = computeCascade(opts.bundle, opts.runOnly);
-    } catch (e) {
-      return { ok: false, error: (e as Error).message, instances: [] };
+  // `runOnly` is a deprecated back-compat parameter — the old walker
+  // used it as a force-rerun signal because cascade-invalidation
+  // didn't exist. Now invalidateNodes (projectRegen.ts) cascades the
+  // event-derived dep graph BEFORE dispatch, so the walker is
+  // state-as-truth: pending → run, completed (with file) → skip. We
+  // still validate the ids so a caller passing garbage learns fast,
+  // but the parameter no longer drives any cache bypass.
+  if (opts.runOnly !== undefined && opts.runOnly.length > 0) {
+    for (const id of opts.runOnly) {
+      if (!bundleNodeIds.has(id)) {
+        return {
+          ok: false,
+          error: `runOnly node id '${id}' is not in bundle (valid nodes: ${[...bundleNodeIds].join(', ')})`,
+          instances: [],
+        };
+      }
     }
   }
 
@@ -1037,16 +1006,12 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   // Run in topo order.
   let stopAtReached = false;
   // BUG-023: track which nodes had their runner actually invoked in
-  // this walk. The cache-skip below (resume short-circuit) must be
-  // bypassed for any downstream of these — even if its walkState
-  // entry says completed + a stale output file is at the expected
-  // path, an upstream change means the cached output no longer
-  // reflects the inputs.
-  //
-  // Granularity: bare node id (over-approximation; see BUG-023).
-  // Per-item granularity would respect inputs[].scope='matching'
-  // so siblings don't unnecessarily re-render. Tracked as a TODO.
-  const reRunInThisWalk = new Set<string>();
+  // The pre-cascade walker tracked `reRunInThisWalk` to force
+  // downstream cache-bypass for any node whose upstream had been
+  // re-invoked this walk (BUG-023 band-aid). Cascade-invalidation
+  // now handles this at the boundary — invalidateNodes clears every
+  // transitive consumer's walkState entry, so the in-loop short-
+  // circuit naturally re-runs them. Removed here.
   for (const node of ordered) {
     if (stopAtReached) break;
 
@@ -1067,66 +1032,29 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
 
     const insts = instancesById.get(node.id) ?? [];
 
-    // runOnly filter — skip the dispatch for nodes outside the
-    // cascade. BUT we still hydrate their completed instances from
-    // walkState so downstream runners can read these nodes' outputs
-    // as inputs. Without this, a critique/regen targeting (say)
-    // shot_image_prompt with runOnly: ['shot_image_prompt'] would
-    // see empty `characters_plan` / `settings_plan` / `story` inputs
-    // — even though those upstream artifacts are on disk and the
-    // walkState says completed. (BUG-021)
-    if (cascadeSet !== null && !cascadeSet.has(node.id)) {
-      if (state) {
-        for (const inst of insts) {
-          const stateKey = inst.itemId ? `${node.id}:${inst.itemId}` : node.id;
-          const prior = state.nodes[stateKey];
-          if (prior && prior.status === 'completed' && prior.outputPath) {
-            const priorAbs = resolve(opts.projectDir, prior.outputPath);
-            if (existsSync(priorAbs)) {
-              inst.status = 'completed';
-              inst.outputRel = prior.outputPath;
-              inst.outputAbs = priorAbs;
-              if (prior.metadata) inst.metadata = prior.metadata;
-            }
-          }
-        }
-      }
-      continue;
-    }
+    // Pre-cascade walker had a cascadeSet bypass here that skipped
+    // dispatch for nodes outside runOnly's reach while still hydrating
+    // their completed instances from walkState. With cascade-
+    // invalidation (cascadeInvalidationKeys + invalidateNodes), the
+    // walker becomes pure state-as-truth — completed nodes are hydrated
+    // by the in-loop short-circuit below, pending nodes run. No outer
+    // filter needed.
 
     for (const inst of insts) {
       const stateKey = inst.itemId ? `${node.id}:${inst.itemId}` : node.id;
 
-      // Resume short-circuit: if walkState says completed AND output
-      // file is present, skip. (If output is gone, treat as missing
-      // and re-run.)
-      //
-      // EXCEPTION: when runOnly is set AND this node is in the cascade,
-      // the caller explicitly asked to redo this node — bypass the
-      // short-circuit. Skipping here would silently turn a redo
-      // request into a no-op.
-      const explicitlyRunning = cascadeSet !== null && cascadeSet.has(node.id);
-      // BUG-023: bypass cache-skip when any upstream node was
-      // re-invoked in this walk. The cached output file at outputPath
-      // no longer reflects the inputs (upstream just changed), so
-      // treating it as a cache hit silently bakes stale upstream
-      // into the downstream artifact (real-world: shot_image
-      // skipped when shot_image_prompt was re-run via critique).
-      const upstreamReRun = node.inputs.some((i) => reRunInThisWalk.has(i.from));
-      // User-version pin: when an artifact was supplied by the user
-      // via dhee_write_node_content, its walkState entry carries
-      // generation.tool='user'. Treat it as pinned — preserve through
-      // upstream re-runs. Only an EXPLICIT runOnly request (i.e. the
-      // user knowingly asking to regenerate this node) breaks the pin.
-      // Without this, a downstream upstream-rerun cascade clobbers
-      // every user-edited prompt / image on the next walk.
-      const priorForPinCheck = state?.nodes?.[stateKey];
-      const isUserPinned =
-        priorForPinCheck?.generation?.tool === 'user'
-        && priorForPinCheck?.status === 'completed'
-        && typeof priorForPinCheck?.outputPath === 'string'
-        && existsSync(resolve(opts.projectDir, priorForPinCheck.outputPath));
-      if (state && !explicitlyRunning && (!upstreamReRun || isUserPinned)) {
+      // State-as-truth resume: if walkState says completed AND the
+      // output file is present, skip. Otherwise re-run (item is
+      // pending or its file was removed). This single rule replaces
+      // three pre-cascade bypass branches (explicitlyRunning /
+      // upstreamReRun / isUserPinned) that worked around missing
+      // cascade-invalidation semantics. With invalidateNodes now
+      // cascading per-item event deps, completed = trustworthy.
+      // User-pin no longer survives upstream cascade — if the user
+      // changes a character ref, even a pinned downstream shot is
+      // invalidated, matching user intent ("downstream fixes should
+      // not be stuck with the old character").
+      if (state) {
         const prior = state.nodes[stateKey];
         if (prior && prior.status === 'completed' && prior.outputPath) {
           const priorAbs = resolve(opts.projectDir, prior.outputPath);
@@ -1436,7 +1364,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         };
         persistState();
       }
-      if (opts.engine) {
+      {
         // The runner stamps cache state + inputsHash via metadata.
         // We propagate them onto the event so projections (cost,
         // lineage) can reason about cache hits and replayability.
@@ -1464,10 +1392,15 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           depSeen.add(k);
           depsForEvent.push(d);
         }
-        opts.engine.appendAndProject({
+        // Always append node.completed — when an engine is attached,
+        // also let it project. Without unconditional append, callers
+        // that don't bring a ProjectionEngine (review-loop wrapper,
+        // most agent paths) leave an empty events.jsonl and cascade-
+        // invalidation has no dep graph to walk on the next regen.
+        const completedEvent = {
           branchId: opts.branchId ?? 'main',
-          actor: 'walker',
-          kind: 'node.completed',
+          actor: 'walker' as const,
+          kind: 'node.completed' as const,
           payload: {
             nodeId: node.id,
             ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
@@ -1484,12 +1417,18 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             ...(depsForEvent.length > 0 ? { dependencies: depsForEvent } : {}),
             ...(result.metadata ? { metadata: result.metadata } : {}),
           },
-        });
+        };
+        if (opts.engine) {
+          opts.engine.appendAndProject(completedEvent);
+        } else {
+          try {
+            const log2 = openEventLog(opts.projectDir);
+            log2.append(completedEvent);
+          } catch {
+            // Best-effort — event log write must not block the walk.
+          }
+        }
       }
-      // BUG-023: record that this node had its runner invoked in
-      // this walk. Downstream cache-skip will see this and force a
-      // re-render even if a stale output sits at the outputPath.
-      reRunInThisWalk.add(node.id);
       log(`✓ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} → ${result.outputPath}`);
     }
 

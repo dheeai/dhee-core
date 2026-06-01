@@ -248,10 +248,15 @@ export async function regenerateNode(opts: RegenerateNodeOpts): Promise<Regenera
   });
   if (inv.error) return { ok: false, error: inv.error };
 
+  // Post-cascade: invalidateNodes already cleared the target item + every
+  // transitive consumer from walkState. The walker just needs to do a
+  // normal topo walk; state-as-truth (pending → run, completed → skip)
+  // produces the right execution set without any runOnly force-rerun
+  // hint. The old `runOnly: [opts.nodeId]` was a band-aid for missing
+  // cascade behavior — no longer needed.
   const runner = opts.runProjectViaBundle ?? defaultRunner;
   const runOpts: RunProjectViaBundleOpts = {
     projectDir: opts.projectDir,
-    runOnly: [opts.nodeId],
     ...(opts.signal ? { signal: opts.signal } : {}),
   };
 

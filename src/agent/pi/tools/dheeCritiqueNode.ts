@@ -9,7 +9,9 @@
  *
  *   confirm=true: stamps the critique into project.json's
  *   pendingCritiques map, invalidates the target node + walkState
- *   entry, and dispatches the bundle with runOnly: [nodeId]. The
+ *   entry (and every transitive consumer via cascade-invalidation),
+ *   then dispatches the bundle. Post-cascade-refactor: dispatch
+ *   carries no runOnly — the walker is state-as-truth. The
  *   walker cascades downstream automatically. The llm.generate
  *   runner consumes the critique on its next invocation of that
  *   (node, item) and clears it after success.
@@ -239,7 +241,7 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
       }
       const message = params.applyOnly
         ? `Critique batched for '${target}'. pendingCritique stamped + node invalidated; dispatch SKIPPED (applyOnly). Call dhee_run_bundle when all batched critiques are queued.`
-        : `Critique applied to '${target}'. Pending critique stamped in project.json; node invalidated; bundle re-dispatched with runOnly: ['${params.nodeId}']. Downstream nodes will cascade-rerun via the walker.`;
+        : `Critique applied to '${target}'. Pending critique stamped in project.json; node + downstream cascade invalidated via event-derived dep graph; bundle re-dispatched (walker re-runs everything pending).`;
       return textResult(message, {
         applied: true,
         applyOnly: params.applyOnly === true,
