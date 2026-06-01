@@ -132,3 +132,124 @@ describe('resolveBundleDir', () => {
     ).toThrow(/not yet implemented|not supported/i);
   });
 });
+
+describe('resolveBundleDir — multi-root search (externalized bundles)', () => {
+  // Externalized bundle resolution: the resolver searches roots in
+  // precedence order so the same bundle id can exist in multiple
+  // locations and the most-specific wins.
+  //
+  // Search order (high → low precedence):
+  //   1. DHEE_USER_BUNDLES_DIR — user forks, community installs (writable)
+  //   2. DHEE_APP_BUNDLES_DIR  — shipped defaults inside .app (read-only)
+  //   3. ~/.kshana/bundles     — legacy `user:` location (back-compat)
+  //   4. <REPO_ROOT>/src/dag/bundles — dev/source fallback
+  //
+  // Both `built-in:` and `user:` schemes resolve through the SAME chain.
+  // The scheme is a semantic hint (UI label), not a resolution policy.
+  // This lets a user fork `built-in:narrative_prompt_relay` by dropping
+  // a same-named dir into DHEE_USER_BUNDLES_DIR; the fork wins.
+
+  let tmpHome: string;
+  let tmpUser: string;
+  let tmpApp: string;
+  let original: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'bs-home-'));
+    tmpUser = mkdtempSync(join(tmpdir(), 'bs-user-'));
+    tmpApp = mkdtempSync(join(tmpdir(), 'bs-app-'));
+    original = {
+      HOME: process.env['HOME'],
+      DHEE_USER_BUNDLES_DIR: process.env['DHEE_USER_BUNDLES_DIR'],
+      DHEE_APP_BUNDLES_DIR: process.env['DHEE_APP_BUNDLES_DIR'],
+    };
+    process.env['HOME'] = tmpHome;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(original)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    for (const d of [tmpHome, tmpUser, tmpApp]) {
+      try { rmSync(d, { recursive: true, force: true }); } catch { /* */ }
+    }
+  });
+
+  function seedBundle(rootDir: string, id: string, marker: string): void {
+    const bundleDir = join(rootDir, id);
+    mkdirSync(bundleDir, { recursive: true });
+    writeFileSync(
+      join(bundleDir, 'bundle.json'),
+      JSON.stringify({ id, marker, goal: 'final', nodes: [] }),
+    );
+  }
+
+  it('resolves built-in:<id> from DHEE_APP_BUNDLES_DIR when set', () => {
+    process.env['DHEE_APP_BUNDLES_DIR'] = tmpApp;
+    seedBundle(tmpApp, 'shipped_bundle', 'app');
+    const dir = resolveBundleDir({ scheme: 'built-in', id: 'shipped_bundle' });
+    expect(dir).toBe(join(tmpApp, 'shipped_bundle'));
+  });
+
+  it('user fork in DHEE_USER_BUNDLES_DIR overrides the built-in shipped under DHEE_APP_BUNDLES_DIR', () => {
+    process.env['DHEE_USER_BUNDLES_DIR'] = tmpUser;
+    process.env['DHEE_APP_BUNDLES_DIR'] = tmpApp;
+    seedBundle(tmpApp, 'narrative_prompt_relay', 'app-shipped');
+    seedBundle(tmpUser, 'narrative_prompt_relay', 'user-forked');
+
+    // Even though the project.json says `built-in:narrative_prompt_relay`,
+    // the user's fork wins because USER has higher precedence than APP.
+    const dir = resolveBundleDir({
+      scheme: 'built-in',
+      id: 'narrative_prompt_relay',
+    });
+    expect(dir).toBe(join(tmpUser, 'narrative_prompt_relay'));
+  });
+
+  it('user:<id> also resolves through the multi-root chain (USER → APP → HOME → REPO_ROOT)', () => {
+    process.env['DHEE_USER_BUNDLES_DIR'] = tmpUser;
+    seedBundle(tmpUser, 'my_custom', 'user');
+    const dir = resolveBundleDir({ scheme: 'user', id: 'my_custom' });
+    expect(dir).toBe(join(tmpUser, 'my_custom'));
+  });
+
+  it('back-compat: user:<id> still resolves to ~/.kshana/bundles when no env vars are set', () => {
+    delete process.env['DHEE_USER_BUNDLES_DIR'];
+    delete process.env['DHEE_APP_BUNDLES_DIR'];
+    const legacyDir = join(tmpHome, '.kshana', 'bundles', 'legacy');
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, 'bundle.json'), '{}');
+    const dir = resolveBundleDir({ scheme: 'user', id: 'legacy' });
+    expect(dir).toBe(legacyDir);
+  });
+
+  it('falls through DHEE_USER_BUNDLES_DIR → DHEE_APP_BUNDLES_DIR when the id is in APP only', () => {
+    process.env['DHEE_USER_BUNDLES_DIR'] = tmpUser; // empty user dir
+    process.env['DHEE_APP_BUNDLES_DIR'] = tmpApp;
+    seedBundle(tmpApp, 'only_in_app', 'app');
+    const dir = resolveBundleDir({ scheme: 'built-in', id: 'only_in_app' });
+    expect(dir).toBe(join(tmpApp, 'only_in_app'));
+  });
+
+  it('error message names every root searched when the bundle is missing everywhere', () => {
+    process.env['DHEE_USER_BUNDLES_DIR'] = tmpUser;
+    process.env['DHEE_APP_BUNDLES_DIR'] = tmpApp;
+    try {
+      resolveBundleDir({ scheme: 'built-in', id: 'no_such_bundle' });
+      throw new Error('should have thrown');
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).toMatch(/no_such_bundle/);
+      expect(msg).toMatch(tmpUser);
+      expect(msg).toMatch(tmpApp);
+    }
+  });
+
+  it('legacy single-file bundle (<id>.json) still resolves from any root', () => {
+    process.env['DHEE_APP_BUNDLES_DIR'] = tmpApp;
+    writeFileSync(join(tmpApp, 'ltx_prompt_relay.json'), '{}');
+    const path = resolveBundleDir({ scheme: 'built-in', id: 'ltx_prompt_relay' });
+    expect(path).toBe(join(tmpApp, 'ltx_prompt_relay.json'));
+  });
+});

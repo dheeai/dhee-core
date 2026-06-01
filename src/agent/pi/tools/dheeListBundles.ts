@@ -9,20 +9,19 @@
  */
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
-import { resolve, join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-// REPO_ROOT = .../kshana-core (this file is src/agent/pi/tools/dheeListBundles.ts)
-const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..');
-const DEFAULT_BUNDLES_DIR = resolve(REPO_ROOT, 'src/dag/bundles');
+import { getBundleSearchRoots } from '../../../dag/bundleSource.js';
 
 export interface ListBundlesDeps {
-  /** Override the bundles directory; useful for tests. */
-  bundlesDir?: () => string;
+  /**
+   * Override the bundles directory(s); useful for tests. Returns one
+   * or more roots; each root is scanned in order, and a bundle id
+   * seen first wins (matches resolveBundleDir precedence — USER fork
+   * shadows APP shipped default).
+   */
+  bundlesDir?: () => string | string[];
 }
 
 export interface BundleEntry {
@@ -52,39 +51,48 @@ function readBundleJson(path: string): BundleEntry | null {
 }
 
 export function makeListBundlesTool(deps: ListBundlesDeps = {}) {
-  const dirFn = deps.bundlesDir ?? (() => DEFAULT_BUNDLES_DIR);
+  const dirFn = deps.bundlesDir ?? (() => getBundleSearchRoots());
   return defineTool({
     name: 'dhee_list_bundles',
     label: 'List bundles',
     description:
-      'List every built-in bundle (pipeline) shipped with kshana. Each entry has { id, version, description }. Use this BEFORE picking a bundleId for dhee_create_project — read the descriptions and pick the one whose strengths match the user\'s story (e.g. action/motion → relay, dialogue/precise composition → shot-by-shot).',
+      'List every available bundle (pipeline) — first-party defaults shipped with the app PLUS any forks / community bundles the user has dropped into their bundles dir. Each entry has { id, version, description }. Use this BEFORE picking a bundleId for dhee_create_project — read the descriptions and pick the one whose strengths match the user\'s story (e.g. action/motion → relay, dialogue/precise composition → shot-by-shot).',
     parameters: Type.Object({}),
     async execute() {
-      const root = dirFn();
-      if (!existsSync(root)) return textResult('[]');
+      const dirResult = dirFn();
+      const roots = Array.isArray(dirResult) ? dirResult : [dirResult];
       const entries: BundleEntry[] = [];
-      let names: string[];
-      try {
-        names = readdirSync(root);
-      } catch {
-        return textResult('[]');
-      }
-      for (const name of names) {
-        const full = join(root, name);
-        let st: ReturnType<typeof statSync>;
+      const seen = new Set<string>();
+      for (const root of roots) {
+        if (!root || !existsSync(root)) continue;
+        let names: string[];
         try {
-          st = statSync(full);
+          names = readdirSync(root);
         } catch {
           continue;
         }
-        if (st.isDirectory()) {
-          const manifestPath = join(full, 'bundle.json');
-          if (!existsSync(manifestPath)) continue;
-          const entry = readBundleJson(manifestPath);
-          if (entry) entries.push(entry);
-        } else if (st.isFile() && name.endsWith('.json')) {
-          const entry = readBundleJson(full);
-          if (entry) entries.push(entry);
+        for (const name of names) {
+          const full = join(root, name);
+          let st: ReturnType<typeof statSync>;
+          try {
+            st = statSync(full);
+          } catch {
+            continue;
+          }
+          let entry: BundleEntry | null = null;
+          if (st.isDirectory()) {
+            const manifestPath = join(full, 'bundle.json');
+            if (!existsSync(manifestPath)) continue;
+            entry = readBundleJson(manifestPath);
+          } else if (st.isFile() && name.endsWith('.json')) {
+            entry = readBundleJson(full);
+          }
+          if (!entry) continue;
+          // First root wins — matches resolveBundleDir precedence so
+          // a user's fork shadows the shipped default in the listing.
+          if (seen.has(entry.id)) continue;
+          seen.add(entry.id);
+          entries.push(entry);
         }
       }
       entries.sort((a, b) => a.id.localeCompare(b.id));

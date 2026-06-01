@@ -141,4 +141,49 @@ describe('dhee_list_bundles', () => {
     expect(r.content[0].type).toBe('text');
     expect(() => JSON.parse(r.content[0].text)).not.toThrow();
   });
+
+  it('9. multi-root: same id in USER + APP → USER fork wins, listed once', async () => {
+    // Externalized bundle resolution: when a user forks a built-in by
+    // dropping a same-named dir into their bundles dir, the listing
+    // shows the FORK (so the description / version reflect the user's
+    // edits), not the shipped default. Matches resolveBundleDir
+    // precedence — USER > APP.
+    const userDir = setupBundlesDir({
+      'narrative_prompt_relay/bundle.json': JSON.stringify({
+        id: 'narrative_prompt_relay',
+        version: '0.2.0-user-fork',
+        description: 'user-tuned narrative relay',
+      }),
+    });
+    const appDir = setupBundlesDir({
+      'narrative_prompt_relay/bundle.json': JSON.stringify({
+        id: 'narrative_prompt_relay',
+        version: '0.1.0',
+        description: 'shipped default',
+      }),
+      'narrative_shot_by_shot/bundle.json': JSON.stringify({
+        id: 'narrative_shot_by_shot',
+        version: '0.1.0',
+        description: 'shipped default',
+      }),
+    });
+    made.push(userDir, appDir);
+
+    const tool = makeListBundlesTool({ bundlesDir: () => [userDir, appDir] });
+    const r = await (tool as { execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }> }).execute('t', {});
+    const parsed = JSON.parse(r.content[0].text) as Array<{ id: string; version: string; description: string }>;
+
+    // Two distinct bundle ids.
+    expect(parsed.map((b) => b.id).sort()).toEqual([
+      'narrative_prompt_relay',
+      'narrative_shot_by_shot',
+    ]);
+    // narrative_prompt_relay's entry came from USER (the fork).
+    const fork = parsed.find((b) => b.id === 'narrative_prompt_relay');
+    expect(fork?.version).toBe('0.2.0-user-fork');
+    expect(fork?.description).toBe('user-tuned narrative relay');
+    // narrative_shot_by_shot wasn't forked — comes from APP unchanged.
+    const shipped = parsed.find((b) => b.id === 'narrative_shot_by_shot');
+    expect(shipped?.description).toBe('shipped default');
+  });
 });

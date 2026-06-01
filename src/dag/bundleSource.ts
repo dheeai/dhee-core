@@ -2,19 +2,33 @@
  * BundleSource — parser + resolver for the `bundleSource` URI field that
  * `project.json` carries to identify which bundle a project uses.
  *
- * Three schemes, each with its own resolution policy:
- *   - `built-in:<id>`           → shipped with kshana-core, lives in
- *                                  <REPO_ROOT>/src/dag/bundles/<id>/
- *   - `user:<id>`               → user-authored, lives in
- *                                  ~/.kshana/bundles/<id>/
+ * Three schemes (parser):
+ *   - `built-in:<id>` → ships with the app
+ *   - `user:<id>`     → user-authored / community / forked
  *   - `registry:<scope>/<name>@<version>` → future bundle registry
- *                                  (parser accepts, resolver rejects
- *                                  with "not yet implemented")
+ *
+ * Resolution is multi-root: both `built-in:` and `user:` schemes search
+ * the SAME chain of roots, in precedence order. The scheme is a
+ * semantic hint (UI label), not a routing policy. This lets a user
+ * fork a built-in by dropping a same-named directory into the user
+ * bundles dir — the fork wins.
+ *
+ * Search order (high → low precedence):
+ *   1. DHEE_USER_BUNDLES_DIR — user forks + community installs
+ *      (the desktop sets this to `<studiosDir>/bundles/`).
+ *   2. DHEE_APP_BUNDLES_DIR  — first-party defaults shipped inside
+ *      the packaged app (electron-builder extraResources lifts
+ *      kshana-core/dist/bundles → <app>/Resources/bundles).
+ *   3. ~/.kshana/bundles     — legacy `user:` location, kept for
+ *      back-compat with projects created before externalization.
+ *   4. <REPO_ROOT>/src/dag/bundles — dev/source fallback (the path
+ *      that worked pre-externalization). Lets vitest + headless
+ *      scripts keep running without env vars.
  *
  * Parse and resolve are deliberately separate functions: the parser
- * never touches the filesystem (pure, can run in tests without any
- * setup), while the resolver makes filesystem calls and may throw on
- * missing-on-disk bundles.
+ * never touches the filesystem (pure, runs in tests without setup);
+ * the resolver makes filesystem calls and throws on missing bundles
+ * with every searched root named in the error.
  */
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -68,8 +82,6 @@ export function parseBundleSource(uri: string): BundleSource {
     return { scheme: 'user', id: rest };
   }
   if (scheme === 'registry') {
-    // 'scope/name@version' — version pin is required (lockable
-    // references are non-negotiable for reproducibility).
     const atIdx = rest.lastIndexOf('@');
     if (atIdx < 0) {
       throw new BundleSourceError(
@@ -91,41 +103,59 @@ export function parseBundleSource(uri: string): BundleSource {
 }
 
 /**
- * Resolve a BundleSource to an absolute filesystem path. The path may
- * be either a directory (modern bundle layout) or a single JSON file
- * (legacy single-file bundle). Callers (the walker / loader) detect
- * which by checking statSync(...).isDirectory().
+ * The ordered list of root directories the resolver searches for a
+ * bundle id. Exported so list-bundles can enumerate the same set.
  *
- * Throws BundleSourceError when:
- *   - built-in bundle id doesn't exist on disk
- *   - user bundle id doesn't exist on disk
- *   - registry scheme (always — not implemented yet)
+ * Env vars take precedence over defaults so the desktop can point
+ * them at packaged paths (`<app>/Resources/bundles`) and user paths
+ * (`<studiosDir>/bundles`) without recompiling kshana-core.
+ */
+export function getBundleSearchRoots(): string[] {
+  const roots: string[] = [];
+  const userDir = process.env['DHEE_USER_BUNDLES_DIR']?.trim();
+  if (userDir) roots.push(userDir);
+  const appDir = process.env['DHEE_APP_BUNDLES_DIR']?.trim();
+  if (appDir) roots.push(appDir);
+  // Legacy `user:` location — back-compat for projects that predate
+  // the env-driven layout.
+  roots.push(resolve(homedir(), '.kshana/bundles'));
+  // Dev / source fallback — the in-repo source tree. Keeps vitest +
+  // headless scripts working without setting env vars.
+  roots.push(resolve(REPO_ROOT, 'src/dag/bundles'));
+  return roots;
+}
+
+/**
+ * Resolve a BundleSource to an absolute filesystem path. The path may
+ * be either a directory (modern bundle layout: `<root>/<id>/`) or a
+ * single JSON file (legacy: `<root>/<id>.json`). Callers detect which
+ * via `statSync(...).isDirectory()`.
+ *
+ * Both `built-in:` and `user:` schemes resolve through the same search
+ * chain — see `getBundleSearchRoots()`. The first match wins; if no
+ * root contains the id, throws BundleSourceError naming every searched
+ * path so the user can see where to drop the bundle.
  */
 export function resolveBundleDir(source: BundleSource): string {
-  if (source.scheme === 'built-in') {
-    const asDir = resolve(REPO_ROOT, 'src/dag/bundles', source.id);
-    if (existsSync(asDir) && statSync(asDir).isDirectory()) return asDir;
-    const asJson = resolve(REPO_ROOT, 'src/dag/bundles', `${source.id}.json`);
-    if (existsSync(asJson)) return asJson;
-    throw new BundleSourceError(
-      `Built-in bundle '${source.id}' not found. ` +
-        `Looked for directory at ${asDir} and single-file at ${asJson}.`,
-    );
-  }
-  if (source.scheme === 'user') {
-    const dir = resolve(homedir(), '.kshana/bundles', source.id);
-    if (existsSync(dir) && statSync(dir).isDirectory()) return dir;
-    throw new BundleSourceError(
-      `User bundle '${source.id}' not found at ${dir}. ` +
-        `Create the bundle directory there or fix the bundleSource in project.json.`,
-    );
-  }
   if (source.scheme === 'registry') {
     throw new BundleSourceError(
       `registry: scheme is not yet implemented. ` +
         `It is reserved for a future bundle registry feature; for now use built-in: or user:.`,
     );
   }
-  // Exhaustiveness — TypeScript should catch this, but be defensive.
-  throw new BundleSourceError(`Unhandled bundle source scheme.`);
+
+  const roots = getBundleSearchRoots();
+  const tried: string[] = [];
+  for (const root of roots) {
+    const asDir = resolve(root, source.id);
+    tried.push(asDir);
+    if (existsSync(asDir) && statSync(asDir).isDirectory()) return asDir;
+    const asJson = resolve(root, `${source.id}.json`);
+    tried.push(asJson);
+    if (existsSync(asJson)) return asJson;
+  }
+  throw new BundleSourceError(
+    `${source.scheme} bundle '${source.id}' not found. ` +
+      `Searched:\n  - ${tried.join('\n  - ')}`,
+  );
 }

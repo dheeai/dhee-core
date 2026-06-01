@@ -25,10 +25,29 @@ export default defineConfig({
   // `SKILL_DIR = resolve(__dirname, 'skill')` resolves to a real
   // directory at runtime. Without this, `loadSkillsFromDir` returns []
   // and the agent runs without our SKILL.md system prompt.
+  //
+  // Also copy the curated first-party bundles so the packaged desktop
+  // can ship them as built-in defaults (resolved at runtime via
+  // DHEE_APP_BUNDLES_DIR → <app>/Resources/bundles, lifted by the
+  // desktop's electron-builder extraResources config from this
+  // dist/bundles directory).
   async onSuccess() {
     const { cpSync, existsSync, rmSync } = await import('node:fs');
-    const dst = 'dist/skill';
-    if (existsSync(dst)) rmSync(dst, { recursive: true, force: true });
-    cpSync('src/agent/pi/skill', dst, { recursive: true });
+    const dstSkill = 'dist/skill';
+    if (existsSync(dstSkill)) rmSync(dstSkill, { recursive: true, force: true });
+    cpSync('src/agent/pi/skill', dstSkill, { recursive: true });
+
+    // Curated default bundles. Add new defaults here when ready to
+    // ship them. The full src/dag/bundles tree stays in source for
+    // dev; only these get packaged so the .app stays small.
+    const FIRST_PARTY_BUNDLES = [
+      'narrative_prompt_relay',
+      'narrative_shot_by_shot',
+    ];
+    const dstBundles = 'dist/bundles';
+    if (existsSync(dstBundles)) rmSync(dstBundles, { recursive: true, force: true });
+    for (const id of FIRST_PARTY_BUNDLES) {
+      cpSync(`src/dag/bundles/${id}`, `${dstBundles}/${id}`, { recursive: true });
+    }
   },
 });
