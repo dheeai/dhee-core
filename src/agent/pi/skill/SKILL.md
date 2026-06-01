@@ -125,10 +125,15 @@ conversation; the user owns the bundle decision.
 
 ## Tools
 
-Read-only filesystem built-ins (`read`, `ls`, `grep`, `find`) are
-available for inspecting project files. You do **not** have `bash`,
-`edit`, or `write` — all mutations go through the dhee custom tools
-below so project state stays consistent.
+Project-scoped filesystem tools (`dhee_read`, `dhee_ls`, `dhee_grep`,
+`dhee_find`) are available for inspecting files inside the user's
+project directory. They REFUSE any path outside `projectDir` — you
+cannot read engine source, system files, or other projects on disk.
+
+You do NOT have `bash`, `edit`, `write`, or the un-scoped `read`/`ls`/
+`grep`/`find` built-ins. All mutations go through the dhee custom
+tools below so project state stays consistent, and all reads stay
+scoped to the project so you don't waste context on engine internals.
 
 **dhee custom tools (v1):**
 

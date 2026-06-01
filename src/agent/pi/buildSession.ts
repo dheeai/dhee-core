@@ -43,8 +43,16 @@ export const DHEE_SKILL_NAME = 'dhee';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = resolve(__dirname, 'skill');
 
-/** Read-only built-in tools. No bash / edit / write. */
-const READONLY_BUILTINS = ['read', 'ls', 'grep', 'find'] as const;
+/**
+ * Pi's read-only built-in tools used to be in this allowlist:
+ *   ['read', 'ls', 'grep', 'find']
+ * Removed because pi's defaults accept ANY absolute path, which let the
+ * agent wander into /Users/ganaraj/Projects/kshana-core/src/... to
+ * debug engine internals instead of helping the user with their video.
+ * The dhee_read / dhee_ls / dhee_grep / dhee_find tools (path-scoped
+ * to the user's projectDir) replace them in DHEE_TOOL_NAMES.
+ */
+const READONLY_BUILTINS: readonly string[] = [];
 
 export interface BuildPiSessionOptions {
   /**

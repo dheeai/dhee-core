@@ -20,6 +20,7 @@ import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProjec
 import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
 import { dheeDescribeBundleTool, makeDescribeBundleTool } from './dheeDescribeBundle.js';
 import { dheeForkTool, makeForkTool } from './dheeFork.js';
+import { dheeFindTool, dheeGrepTool, dheeLsTool, dheeReadTool, makeFindTool, makeGrepTool, makeLsTool, makeReadTool } from './dheeFs.js';
 import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
 import { dheeListBundlesTool, makeListBundlesTool } from './dheeListBundles.js';
 import { dheeListVersionsTool, makeListVersionsTool } from './dheeListVersions.js';
@@ -54,6 +55,10 @@ export const DHEE_TOOL_NAMES = [
   'dhee_swap_runner',
   'dhee_write_input',
   'dhee_write_node_content',
+  'dhee_read',
+  'dhee_ls',
+  'dhee_grep',
+  'dhee_find',
 ] as const;
 
 export {
@@ -76,6 +81,10 @@ export {
   dheeSwapRunnerTool,
   dheeWriteInputTool,
   dheeWriteNodeContentTool,
+  dheeReadTool,
+  dheeLsTool,
+  dheeGrepTool,
+  dheeFindTool,
   makeApplyWorkflowAliasesTool,
   makeCheckWorkflowTool,
   makeCreateProjectTool,
@@ -95,6 +104,10 @@ export {
   makeSwapRunnerTool,
   makeWriteInputTool,
   makeWriteNodeContentTool,
+  makeReadTool,
+  makeLsTool,
+  makeGrepTool,
+  makeFindTool,
 };
 
 /**
@@ -122,4 +135,8 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeSwapRunnerTool);
   pi.registerTool(dheeWriteInputTool);
   pi.registerTool(dheeWriteNodeContentTool);
+  pi.registerTool(dheeReadTool);
+  pi.registerTool(dheeLsTool);
+  pi.registerTool(dheeGrepTool);
+  pi.registerTool(dheeFindTool);
 }
