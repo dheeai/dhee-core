@@ -36,15 +36,25 @@ describe('buildPiSessionConfig', () => {
     expect(dhee!.filePath).toMatch(/src[\\/]agent[\\/]pi[\\/]skill[\\/]SKILL\.md$/);
   });
 
-  it('gates the tool allowlist to read-only built-ins (no write / edit / bash)', async () => {
+  it('gates the tool allowlist to project-scoped fs + dhee custom tools (no pi builtins, no write / edit / bash)', async () => {
     const cfg = await buildPiSessionConfig({
       sessionManager: SessionManager.inMemory(process.cwd()),
     });
 
-    expect(cfg.tools).toContain('read');
-    expect(cfg.tools).toContain('ls');
-    expect(cfg.tools).toContain('grep');
-    expect(cfg.tools).toContain('find');
+    // The pi-coding-agent built-in read/ls/grep/find accept any absolute
+    // path on the filesystem; we replaced them with project-scoped
+    // dhee_read / dhee_ls / dhee_grep / dhee_find so the agent can't
+    // wander into engine source. The old builtins must NOT be allowlisted.
+    expect(cfg.tools).not.toContain('read');
+    expect(cfg.tools).not.toContain('ls');
+    expect(cfg.tools).not.toContain('grep');
+    expect(cfg.tools).not.toContain('find');
+    // The project-scoped replacements ARE allowlisted.
+    expect(cfg.tools).toContain('dhee_read');
+    expect(cfg.tools).toContain('dhee_ls');
+    expect(cfg.tools).toContain('dhee_grep');
+    expect(cfg.tools).toContain('dhee_find');
+    // Mutating builtins are never allowlisted.
     expect(cfg.tools).not.toContain('write');
     expect(cfg.tools).not.toContain('edit');
     expect(cfg.tools).not.toContain('bash');

@@ -516,6 +516,9 @@ describe('DHEE_TOOL_NAMES', () => {
   it('lists every v1 dhee tool name so the buildSession allowlist can include them', () => {
     expect(DHEE_TOOL_NAMES).toEqual([
       'dhee_create_project',
+      'dhee_list_bundles',
+      'dhee_present_bundle_choices',
+      'dhee_describe_bundle',
       'dhee_run_bundle',
       'dhee_get_status',
       'dhee_regenerate_node',
@@ -525,6 +528,16 @@ describe('DHEE_TOOL_NAMES', () => {
       'dhee_read_artifact',
       'dhee_show_node_output',
       'dhee_show_file',
+      'dhee_list_versions',
+      'dhee_select_version',
+      'dhee_fork',
+      'dhee_swap_runner',
+      'dhee_write_input',
+      'dhee_write_node_content',
+      'dhee_read',
+      'dhee_ls',
+      'dhee_grep',
+      'dhee_find',
     ]);
   });
 });

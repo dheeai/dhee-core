@@ -167,6 +167,23 @@ describe('comfy.image runner', () => {
   describe('failure mode 1 — endpoint env var unset', () => {
     it('fails with the named env var in the error', async () => {
       delete process.env['ENDPOINT_test_endpoint']; // unset for this case
+      // resolveEndpointUrl in COMFY_MODE=local (the default) routes
+      // EVERY endpoint to ENDPOINT_self_local / COMFYUI_BASE_URL,
+      // ignoring the bundle's named endpoint. To test the bundle-
+      // label-honoring code path (which is what this test asserts),
+      // force COMFY_MODE=cloud and unset the local fallbacks.
+      const savedMode = process.env['COMFY_MODE'];
+      const savedLocal = process.env['ENDPOINT_self_local'];
+      const savedBase = process.env['COMFYUI_BASE_URL'];
+      process.env['COMFY_MODE'] = 'cloud';
+      delete process.env['ENDPOINT_self_local'];
+      delete process.env['COMFYUI_BASE_URL'];
+      const restoreEnv = () => {
+        if (savedMode === undefined) delete process.env['COMFY_MODE'];
+        else process.env['COMFY_MODE'] = savedMode;
+        if (savedLocal !== undefined) process.env['ENDPOINT_self_local'] = savedLocal;
+        if (savedBase !== undefined) process.env['COMFYUI_BASE_URL'] = savedBase;
+      };
       const client = makeStubClient({});
       const runner = createComfyImageRunner({ clientFactory: () => client });
 
@@ -186,6 +203,7 @@ describe('comfy.image runner', () => {
         expect(result.error).toMatch(/ENDPOINT_test_endpoint/);
         expect(result.error).toMatch(/test\.endpoint/);
       }
+      restoreEnv();
     });
   });
 

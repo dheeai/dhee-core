@@ -28,6 +28,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { cascadeInvalidationKeys, type CascadeTarget } from './cascadeInvalidationKeys.js';
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
 import type {
@@ -124,9 +125,41 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
   const invalidated: string[] = [];
   const notFound: string[] = [];
 
-  for (const key of opts.nodeIds) {
+  // Cascade: for each requested target, walk the event-derived
+  // dependency graph forward and collect every downstream consumer.
+  // Then the loop below clears every key in the expanded set.
+  // Pre-fix: the loop only cleared the requested keys, leaving
+  // downstream artifacts intact with stale-upstream baked in. The
+  // walker compensated with the upstreamReRun cache-bypass hack
+  // (BUG-023). With cascade-invalidation, the walker becomes dumb
+  // (state-as-truth) — that hack is removed in this commit's
+  // walker simplification.
+  let cascadeKeys: string[];
+  try {
+    const log = openEventLog(opts.projectDir);
+    const allEvents = [...log.read()];
+    const expanded = new Set<string>();
+    for (const requested of opts.nodeIds) {
+      const target: CascadeTarget = requested.includes(':')
+        ? { nodeId: requested.split(':')[0]!, itemId: requested.split(':').slice(1).join(':') }
+        : { nodeId: requested };
+      for (const k of cascadeInvalidationKeys(allEvents, target)) {
+        expanded.add(k.itemId !== undefined ? `${k.nodeId}:${k.itemId}` : k.nodeId);
+      }
+    }
+    cascadeKeys = [...expanded];
+  } catch {
+    // Event log unreadable — fall back to requested keys only.
+    cascadeKeys = [...opts.nodeIds];
+  }
+
+  for (const key of cascadeKeys) {
     if (!walkState.nodes![key]) {
-      notFound.push(key);
+      // Cascade keys may include items never recorded in walkState
+      // (e.g. a downstream item that hasn't been rendered yet). Skip
+      // silently rather than reporting notFound — they don't need
+      // clearing. Only report notFound for keys the CALLER requested.
+      if (opts.nodeIds.includes(key)) notFound.push(key);
       continue;
     }
     // Delete the on-disk artifact too — some runners (comfy.image,
