@@ -114,6 +114,40 @@ conversation; the user owns the bundle decision.
   proposing a fix.
 - **Regenerate locally.** When the user wants to change one shot,
   regenerate only that node — don't re-run the entire DAG.
+
+  - For ONE item of a collection node, ALWAYS use:
+    `dhee_regenerate_node(projectDir, nodeId, itemId)`
+    Example: shot 6 of `shot_image` →
+    `dhee_regenerate_node(nodeId='shot_image', itemId='scene_1_shot_6')`.
+
+  - NEVER use `dhee_run_bundle(runOnly=[bareNodeId])` to fix one item.
+    `runOnly` with a bare nodeId re-renders EVERY itemId under that
+    node — destroying renders the user didn't ask to touch. Real
+    incident 2026-06-01: agent escalated "fix shot 6 finger" to
+    `runOnly=["shot_image"]` and re-rendered all 7 shots.
+
+  - When fixing multiple shots, issue separate `dhee_regenerate_node`
+    calls — one per itemId. The walker handles the cascade per call.
+
+- **Quote tool errors verbatim. Don't confabulate root causes.**
+  When a tool returns an error, read the WHOLE error message and
+  surface it to the user as-is before proposing any fix. Real incident
+  2026-06-01: a 429 PAYMENT_REQUIRED from Comfy Cloud got paraphrased
+  as "the cloud images expired"; the agent then proposed a re-render
+  cascade that wouldn't have helped even if the diagnosis were right.
+  If you can't read the runner's literal error, the right move is to
+  ask the user, not invent a plausible-sounding alternative.
+
+- **On Comfy errors specifically:**
+  - 429 PAYMENT_REQUIRED / subscription issues → the user may want to
+    swap the endpoint to local. Quote the 429 verbatim and ask before
+    re-rendering. `dhee_swap_runner` can target one node.
+  - Image / workflow not found → check the workflow path with the
+    user, do NOT auto-regenerate to "fix" it.
+  - File-upload errors → retry the SAME dispatch; the comfy.image
+    runner re-uploads refs on every call. Don't try to "re-upload by
+    re-running upstream nodes" — there's no such mechanism, you'd
+    just re-render unrelated artifacts.
 - **Don't poll.** When a tool reports work is in progress (a render,
   a long-running bundle run, anything not yet complete), call the
   status tool AT MOST ONCE per user message. Report what you saw + ask
