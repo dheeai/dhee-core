@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
+import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
 
 function formatSrtTime(totalSeconds: number): string {
   const ms = Math.floor((totalSeconds % 1) * 1000);
@@ -1140,9 +1141,21 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         }
       }
 
-      const runner = getRunner(node.runner.tool);
+      // Honor any agent-recorded runner.swapped events for this
+      // (nodeId, itemId). Falls back to the bundle's declared tool
+      // when no swap exists. configOverride from the swap (if any)
+      // gets merged into the runner config below.
+      const resolved = resolveRunnerForInstance({
+        projectDir: opts.projectDir,
+        nodeId: node.id,
+        ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+        fallbackTool: node.runner.tool,
+        branchId: opts.branchId ?? 'main',
+      });
+      const effectiveTool = resolved.tool;
+      const runner = getRunner(effectiveTool);
       if (!runner) {
-        const err = `runner '${node.runner.tool}' not registered`;
+        const err = `runner '${effectiveTool}' not registered`;
         log(`✗ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''}: ${err}`);
         inst.status = 'failed';
         if (state) {
@@ -1173,9 +1186,13 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           ctxVars,
         );
       }
+      // Merge any swap-provided config overrides on top of node.runner.config.
+      if (resolved.configOverride) {
+        Object.assign(cfg, resolved.configOverride);
+      }
       const runtimeNode: NodeDef = {
         ...node,
-        runner: { ...node.runner, config: cfg },
+        runner: { tool: effectiveTool, config: cfg },
       };
 
       // Resolve ctx.inputs from upstream completed nodes. For each
@@ -1332,7 +1349,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         });
       }
 
-      log(`→ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} via ${node.runner.tool}`);
+      log(`→ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} via ${effectiveTool}${effectiveTool !== node.runner.tool ? ` (swapped from ${node.runner.tool})` : ''}`);
 
       // Non-destructive overwrite: if a canonical artifact already
       // sits at the runner's outputPath, rename it to a versioned
