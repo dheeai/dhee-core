@@ -38,6 +38,17 @@ Within a scene, use however many shots you need to fill the time at
 that's fine. Don't fake scene breaks just to keep shot counts low;
 the downstream renderer chunks long scenes automatically.
 
+**Shot pacing (LTX-2 constraint).** LTX-2 renders slow-to-moderate
+motion beautifully and struggles with fast action (multi-limb rapid
+movement, sword fights mid-swing, car chases). Each shot should
+capture ONE deliberate motion or held moment — not a frantic
+sequence. If the plot calls for a fight or chase, **break it into
+many short shots, one action per shot** (hand grips weapon → arm
+arcs back → blade meets armor) rather than one "they fight" shot.
+Tension reads as fast through cutting, not through cramming fast
+motion into a single shot. The 3-6s shot budget already encourages
+this; lean into it.
+
 Output a JSON object with BOTH a scenes array AND a flat shots
 array (each shot's id encodes its scene, so downstream tools can
 fan-out per shot without re-traversing the scenes):
