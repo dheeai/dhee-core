@@ -228,4 +228,60 @@ describe('invalidateNodes', () => {
     expect(result.notFound).toEqual([]);
     expect(result.error).toMatch(/project\.json not found/i);
   });
+
+  it('preserves the on-disk artifact as a versioned sibling instead of unlinking', async () => {
+    // Seed an on-disk artifact + walkState entry pointing at it.
+    const artifactRel = 'assets/scene_1/shot_3.png';
+    const artifactAbs = join(projectDir, artifactRel);
+    mkdirSync(join(projectDir, 'assets/scene_1'), { recursive: true });
+    writeFileSync(artifactAbs, 'original-bytes');
+    const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    proj.walkState.nodes['shot_image:scene_1_shot_3'] = {
+      status: 'completed',
+      outputPath: artifactRel,
+      itemId: 'scene_1_shot_3',
+    };
+    writeFileSync(join(projectDir, 'project.json'), JSON.stringify(proj));
+
+    await invalidateNodes({ projectDir, nodeIds: ['shot_image:scene_1_shot_3'] });
+
+    // The canonical path is gone (renamed, not unlinked).
+    expect(existsSync(artifactAbs)).toBe(false);
+    // The .v1 sibling holds the original bytes.
+    const v1 = join(projectDir, 'assets/scene_1/shot_3.v1.png');
+    expect(existsSync(v1)).toBe(true);
+    expect(readFileSync(v1, 'utf8')).toBe('original-bytes');
+  });
+
+  it('emits a version.added event naming the preserved path', async () => {
+    // Seed an artifact.
+    const artifactRel = 'assets/scene_1/shot_4.png';
+    mkdirSync(join(projectDir, 'assets/scene_1'), { recursive: true });
+    writeFileSync(join(projectDir, artifactRel), 'old-bytes');
+    const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    proj.walkState.nodes['shot_image:scene_1_shot_4'] = {
+      status: 'completed',
+      outputPath: artifactRel,
+      itemId: 'scene_1_shot_4',
+    };
+    writeFileSync(join(projectDir, 'project.json'), JSON.stringify(proj));
+
+    await invalidateNodes({ projectDir, nodeIds: ['shot_image:scene_1_shot_4'] });
+
+    const eventsPath = join(projectDir, '.dhee/events.jsonl');
+    expect(existsSync(eventsPath)).toBe(true);
+    const events = readFileSync(eventsPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as { kind: string; payload: Record<string, unknown> });
+    const added = events.filter((e) => e.kind === 'version.added');
+    const named = added.find((e) =>
+      typeof e.payload.outputPath === 'string'
+      && (e.payload.outputPath as string).endsWith('assets/scene_1/shot_4.v1.png'),
+    );
+    expect(named).toBeDefined();
+    // Payload identifies the node + item.
+    expect(named?.payload.nodeId).toBe('shot_image');
+    expect(named?.payload.itemId).toBe('scene_1_shot_4');
+  });
 });

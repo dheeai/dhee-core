@@ -27,7 +27,8 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
+import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
 import type {
   RunProjectViaBundleOpts,
@@ -139,6 +140,7 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
     // way (file gone → re-render).
     const entry = walkState.nodes![key];
     const outputPath = entry?.outputPath;
+    let preservedRel: string | null = null;
     if (typeof outputPath === 'string' && outputPath.length > 0) {
       const abs = resolve(opts.projectDir, outputPath);
       try {
@@ -146,9 +148,37 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
         // roll back / compare. The canonical path is then free for the
         // next render. Falls back to no-op when the file is gone
         // already.
-        preserveAsVersion(abs);
+        const preservedAbs = preserveAsVersion(abs);
+        if (preservedAbs) {
+          preservedRel = relative(resolve(opts.projectDir), preservedAbs);
+        }
       } catch {
         // best-effort; swallow so invalidation still proceeds.
+      }
+    }
+    // Emit version.added so the event log records the preserved file —
+    // closes the gap "which version went to which path." Best-effort:
+    // event log failure must not abort the invalidate.
+    if (preservedRel) {
+      try {
+        const log = openEventLog(opts.projectDir);
+        const [bare, ...rest] = key.split(':');
+        const itemId = rest.length > 0 ? rest.join(':') : undefined;
+        log.append({
+          kind: 'version.added',
+          actor: 'agent',
+          branchId: 'main',
+          payload: {
+            nodeId: bare ?? key,
+            ...(itemId ? { itemId } : {}),
+            versionId: `preserved-${Date.now()}-${key}`,
+            outputPath: preservedRel,
+            source: 'runner',
+            reason: 'preserved on invalidateNodes — prior auto-render moved aside before re-run',
+          },
+        });
+      } catch {
+        // best-effort
       }
     }
     delete walkState.nodes![key];

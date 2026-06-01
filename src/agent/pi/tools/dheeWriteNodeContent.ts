@@ -212,10 +212,30 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
           true,
         );
       }
+      // Open the event log up front so preserve calls can emit
+      // version.added events for each rename.
+      const log = openEventLog(params.projectDir);
+
       mkdirSync(dirname(targetAbs), { recursive: true });
       // Non-destructive overwrite: rename existing canonical file to a
       // versioned sibling first so the user can roll back / compare.
-      preserveAsVersion(targetAbs);
+      const targetPreserved = preserveAsVersion(targetAbs);
+      if (targetPreserved) {
+        const relPreserved = relative(resolve(params.projectDir), targetPreserved);
+        log.append({
+          kind: 'version.added',
+          actor: 'agent',
+          branchId: 'main',
+          payload: {
+            nodeId: params.nodeId,
+            ...(itemId ? { itemId } : {}),
+            versionId: `preserved-${Date.now()}-${params.nodeId}${itemId ? '-' + itemId : ''}`,
+            outputPath: relPreserved,
+            source: 'runner',
+            reason: 'preserved on overwrite by dhee_write_node_content',
+          },
+        });
+      }
       writeFileSync(targetAbs, bytes);
 
       // 6. Update walkState: mark this node completed (tool=user) and
@@ -248,7 +268,24 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
               // Preserve as versioned sibling instead of unlinking —
               // the downstream artifact survives in the version tray
               // so the user can roll back or compare.
-              preserveAsVersion(abs);
+              const preserved = preserveAsVersion(abs);
+              if (preserved) {
+                const relPreserved = relative(resolve(params.projectDir), preserved);
+                const downItemId = k.includes(':') ? k.split(':').slice(1).join(':') : undefined;
+                log.append({
+                  kind: 'version.added',
+                  actor: 'agent',
+                  branchId: 'main',
+                  payload: {
+                    nodeId: downId,
+                    ...(downItemId ? { itemId: downItemId } : {}),
+                    versionId: `preserved-${Date.now()}-${k}`,
+                    outputPath: relPreserved,
+                    source: 'runner',
+                    reason: `preserved by cascade from ${params.nodeId} override`,
+                  },
+                });
+              }
             } catch {
               /* best-effort */
             }
@@ -264,7 +301,6 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
       writeProjectJson(params.projectDir, pj);
 
       // 7. Append events for audit.
-      const log = openEventLog(params.projectDir);
       log.append({
         kind: 'node.completed',
         actor: 'agent',

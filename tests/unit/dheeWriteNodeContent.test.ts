@@ -367,6 +367,69 @@ describe('dhee_write_node_content', () => {
     expect(got.toString('utf8')).toBe('source-bytes');
   });
 
+  it('14. preserves prior canonical → emits version.added with versionedPath', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    mkdirSync(join(projectDir, 'plans'), { recursive: true });
+    // Prior canonical render already on disk.
+    writeFileSync(join(projectDir, 'plans/plot.md'), 'AUTO original plot');
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('plot', 'plans/plot.md')]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: 'NEW user plot' },
+    });
+    // Versioned sibling exists on disk + holds the old bytes.
+    expect(existsSync(join(projectDir, 'plans/plot.v1.md'))).toBe(true);
+    expect(readFileSync(join(projectDir, 'plans/plot.v1.md'), 'utf8')).toBe('AUTO original plot');
+    // Canonical holds the new bytes.
+    expect(readFileSync(join(projectDir, 'plans/plot.md'), 'utf8')).toBe('NEW user plot');
+    // version.added event names the versioned path.
+    const events = readEvents(projectDir);
+    const added = events.filter((e) => e.kind === 'version.added');
+    expect(added.length).toBeGreaterThanOrEqual(1);
+    const plotPreservation = added.find((e) => (e.payload as { outputPath?: string }).outputPath?.endsWith('plans/plot.v1.md'));
+    expect(plotPreservation).toBeDefined();
+  });
+
+  it('15. cascade preserves downstream artifacts → version.added events name each', async () => {
+    const { projectDir } = setupProject({
+      walkState: {
+        nodes: {
+          plot: { status: 'completed', outputPath: 'plans/plot.md' },
+          story: { status: 'completed', outputPath: 'plans/story.md' },
+        },
+        lastInvalidatedIds: [],
+      },
+    });
+    dirs.push(projectDir);
+    mkdirSync(join(projectDir, 'plans'), { recursive: true });
+    writeFileSync(join(projectDir, 'plans/plot.md'), 'old plot');
+    writeFileSync(join(projectDir, 'plans/story.md'), 'old story');
+
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([
+          node('plot', 'plans/plot.md'),
+          node('story', 'plans/story.md', 'md', [{ from: 'plot' }]),
+        ]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: 'new plot' },
+    });
+    // Downstream story preserved (not deleted) as story.v1.md.
+    expect(existsSync(join(projectDir, 'plans/story.v1.md'))).toBe(true);
+    expect(readFileSync(join(projectDir, 'plans/story.v1.md'), 'utf8')).toBe('old story');
+    // A version.added event names story.v1.md.
+    const added = readEvents(projectDir).filter((e) => e.kind === 'version.added');
+    const storyPreserved = added.find((e) => (e.payload as { outputPath?: string }).outputPath?.endsWith('plans/story.v1.md'));
+    expect(storyPreserved).toBeDefined();
+  });
+
   it('13. node not in bundle → error', async () => {
     const { projectDir } = setupProject();
     dirs.push(projectDir);
