@@ -76,16 +76,14 @@ creates the folder and opens chat, then leaves the rest to you):
 3. **Present the bundle catalog and let the USER pick.** Do NOT pick
    the bundle yourself.
    - Call `dhee_list_bundles()`.
-   - Present the choices to the user as a numbered list with the
-     bundle's own description (don't paraphrase — bundle authors wrote
-     those descriptions for a reason).
-   - End with a single direct question: *"Which one do you want for
-     this project? (number or name)"*
-   - You may suggest a likely fit in one short sentence *after* the
-     list ("My guess: prompt_relay for the action sequences — but
-     you choose."), but the user's answer is authoritative. NEVER
-     call `dhee_create_project` until the user has explicitly named
-     a bundle.
+   - Optionally: paste the descriptions briefly in the chat for
+     context, with a one-sentence suggestion if asked — but the user
+     picks, not you.
+   - Then call `dhee_present_bundle_choices(bundleIds, question?)`
+     with the ids you want to offer. The desktop renders those as
+     clickable cards; the user's click becomes their next message.
+   - NEVER call `dhee_create_project` until the user has explicitly
+     named a bundle (either by clicking a card or typing the name).
 
 4. **Once the user picks**, call `dhee_describe_bundle(bundleId)` so
    you know what inputs the bundle wants. Then:

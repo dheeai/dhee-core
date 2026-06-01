@@ -23,6 +23,7 @@ import { dheeForkTool, makeForkTool } from './dheeFork.js';
 import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
 import { dheeListBundlesTool, makeListBundlesTool } from './dheeListBundles.js';
 import { dheeListVersionsTool, makeListVersionsTool } from './dheeListVersions.js';
+import { dheePresentBundleChoicesTool, makePresentBundleChoicesTool } from './dheePresentBundleChoices.js';
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
 import { dheeRunBundleTool, makeRunBundleTool } from './dheeRunBundle.js';
@@ -36,6 +37,7 @@ import { dheeWriteNodeContentTool, makeWriteNodeContentTool } from './dheeWriteN
 export const DHEE_TOOL_NAMES = [
   'dhee_create_project',
   'dhee_list_bundles',
+  'dhee_present_bundle_choices',
   'dhee_describe_bundle',
   'dhee_run_bundle',
   'dhee_get_status',
@@ -64,6 +66,7 @@ export {
   dheeGetStatusTool,
   dheeListBundlesTool,
   dheeListVersionsTool,
+  dheePresentBundleChoicesTool,
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
   dheeRunBundleTool,
@@ -82,6 +85,7 @@ export {
   makeGetStatusTool,
   makeListBundlesTool,
   makeListVersionsTool,
+  makePresentBundleChoicesTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
   makeRunBundleTool,
@@ -100,6 +104,7 @@ export {
 export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeCreateProjectTool);
   pi.registerTool(dheeListBundlesTool);
+  pi.registerTool(dheePresentBundleChoicesTool);
   pi.registerTool(dheeDescribeBundleTool);
   pi.registerTool(dheeRunBundleTool);
   pi.registerTool(dheeGetStatusTool);

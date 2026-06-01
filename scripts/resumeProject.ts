@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     for (const e of events) {
       if (e.seq <= lastSeq) continue;
       lastSeq = e.seq;
-      const p = e.payload as Record<string, unknown>;
+      const p = e.payload as unknown as Record<string, unknown>;
       const nodeId = (p['nodeId'] as string) ?? '';
       const itemId = p['itemId'] ? `:${p['itemId'] as string}` : '';
       const gen = (p['generation'] as { cached?: boolean }) || {};
