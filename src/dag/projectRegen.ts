@@ -26,8 +26,9 @@
  * from the runner module's load order (and so tests can use a stub).
  */
 
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { preserveAsVersion } from './preserveAsVersion.js';
 import type {
   RunProjectViaBundleOpts,
   RunProjectViaBundleResult,
@@ -141,7 +142,11 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
     if (typeof outputPath === 'string' && outputPath.length > 0) {
       const abs = resolve(opts.projectDir, outputPath);
       try {
-        if (existsSync(abs)) unlinkSync(abs);
+        // Preserve the old artifact as a versioned sibling so user can
+        // roll back / compare. The canonical path is then free for the
+        // next render. Falls back to no-op when the file is gone
+        // already.
+        preserveAsVersion(abs);
       } catch {
         // best-effort; swallow so invalidation still proceeds.
       }

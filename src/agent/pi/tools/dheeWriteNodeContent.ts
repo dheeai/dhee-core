@@ -19,11 +19,12 @@
  * pattern keeps "user override" consistent with how "regenerate" works.
  * Once ProjectionEngine fully replaces walkState, this tool moves with it.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
 import { openEventLog } from '../../../dag/eventLog/EventLog.js';
+import { preserveAsVersion } from '../../../dag/preserveAsVersion.js';
 import { loadBundle } from '../../../dag/walker.js';
 import { parseBundleSource, resolveBundleDir } from '../../../dag/bundleSource.js';
 import type { DagBundle, NodeDef } from '../../../dag/schema.js';
@@ -212,6 +213,9 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
         );
       }
       mkdirSync(dirname(targetAbs), { recursive: true });
+      // Non-destructive overwrite: rename existing canonical file to a
+      // versioned sibling first so the user can roll back / compare.
+      preserveAsVersion(targetAbs);
       writeFileSync(targetAbs, bytes);
 
       // 6. Update walkState: mark this node completed (tool=user) and
@@ -241,7 +245,10 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
           if (typeof op === 'string' && op.length > 0) {
             const abs = resolve(params.projectDir, op);
             try {
-              if (existsSync(abs)) unlinkSync(abs);
+              // Preserve as versioned sibling instead of unlinking —
+              // the downstream artifact survives in the version tray
+              // so the user can roll back or compare.
+              preserveAsVersion(abs);
             } catch {
               /* best-effort */
             }
