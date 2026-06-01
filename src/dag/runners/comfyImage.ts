@@ -20,10 +20,12 @@
  * Testability: ComfyImageClient is injected via createComfyImageRunner(
  * { clientFactory }). Tests stub upload/queue/download.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, extname, resolve } from 'node:path';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
+import { openGenerationCache } from '../cas/GenerationCache.js';
+import type { InputsHashKey } from '../cas/inputsHash.js';
 
 // ── Public types ──────────────────────────────────────────────────────
 
@@ -326,9 +328,57 @@ export function createComfyImageRunner(opts?: {
     if (!v.ok) return { ok: false, error: v.error };
     const cfg = v.cfg;
 
-    // ── Cache hit? ──
+    // ── Cache: build a content-addressed key over (workflow file
+    //          content + prompt + reference image bytes + dimensions).
+    //          Hit → copy from CAS and return cached:true with the
+    //          inputsHash on metadata (the walker stamps it onto
+    //          node.completed). Miss → run; CAS-put on the way out.
     const outAbs = resolve(ctx.projectDir, cfg.outputPath);
-    if (!cfg.forceRerun && existsSync(outAbs)) {
+    const workflowAbsForKey = resolve(ctx.bundleDir, cfg.workflowPath);
+    const casDisabled = process.env['DHEE_DISABLE_CAS'] === '1';
+    const cacheKey: InputsHashKey = {
+      tool: 'comfy.image',
+      toolVersion: '0.1.0',
+      inputs: {
+        workflowFile: existsSync(workflowAbsForKey) ? { kind: 'file' as const, path: workflowAbsForKey } : undefined,
+        prompt: cfg.prompt ?? '',
+        baseImage: cfg.baseImage && existsSync(cfg.baseImage)
+          ? { kind: 'file' as const, path: cfg.baseImage } : undefined,
+        referenceImages: cfg.referenceImages?.filter((p) => existsSync(p)).map((p) => ({ kind: 'file' as const, path: p })),
+        // FL2V wiring inputs (when present)
+        fl2vFirst: (cfgWithUpstream['_fl2v_first_frame'] as string | undefined) && existsSync(cfgWithUpstream['_fl2v_first_frame'] as string)
+          ? { kind: 'file' as const, path: cfgWithUpstream['_fl2v_first_frame'] as string } : undefined,
+        fl2vLast: (cfgWithUpstream['_fl2v_last_frame'] as string | undefined) && existsSync(cfgWithUpstream['_fl2v_last_frame'] as string)
+          ? { kind: 'file' as const, path: cfgWithUpstream['_fl2v_last_frame'] as string } : undefined,
+      },
+      config: {
+        width: cfg.width,
+        height: cfg.height,
+        durationSeconds: (cfg as { duration?: number }).duration,
+      },
+    };
+    if (!casDisabled && !cfg.forceRerun) {
+      const cache = openGenerationCache(
+        process.env['DHEE_CACHE_ROOT'] ? { cacheRoot: process.env['DHEE_CACHE_ROOT'] } : undefined,
+      );
+      const hit = cache.get(cacheKey);
+      if (hit) {
+        mkdirSync(dirname(outAbs), { recursive: true });
+        copyFileSync(hit.storePath, outAbs);
+        ctx.log(`comfy.image: CAS hit ${hit.hash.slice(0, 8)} → ${cfg.outputPath}`);
+        return {
+          ok: true,
+          outputPath: cfg.outputPath,
+          metadata: { cached: true, inputsHash: hit.hash, casHit: true, ...(hit.metadata ?? {}) },
+        };
+      }
+    }
+
+    // Path-based skip (intra-project resume) — only trustworthy when
+    // CAS is disabled. With CAS enabled, the CAS lookup above is the
+    // source of truth; a file at outputPath may have come from a
+    // different inputs (e.g. another branch).
+    if (casDisabled && !cfg.forceRerun && existsSync(outAbs)) {
       try {
         if (statSync(outAbs).size > 0) {
           ctx.log(`comfy.image: cached → ${cfg.outputPath}`);
@@ -510,10 +560,36 @@ export function createComfyImageRunner(opts?: {
     }
 
     ctx.log(`comfy.image: wrote ${cfg.outputPath}`);
+
+    // Best-effort: stamp the rendered output into CAS so future runs
+    // (cross-project, cross-branch) can replay without re-rendering.
+    let inputsHashForEvent: string | undefined;
+    if (!casDisabled) {
+      try {
+        const cache = openGenerationCache(
+          process.env['DHEE_CACHE_ROOT'] ? { cacheRoot: process.env['DHEE_CACHE_ROOT'] } : undefined,
+        );
+        const ext = (extname(cfg.outputPath).slice(1) || 'png');
+        const put = cache.put({
+          key: cacheKey,
+          sourcePath: outAbs,
+          ext,
+          metadata: { comfyOutput: imageOut.filename, bytes: statSync(outAbs).size },
+        });
+        inputsHashForEvent = put.hash;
+      } catch {
+        // best-effort
+      }
+    }
+
     return {
       ok: true,
       outputPath: cfg.outputPath,
-      metadata: { comfyOutput: imageOut.filename },
+      metadata: {
+        comfyOutput: imageOut.filename,
+        cached: false,
+        ...(inputsHashForEvent ? { inputsHash: inputsHashForEvent } : {}),
+      },
     };
   }
 

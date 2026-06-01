@@ -1143,6 +1143,20 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       // placeholders in its prompt template. Bundle-level inputs are
       // merged in first so node-level inputs can override.
       const resolvedInputs: Record<string, unknown> = { ...bundleInputs };
+      // Track the upstream instances actually consumed for this run.
+      // Stamped onto the node.completed event so the per-instance
+      // dependency graph projection can render edges card-to-card on
+      // the Inspector UI without re-deriving from bundle structure
+      // or file contents. Captured here because the walker already
+      // knows the exact instance set as part of input resolution.
+      const dependenciesUsed: Array<{ nodeId: string; itemId?: string; role?: 'input' | 'context' | 'reference' | 'aggregate' }> = [];
+      const recordDep = (fromNodeId: string, fromItemId: string | undefined, role: 'input' | 'context' | 'reference' | 'aggregate' | undefined): void => {
+        dependenciesUsed.push({
+          nodeId: fromNodeId,
+          ...(fromItemId !== undefined ? { itemId: fromItemId } : {}),
+          ...(role ? { role } : {}),
+        });
+      };
       for (const inp of node.inputs) {
         const upInsts = instancesById.get(inp.from) ?? [];
         if (upInsts.length === 0) {
@@ -1196,7 +1210,9 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
               priors.push(entry);
             }
             priors.sort((a, b) => b.shotNumber - a.shotNumber);
-            resolvedInputs[inp.from] = priors.slice(0, n);
+            const chosen = priors.slice(0, n);
+            resolvedInputs[inp.from] = chosen;
+            for (const c of chosen) recordDep(inp.from, c.itemId, (inp.usage as 'input' | 'context' | 'reference' | 'aggregate' | undefined));
             continue;
           }
         }
@@ -1211,7 +1227,10 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           for (const u of upInsts) {
             if (!u.itemId || !u.outputRel) continue;
             const abs = resolve(opts.projectDir, u.outputRel);
-            if (existsSync(abs)) pathsById[u.itemId] = abs;
+            if (existsSync(abs)) {
+              pathsById[u.itemId] = abs;
+              recordDep(inp.from, u.itemId, (inp.usage as 'input' | 'context' | 'reference' | 'aggregate' | undefined));
+            }
           }
           resolvedInputs[inp.from] = pathsById;
           continue;
@@ -1224,6 +1243,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             ? upInsts.find((u) => u.itemId === inst.itemId) ?? upInsts[0]
             : upInsts[0];
         if (!matching?.outputRel) continue;
+        recordDep(inp.from, matching.itemId, (inp.usage as 'input' | 'context' | 'reference' | 'aggregate' | undefined));
         const upAbs = resolve(opts.projectDir, matching.outputRel);
         if (!existsSync(upAbs)) continue;
         // Binary files (images, videos, audio) → expose the absolute
@@ -1323,6 +1343,16 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         const inputsHash = typeof md['inputsHash'] === 'string' ? (md['inputsHash'] as string) : undefined;
         const costUsd = typeof md['costUsd'] === 'number' ? (md['costUsd'] as number) : undefined;
         const versionId = `v${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        // Dedupe dependencies — the same upstream may appear under
+        // multiple roles in a single resolve pass; keep the first.
+        const depSeen = new Set<string>();
+        const depsForEvent: typeof dependenciesUsed = [];
+        for (const d of dependenciesUsed) {
+          const k = `${d.nodeId}:${d.itemId ?? ''}:${d.role ?? ''}`;
+          if (depSeen.has(k)) continue;
+          depSeen.add(k);
+          depsForEvent.push(d);
+        }
         opts.engine.appendAndProject({
           branchId: opts.branchId ?? 'main',
           actor: 'walker',
@@ -1340,6 +1370,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
               ...(inputsHash ? { inputsHash } : {}),
               ...(costUsd !== undefined ? { costUsd } : {}),
             },
+            ...(depsForEvent.length > 0 ? { dependencies: depsForEvent } : {}),
             ...(result.metadata ? { metadata: result.metadata } : {}),
           },
         });

@@ -29,6 +29,24 @@ export interface NodeStartedPayload {
   itemId?: string;
 }
 
+/**
+ * One upstream instance whose output was consumed by a runner call.
+ * Captured by the walker at dispatch time — the walker already
+ * resolves these to build ctx.inputs, so adding them to the event is
+ * essentially free.
+ *
+ * Roles mirror the bundle's `inputs[].usage`:
+ *   - 'input'     — primary content (e.g. shot_image_prompt → shot_image)
+ *   - 'context'   — extra background passed to the LLM
+ *   - 'reference' — referenced asset (e.g. character_image → shot_image)
+ *   - 'aggregate' — collected list of upstream items
+ */
+export interface NodeDependency {
+  nodeId: string;
+  itemId?: string;
+  role?: 'input' | 'context' | 'reference' | 'aggregate';
+}
+
 export interface NodeCompletedPayload {
   nodeId: string;
   itemId?: string;
@@ -47,6 +65,13 @@ export interface NodeCompletedPayload {
     costUsd?: number;
     cached: boolean;
   };
+  /**
+   * Upstream instances whose outputs fed this runner call. Source of
+   * truth for the instance-level dependency graph projection. Optional
+   * — events written before the walker captured deps don't carry it;
+   * the projection treats absence as "no recorded dependencies".
+   */
+  dependencies?: NodeDependency[];
   metadata?: Record<string, unknown>;
 }
 
