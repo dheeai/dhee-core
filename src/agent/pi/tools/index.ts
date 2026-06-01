@@ -29,6 +29,8 @@ import { dheeSelectVersionTool, makeSelectVersionTool } from './dheeSelectVersio
 import { dheeShowFileTool, makeShowFileTool } from './dheeShowFile.js';
 import { dheeShowNodeOutputTool, makeShowNodeOutputTool } from './dheeShowNodeOutput.js';
 import { dheeSwapRunnerTool, makeSwapRunnerTool } from './dheeSwapRunner.js';
+import { dheeWriteInputTool, makeWriteInputTool } from './dheeWriteInput.js';
+import { dheeWriteNodeContentTool, makeWriteNodeContentTool } from './dheeWriteNodeContent.js';
 
 export const DHEE_TOOL_NAMES = [
   'dhee_create_project',
@@ -46,6 +48,8 @@ export const DHEE_TOOL_NAMES = [
   'dhee_select_version',
   'dhee_fork',
   'dhee_swap_runner',
+  'dhee_write_input',
+  'dhee_write_node_content',
 ] as const;
 
 export {
@@ -64,6 +68,8 @@ export {
   dheeShowFileTool,
   dheeShowNodeOutputTool,
   dheeSwapRunnerTool,
+  dheeWriteInputTool,
+  dheeWriteNodeContentTool,
   makeApplyWorkflowAliasesTool,
   makeCheckWorkflowTool,
   makeCreateProjectTool,
@@ -79,6 +85,8 @@ export {
   makeShowFileTool,
   makeShowNodeOutputTool,
   makeSwapRunnerTool,
+  makeWriteInputTool,
+  makeWriteNodeContentTool,
 };
 
 /**
@@ -102,4 +110,6 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeSelectVersionTool);
   pi.registerTool(dheeForkTool);
   pi.registerTool(dheeSwapRunnerTool);
+  pi.registerTool(dheeWriteInputTool);
+  pi.registerTool(dheeWriteNodeContentTool);
 }

@@ -34,6 +34,18 @@ export interface NodeStateEntry {
   completedAt?: number;
   /** Arbitrary runner-emitted metadata (e.g. cached:true, model:'gpt-4'). */
   metadata?: Record<string, unknown>;
+  /**
+   * Who produced this artifact. Default is the runner tool name (the
+   * walker fills this on completion). The special value 'user' marks
+   * the entry as user-overridden via dhee_write_node_content — the
+   * walker treats user-overrides as pinned and refuses to re-fire the
+   * runner on upstream cascades. The only way to clear the pin is an
+   * explicit runOnly / invalidate.
+   */
+  generation?: {
+    tool?: string;
+    toolVersion?: string;
+  };
 }
 
 export interface WalkState {

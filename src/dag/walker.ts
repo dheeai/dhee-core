@@ -1110,7 +1110,20 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       // into the downstream artifact (real-world: shot_image
       // skipped when shot_image_prompt was re-run via critique).
       const upstreamReRun = node.inputs.some((i) => reRunInThisWalk.has(i.from));
-      if (state && !explicitlyRunning && !upstreamReRun) {
+      // User-version pin: when an artifact was supplied by the user
+      // via dhee_write_node_content, its walkState entry carries
+      // generation.tool='user'. Treat it as pinned — preserve through
+      // upstream re-runs. Only an EXPLICIT runOnly request (i.e. the
+      // user knowingly asking to regenerate this node) breaks the pin.
+      // Without this, a downstream upstream-rerun cascade clobbers
+      // every user-edited prompt / image on the next walk.
+      const priorForPinCheck = state?.nodes?.[stateKey];
+      const isUserPinned =
+        priorForPinCheck?.generation?.tool === 'user'
+        && priorForPinCheck?.status === 'completed'
+        && typeof priorForPinCheck?.outputPath === 'string'
+        && existsSync(resolve(opts.projectDir, priorForPinCheck.outputPath));
+      if (state && !explicitlyRunning && (!upstreamReRun || isUserPinned)) {
         const prior = state.nodes[stateKey];
         if (prior && prior.status === 'completed' && prior.outputPath) {
           const priorAbs = resolve(opts.projectDir, prior.outputPath);

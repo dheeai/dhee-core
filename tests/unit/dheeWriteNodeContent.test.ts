@@ -1,0 +1,383 @@
+/**
+ * dhee_write_node_content — TDD coverage.
+ *
+ * The agent overrides a node's output content (e.g. rewrites
+ * `shot_image_prompt:scene_1_shot_3` after the LLM produced something
+ * the user doesn't want, or supplies a hand-edited image at
+ * `shot_image:scene_1_shot_3.png`). The tool:
+ *   1. Resolves outputPath from the bundle's outputs.pattern with
+ *      item context expanded.
+ *   2. Writes bytes.
+ *   3. Marks the node as completed (generation.tool='user') in walkState
+ *      so the walker treats it as done.
+ *   4. Cascades: invalidates every downstream node so a subsequent
+ *      dhee_run_bundle picks up the new content.
+ *
+ * Failure modes:
+ *   1. Happy path (text): writes file, walkState[nodeId] completed
+ *      with generation.tool='user'.
+ *   2. Cascade: downstream nodes get cleared from walkState.
+ *   3. Cascade: downstream artifacts deleted from disk.
+ *   4. Collection node with itemId: pattern expands {{item_id}} +
+ *      writes to nested path; walkState key is `node:item`.
+ *   5. project.json missing → error.
+ *   6. Unknown nodeId → error.
+ *   7. Path traversal via pattern (../) → reject.
+ *   8. Parent dir auto-created.
+ *   9. node.completed event emitted with generation.tool='user'.
+ *  10. node.invalidated events emitted for each downstream node.
+ *  11. base64 payload writes binary bytes correctly.
+ *  12. localFile payload copies bytes.
+ *  13. Calling on a node that ISN'T in the bundle → error.
+ */
+import { describe, it, expect, afterAll } from 'vitest';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { makeWriteNodeContentTool } from '../../src/agent/pi/tools/dheeWriteNodeContent.js';
+import type { DagBundle, NodeDef } from '../../src/dag/schema.js';
+
+interface ToolLike {
+  execute: (
+    id: string,
+    params: {
+      projectDir: string;
+      nodeId: string;
+      itemId?: string;
+      payload: unknown;
+      reason?: string;
+    },
+  ) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
+}
+
+function setupProject(opts: { walkState?: object; bundleSource?: string } = {}): { projectDir: string } {
+  const projectDir = mkdtempSync(join(tmpdir(), 'wnc-test-'));
+  writeFileSync(
+    join(projectDir, 'project.json'),
+    JSON.stringify({
+      name: 'T',
+      bundleSource: opts.bundleSource ?? 'built-in:fake',
+      walkState: opts.walkState ?? { nodes: {}, lastInvalidatedIds: [] },
+    }),
+    'utf8',
+  );
+  return { projectDir };
+}
+
+function node(
+  id: string,
+  pattern: string,
+  format: 'md' | 'json' | 'image' | 'video' | 'audio' | 'text' = 'md',
+  inputs: Array<{ from: string }> = [],
+): NodeDef {
+  return {
+    id,
+    kind: 'stage',
+    inputs: inputs.map((i) => ({ from: i.from, usage: 'input' })),
+    outputs: { format, pattern },
+    runner: { tool: 'llm.generate', config: {} },
+  } as unknown as NodeDef;
+}
+
+function fakeBundle(nodes: NodeDef[]): DagBundle {
+  return {
+    id: 'fake',
+    version: '0.1.0',
+    goal: nodes[nodes.length - 1]?.id ?? 'unused',
+    nodes,
+  } as unknown as DagBundle;
+}
+
+function readWalkState(projectDir: string): { nodes: Record<string, { status?: string; outputPath?: string; generation?: { tool?: string } } | undefined>; lastInvalidatedIds: string[] } {
+  const pj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8')) as { walkState?: { nodes?: Record<string, { status?: string; outputPath?: string; generation?: { tool?: string } } | undefined>; lastInvalidatedIds?: string[] } };
+  return { nodes: pj.walkState?.nodes ?? {}, lastInvalidatedIds: pj.walkState?.lastInvalidatedIds ?? [] };
+}
+
+function readEvents(projectDir: string): Array<{ kind: string; payload: { nodeId?: string; generation?: { tool?: string }; reason?: string; outputPath?: string } }> {
+  const p = join(projectDir, '.dhee/events.jsonl');
+  if (!existsSync(p)) return [];
+  return readFileSync(p, 'utf8')
+    .split('\n')
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l));
+}
+
+describe('dhee_write_node_content', () => {
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('1. happy path text: writes file + walkState marked completed (tool=user)', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('plot', 'plans/plot.md')]),
+    }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: '# rewritten plot' },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(readFileSync(join(projectDir, 'plans/plot.md'), 'utf8')).toBe('# rewritten plot');
+    const ws = readWalkState(projectDir);
+    expect(ws.nodes.plot?.status).toBe('completed');
+    expect(ws.nodes.plot?.outputPath).toBe('plans/plot.md');
+    expect(ws.nodes.plot?.generation?.tool).toBe('user');
+  });
+
+  it('2. cascade: downstream node walkState entries are cleared', async () => {
+    const { projectDir } = setupProject({
+      walkState: {
+        nodes: {
+          plot: { status: 'completed', outputPath: 'plans/plot.md' },
+          story: { status: 'completed', outputPath: 'plans/story.md' },
+          scenes: { status: 'completed', outputPath: 'plans/scenes.json' },
+        },
+        lastInvalidatedIds: [],
+      },
+    });
+    dirs.push(projectDir);
+    mkdirSync(join(projectDir, 'plans'), { recursive: true });
+    writeFileSync(join(projectDir, 'plans/plot.md'), 'old');
+    writeFileSync(join(projectDir, 'plans/story.md'), 'old story');
+    writeFileSync(join(projectDir, 'plans/scenes.json'), '{}');
+
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([
+          node('plot', 'plans/plot.md'),
+          node('story', 'plans/story.md', 'md', [{ from: 'plot' }]),
+          node('scenes', 'plans/scenes.json', 'json', [{ from: 'story' }]),
+        ]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: 'new plot' },
+    });
+    const ws = readWalkState(projectDir);
+    // plot is completed (user)
+    expect(ws.nodes.plot?.status).toBe('completed');
+    // story + scenes cleared (downstream)
+    expect(ws.nodes.story).toBeUndefined();
+    expect(ws.nodes.scenes).toBeUndefined();
+  });
+
+  it('3. cascade: downstream artifacts deleted from disk', async () => {
+    const { projectDir } = setupProject({
+      walkState: {
+        nodes: {
+          plot: { status: 'completed', outputPath: 'plans/plot.md' },
+          story: { status: 'completed', outputPath: 'plans/story.md' },
+        },
+        lastInvalidatedIds: [],
+      },
+    });
+    dirs.push(projectDir);
+    mkdirSync(join(projectDir, 'plans'), { recursive: true });
+    writeFileSync(join(projectDir, 'plans/plot.md'), 'plot');
+    writeFileSync(join(projectDir, 'plans/story.md'), 'story');
+
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([
+          node('plot', 'plans/plot.md'),
+          node('story', 'plans/story.md', 'md', [{ from: 'plot' }]),
+        ]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: 'new plot' },
+    });
+    // plot still exists (user wrote it)
+    expect(existsSync(join(projectDir, 'plans/plot.md'))).toBe(true);
+    expect(readFileSync(join(projectDir, 'plans/plot.md'), 'utf8')).toBe('new plot');
+    // story file removed (downstream invalidated)
+    expect(existsSync(join(projectDir, 'plans/story.md'))).toBe(false);
+  });
+
+  it('4. collection node with itemId: pattern expands + walkState key is node:item', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([
+          node('shot_image_prompt', 'prompts/shots/{{item_id}}.json', 'json'),
+        ]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'shot_image_prompt',
+      itemId: 'scene_1_shot_3',
+      payload: { kind: 'text', content: '{"imagePrompt":"new prompt"}' },
+    });
+    expect(existsSync(join(projectDir, 'prompts/shots/scene_1_shot_3.json'))).toBe(true);
+    const ws = readWalkState(projectDir);
+    expect(ws.nodes['shot_image_prompt:scene_1_shot_3']?.status).toBe('completed');
+  });
+
+  it('5. project.json missing → error', async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'wnc-test-noproj-'));
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('plot', 'plans/plot.md')]),
+    }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: 'x' },
+    });
+    expect(r.isError).toBe(true);
+  });
+
+  it('6. unknown nodeId → error', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('plot', 'plans/plot.md')]),
+    }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'no_such_node',
+      payload: { kind: 'text', content: 'x' },
+    });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/unknown|not found/i);
+  });
+
+  it('7. path traversal via pattern rejected', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('evil', '../etc/passwd')]),
+    }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'evil',
+      payload: { kind: 'text', content: 'hax' },
+    });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/outside|traversal|escape/i);
+  });
+
+  it('8. parent dir auto-created', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([node('deep', 'really/deep/nested/path.md')]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'deep',
+      payload: { kind: 'text', content: 'a' },
+    });
+    expect(existsSync(join(projectDir, 'really/deep/nested/path.md'))).toBe(true);
+  });
+
+  it('9. node.completed event emitted with generation.tool=user', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('plot', 'plans/plot.md')]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: 'x' },
+      reason: 'user wanted a darker tone',
+    });
+    const events = readEvents(projectDir);
+    const completed = events.filter((e) => e.kind === 'node.completed');
+    expect(completed).toHaveLength(1);
+    expect(completed[0].payload?.nodeId).toBe('plot');
+    expect(completed[0].payload?.generation?.tool).toBe('user');
+  });
+
+  it('10. node.invalidated events emitted for downstream', async () => {
+    const { projectDir } = setupProject({
+      walkState: {
+        nodes: {
+          plot: { status: 'completed', outputPath: 'plans/plot.md' },
+          story: { status: 'completed', outputPath: 'plans/story.md' },
+          scenes: { status: 'completed', outputPath: 'plans/scenes.json' },
+        },
+        lastInvalidatedIds: [],
+      },
+    });
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([
+          node('plot', 'plans/plot.md'),
+          node('story', 'plans/story.md', 'md', [{ from: 'plot' }]),
+          node('scenes', 'plans/scenes.json', 'json', [{ from: 'story' }]),
+        ]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: 'x' },
+    });
+    const events = readEvents(projectDir);
+    const inv = events.filter((e) => e.kind === 'node.invalidated');
+    const ids = inv.map((e) => e.payload?.nodeId).sort();
+    expect(ids).toEqual(['scenes', 'story']);
+  });
+
+  it('11. base64 payload writes binary bytes', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([node('shot_image', 'shots/{{item_id}}.png', 'image')]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'shot_image',
+      itemId: 'scene_1_shot_2',
+      payload: { kind: 'base64', contentBase64: png.toString('base64') },
+    });
+    const got = readFileSync(join(projectDir, 'shots/scene_1_shot_2.png'));
+    expect([...got]).toEqual([...png]);
+  });
+
+  it('12. localFile payload copies bytes', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const srcDir = mkdtempSync(join(tmpdir(), 'wnc-src-'));
+    dirs.push(srcDir);
+    const src = join(srcDir, 'override.png');
+    writeFileSync(src, Buffer.from('source-bytes'));
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () =>
+        fakeBundle([node('shot_image', 'shots/{{item_id}}.png', 'image')]),
+    }) as unknown as ToolLike;
+    await tool.execute('t', {
+      projectDir,
+      nodeId: 'shot_image',
+      itemId: 'scene_2_shot_1',
+      payload: { kind: 'localFile', sourcePath: src },
+    });
+    const got = readFileSync(join(projectDir, 'shots/scene_2_shot_1.png'));
+    expect(got.toString('utf8')).toBe('source-bytes');
+  });
+
+  it('13. node not in bundle → error', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('plot', 'plans/plot.md')]),
+    }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'this_does_not_exist',
+      payload: { kind: 'text', content: 'x' },
+    });
+    expect(r.isError).toBe(true);
+  });
+});

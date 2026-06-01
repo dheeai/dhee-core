@@ -92,6 +92,25 @@ export interface VersionAddedPayload {
   itemId?: string;
   versionId: string;
   parentVersionId?: string;
+  /**
+   * Who produced this version. 'runner' = an auto-generated artifact
+   * from a walker dispatch. 'user' = the user (via the agent's write
+   * tools) supplied this content directly; the walker should treat
+   * user-versions as pinned and not re-fire the runner unless the
+   * version is explicitly invalidated.
+   */
+  source?: 'runner' | 'user';
+  /**
+   * Path of the artifact written, relative to projectDir. Stored so
+   * projections + agent tools can locate the bytes without re-deriving
+   * from the bundle's outputPath template.
+   */
+  outputPath?: string;
+  /**
+   * Optional free-text reason the user supplied (for user-source
+   * versions). Audit + future-you context.
+   */
+  reason?: string;
 }
 
 export interface VersionSelectedPayload {
