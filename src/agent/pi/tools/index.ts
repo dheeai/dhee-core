@@ -20,6 +20,7 @@ import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProjec
 import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
 import { dheeForkTool, makeForkTool } from './dheeFork.js';
 import { dheeGetStatusTool, makeGetStatusTool } from './dheeGetStatus.js';
+import { dheeListBundlesTool, makeListBundlesTool } from './dheeListBundles.js';
 import { dheeListVersionsTool, makeListVersionsTool } from './dheeListVersions.js';
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
@@ -31,6 +32,7 @@ import { dheeSwapRunnerTool, makeSwapRunnerTool } from './dheeSwapRunner.js';
 
 export const DHEE_TOOL_NAMES = [
   'dhee_create_project',
+  'dhee_list_bundles',
   'dhee_run_bundle',
   'dhee_get_status',
   'dhee_regenerate_node',
@@ -53,6 +55,7 @@ export {
   dheeCritiqueNodeTool,
   dheeForkTool,
   dheeGetStatusTool,
+  dheeListBundlesTool,
   dheeListVersionsTool,
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
@@ -67,6 +70,7 @@ export {
   makeCritiqueNodeTool,
   makeForkTool,
   makeGetStatusTool,
+  makeListBundlesTool,
   makeListVersionsTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
@@ -83,6 +87,7 @@ export {
  */
 export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeCreateProjectTool);
+  pi.registerTool(dheeListBundlesTool);
   pi.registerTool(dheeRunBundleTool);
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);

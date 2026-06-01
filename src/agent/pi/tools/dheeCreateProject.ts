@@ -9,7 +9,7 @@
  * error at run time if the bundle doesn't resolve).
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
@@ -18,15 +18,21 @@ import { getProjectsDir } from '../paths.js';
 const Params = Type.Object({
   name: Type.String({
     description:
-      'Short project name. Becomes both the directory name under the dhee projects dir and the display name. Letters/numbers/underscores recommended.',
+      'Short project name. Becomes the display name and (in legacy mode) the directory name under the dhee projects dir. Letters/numbers/underscores recommended.',
   }),
   bundleId: Type.String({
     description:
-      "Bundle id to pin (e.g. 'narrative_qwen_chain_relay', 'narrative_prompt_relay', 'narrative_shot_by_shot'). Written to project.json as 'built-in:<bundleId>'.",
+      "Bundle id to pin (e.g. 'narrative_qwen_chain_relay', 'narrative_prompt_relay', 'narrative_shot_by_shot'). Written to project.json as 'built-in:<bundleId>'. Use dhee_list_bundles first to see what's available.",
   }),
   description: Type.Optional(
     Type.String({
       description: 'Optional human-readable description; recorded on the project for UI display.',
+    }),
+  ),
+  existingDir: Type.Optional(
+    Type.String({
+      description:
+        'Absolute path of a folder the caller has already created (typically by the desktop\'s "+New Project" button). The tool will populate project.json INTO this folder rather than creating a new one under the projects dir. Refuses if the folder already contains a project.json.',
     }),
   ),
 });
@@ -57,14 +63,46 @@ export function makeCreateProjectTool(deps: CreateProjectDeps = {}) {
           true,
         );
       }
-      const projectDir = join(dirFn(), params.name);
-      if (existsSync(projectDir)) {
-        return textResult(
-          `Project '${params.name}' already exists at ${projectDir}. Pick a different name or delete it first.`,
-          true,
-        );
+
+      let projectDir: string;
+      if (params.existingDir) {
+        if (!existsSync(params.existingDir)) {
+          return textResult(
+            `existingDir '${params.existingDir}' not found. The caller must create the folder before calling dhee_create_project.`,
+            true,
+          );
+        }
+        try {
+          if (!statSync(params.existingDir).isDirectory()) {
+            return textResult(
+              `existingDir '${params.existingDir}' is not a directory.`,
+              true,
+            );
+          }
+        } catch (e) {
+          return textResult(
+            `existingDir '${params.existingDir}' not accessible: ${e instanceof Error ? e.message : String(e)}.`,
+            true,
+          );
+        }
+        if (existsSync(join(params.existingDir, 'project.json'))) {
+          return textResult(
+            `project.json already exists at ${params.existingDir}. Refusing to overwrite.`,
+            true,
+          );
+        }
+        projectDir = params.existingDir;
+      } else {
+        projectDir = join(dirFn(), params.name);
+        if (existsSync(projectDir)) {
+          return textResult(
+            `Project '${params.name}' already exists at ${projectDir}. Pick a different name or delete it first.`,
+            true,
+          );
+        }
+        mkdirSync(projectDir, { recursive: true });
       }
-      mkdirSync(projectDir, { recursive: true });
+
       const project = {
         name: params.name,
         bundleSource: `built-in:${params.bundleId}`,
