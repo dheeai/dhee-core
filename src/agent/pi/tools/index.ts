@@ -15,6 +15,7 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 
 import { dheeApplyWorkflowAliasesTool, makeApplyWorkflowAliasesTool } from './dheeApplyWorkflowAliases.js';
+import { dheeAskQuestionTool, makeAskQuestionTool } from './dheeAskQuestion.js';
 import { dheeCheckWorkflowTool, makeCheckWorkflowTool } from './dheeCheckWorkflow.js';
 import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProject.js';
 import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
@@ -37,6 +38,7 @@ import { dheeWriteNodeContentTool, makeWriteNodeContentTool } from './dheeWriteN
 
 export const DHEE_TOOL_NAMES = [
   'dhee_create_project',
+  'dhee_ask_question',
   'dhee_list_bundles',
   'dhee_present_bundle_choices',
   'dhee_describe_bundle',
@@ -63,6 +65,7 @@ export const DHEE_TOOL_NAMES = [
 
 export {
   dheeApplyWorkflowAliasesTool,
+  dheeAskQuestionTool,
   dheeCheckWorkflowTool,
   dheeCreateProjectTool,
   dheeCritiqueNodeTool,
@@ -86,6 +89,7 @@ export {
   dheeGrepTool,
   dheeFindTool,
   makeApplyWorkflowAliasesTool,
+  makeAskQuestionTool,
   makeCheckWorkflowTool,
   makeCreateProjectTool,
   makeCritiqueNodeTool,
@@ -116,6 +120,7 @@ export {
  */
 export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeCreateProjectTool);
+  pi.registerTool(dheeAskQuestionTool);
   pi.registerTool(dheeListBundlesTool);
   pi.registerTool(dheePresentBundleChoicesTool);
   pi.registerTool(dheeDescribeBundleTool);

@@ -14,8 +14,12 @@
  * and the agent can't accidentally hide the picker by forgetting a
  * markdown convention.
  */
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
+import { getBundleSearchRoots } from '../../../dag/bundleSource.js';
+import { titleizeBundleId, summaryOf } from '../../../dag/bundleDisplay.js';
 
 const Params = Type.Object({
   bundleIds: Type.Array(
@@ -39,6 +43,49 @@ function textResult(text: string, isError = false) {
   return { content: [{ type: 'text' as const, text }], details: {}, ...(isError ? { isError: true } : {}) };
 }
 
+interface BundleMeta {
+  id: string;
+  displayName: string;
+  summary: string;
+}
+
+/**
+ * Look up a bundle's display metadata across the search roots. Mirrors
+ * resolveBundleDir precedence — USER fork shadows APP shipped default.
+ * Returns a meta with fallback fields filled in even when bundle.json
+ * is missing or unreadable, so the picker always has SOMETHING to show
+ * (titleized id + empty summary).
+ */
+function lookupBundleMeta(id: string): BundleMeta {
+  const fallback: BundleMeta = { id, displayName: titleizeBundleId(id), summary: '' };
+  for (const root of getBundleSearchRoots()) {
+    const candidates = [join(root, id, 'bundle.json'), join(root, `${id}.json`)];
+    for (const path of candidates) {
+      try {
+        if (!existsSync(path)) continue;
+        if (!statSync(path).isFile()) continue;
+        const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+          displayName?: string;
+          summary?: string;
+          description?: string;
+        };
+        const displayName =
+          typeof parsed.displayName === 'string' && parsed.displayName.trim().length > 0
+            ? parsed.displayName.trim()
+            : titleizeBundleId(id);
+        const summary = summaryOf({
+          ...(parsed.summary !== undefined ? { summary: parsed.summary } : {}),
+          ...(parsed.description !== undefined ? { description: parsed.description } : {}),
+        });
+        return { id, displayName, summary };
+      } catch {
+        // continue to next candidate / root
+      }
+    }
+  }
+  return fallback;
+}
+
 export function makePresentBundleChoicesTool() {
   return defineTool({
     name: 'dhee_present_bundle_choices',
@@ -57,9 +104,14 @@ export function makePresentBundleChoicesTool() {
         }
         if (!dedup.includes(id)) dedup.push(id);
       }
+      const bundles: BundleMeta[] = dedup.map((id) => lookupBundleMeta(id));
       const payload = {
         kind: 'bundle_choices' as const,
+        // Keep `bundleIds` for back-compat with any consumer that
+        // hasn't migrated; new `bundles` array carries the rich
+        // metadata the picker uses to render display name + summary.
         bundleIds: dedup,
+        bundles,
         ...(params.question ? { question: params.question } : {}),
       };
       return textResult(JSON.stringify(payload));

@@ -520,6 +520,7 @@ describe('DHEE_TOOL_NAMES', () => {
   it('lists every v1 dhee tool name so the buildSession allowlist can include them', () => {
     expect(DHEE_TOOL_NAMES).toEqual([
       'dhee_create_project',
+      'dhee_ask_question',
       'dhee_list_bundles',
       'dhee_present_bundle_choices',
       'dhee_describe_bundle',

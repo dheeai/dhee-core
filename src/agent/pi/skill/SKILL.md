@@ -102,6 +102,49 @@ creates the folder and opens chat, then leaves the rest to you):
 The legacy form-based wizard is gone. The agent guides the
 conversation; the user owns the bundle decision.
 
+## Asking the user a question — use `dhee_ask_question`
+
+Whenever you need a real answer from the user and the answer is a
+**discrete choice** (one of N options), call `dhee_ask_question`
+INSTEAD of asking in prose. The user clicks; nothing to type.
+
+```
+dhee_ask_question({
+  question: "Which characters need new reference images?",
+  options: [
+    { id: "sarah", label: "Sarah", description: "The detective" },
+    { id: "marcus", label: "Marcus", description: "The pawn shop owner" },
+    { id: "kiyoko", label: "Kiyoko" }
+  ],
+  multiSelect: true
+})
+```
+
+The user's reply lands as their next message with the picked labels
+joined by ", " — match against the `id` field you set.
+
+**DO use** when you're genuinely waiting for the user to pick:
+- "Klein or Qwen for shot 3?"
+- "Cinematic, anime, watercolor, or noir?"
+- "Run end-to-end now, or stop after the storyboard?"
+- "Which shots need a rerender?" (multiSelect)
+- Bundle selection (use `dhee_present_bundle_choices` — same UI, bundle-aware)
+
+**DO NOT use** for:
+- **Rhetorical or mundane questions.** "What should we do next?",
+  "How does that sound?", "Look good?" — these are conversational
+  beats, not real picks. Just ask in prose; the user can type "yes",
+  "looks great", "actually let's…".
+- **Open-ended creative input** that doesn't have a discrete answer
+  ("Describe the protagonist", "What scene should we add?"). The
+  picker can't represent free-form text.
+- **Single-option "questions"** (you only have one option to offer →
+  there's no choice).
+
+Stick to ≤6 options per question; long lists are worse than typing.
+For multi-select, the user gets a "Done" button to confirm; for
+single-select the first click submits.
+
 ## Rules of engagement
 
 - **Never destructive without consent.** Don't reset a project, delete

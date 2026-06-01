@@ -129,7 +129,15 @@ describe('dhee_list_bundles', () => {
     made.push(dir);
     const r = await callTool(dir);
     const parsed = JSON.parse(r.content[0].text);
-    expect(parsed).toEqual([{ id: 'no_desc', version: '0.1.0', description: '' }]);
+    // displayName is auto-derived from the id (snake_case → Title Case);
+    // summary is empty when description is empty.
+    expect(parsed).toEqual([{
+      id: 'no_desc',
+      version: '0.1.0',
+      description: '',
+      displayName: 'No Desc',
+      summary: '',
+    }]);
   });
 
   it('8. tool output is parseable JSON in `text` content', async () => {

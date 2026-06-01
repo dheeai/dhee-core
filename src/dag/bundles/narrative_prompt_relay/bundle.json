@@ -1,6 +1,8 @@
 {
   "id": "narrative_prompt_relay",
   "version": "0.1.0",
+  "displayName": "Narrative Prompt Relay",
+  "summary": "Cinematic story video with continuous motion across shots.",
   "engineCompat": ">=0.1.0",
   "description": "Full narrative pipeline from plot to final video, with LTX Director relay synthesis for the video stage on a local Comfy endpoint.",
   "dependencies": {

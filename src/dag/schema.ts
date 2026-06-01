@@ -177,6 +177,21 @@ export type BundleInputDecl =
 export interface DagBundle {
   id: string;
   version: string;
+  /**
+   * Human-readable display name for the bundle (e.g. "Narrative Prompt
+   * Relay"). Shown in bundle picker cards + project tiles. When omitted,
+   * the desktop falls back to `titleizeBundleId(id)` (snake_case → Title
+   * Case). Set explicitly when the auto-fallback doesn't give you what
+   * you want (e.g. "LTX Director Chain" instead of "Ltx Director Chain").
+   */
+  displayName?: string;
+  /**
+   * Short marketing-style summary (one sentence, ≤120 chars) for the
+   * bundle picker card. `description` below is the long-form prose;
+   * `summary` is the tagline. When omitted, the desktop derives it from
+   * the first sentence of `description`.
+   */
+  summary?: string;
   description?: string;
   /**
    * Range of kshana engine versions this bundle is known to work

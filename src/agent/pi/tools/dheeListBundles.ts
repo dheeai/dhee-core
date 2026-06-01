@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
 import { getBundleSearchRoots } from '../../../dag/bundleSource.js';
+import { titleizeBundleId, summaryOf } from '../../../dag/bundleDisplay.js';
 
 export interface ListBundlesDeps {
   /**
@@ -28,22 +29,45 @@ export interface BundleEntry {
   id: string;
   version: string;
   description: string;
+  /** Human-readable label for the picker (always non-empty; derived from id if bundle.json omits). */
+  displayName: string;
+  /** Short tagline for the picker card (≤120 chars; derived from description if bundle.json omits). */
+  summary: string;
 }
 
 function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }], details: {} };
 }
 
+interface BundleJsonShape {
+  id?: string;
+  version?: string;
+  description?: string;
+  displayName?: string;
+  summary?: string;
+}
+
 function readBundleJson(path: string): BundleEntry | null {
   try {
     const raw = readFileSync(path, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<BundleEntry>;
+    const parsed = JSON.parse(raw) as BundleJsonShape;
     if (typeof parsed.id !== 'string' || parsed.id.length === 0) return null;
     if (typeof parsed.version !== 'string' || parsed.version.length === 0) return null;
+    const description = typeof parsed.description === 'string' ? parsed.description : '';
+    const displayName =
+      typeof parsed.displayName === 'string' && parsed.displayName.trim().length > 0
+        ? parsed.displayName.trim()
+        : titleizeBundleId(parsed.id);
+    const summary = summaryOf({
+      ...(parsed.summary !== undefined ? { summary: parsed.summary } : {}),
+      ...(description ? { description } : {}),
+    });
     return {
       id: parsed.id,
       version: parsed.version,
-      description: typeof parsed.description === 'string' ? parsed.description : '',
+      description,
+      displayName,
+      summary,
     };
   } catch {
     return null;
