@@ -71,6 +71,33 @@ export type {
   RegenerateNodeResult,
   RunProjectViaBundleFn,
 } from './projectRegen.js';
+// Event-sourced projections — exposed for desktop / external consumers.
+export { openEventLog } from './eventLog/EventLog.js';
+export type { EventLog } from './eventLog/EventLog.js';
+export { eventLogPath, dheeDir } from './eventLog/eventLogPath.js';
+export type {
+  DheeEvent,
+  EventKind,
+  EventActor,
+  NodeDependency,
+  NodeCompletedPayload,
+} from './eventLog/events.js';
+export { openProjectionEngine } from './eventLog/ProjectionEngine.js';
+export type { ProjectionEngine } from './eventLog/ProjectionEngine.js';
+export { projectInstanceGraph, computeDependents } from './eventLog/projectInstanceGraph.js';
+export type {
+  InstanceGraph,
+  InstanceNode,
+  InstanceEdge,
+  InstanceRef,
+  ProjectInstanceGraphOpts,
+} from './eventLog/projectInstanceGraph.js';
+export { listVersions } from './eventLog/projectVersions.js';
+export type { VersionTrayEntry, ListVersionsOpts } from './eventLog/projectVersions.js';
+export { computeBranchTree } from './eventLog/projectBranches.js';
+export type { BranchTree, BranchEntry } from './eventLog/projectBranches.js';
+export { computeCostLedger } from './eventLog/projectCost.js';
+export type { CostLedger, CostLedgerOpts } from './eventLog/projectCost.js';
 
 export interface WalkerCliParams {
   /** Which scene(s) to render. */
