@@ -184,27 +184,44 @@ scoped to the project so you don't waste context on engine internals.
   uses this); without it, creates `<projectsDir>/<name>/`. Either way
   writes `bundleSource = built-in:<bundleId>`. Does **not** start a run.
 - `dhee_write_input(projectDir, inputId, payload, reason?)` — write a
-  bundle-declared input file (story.md, character ref images, etc).
-  The bundle declares `inputs[]`; you pick the `inputId` and supply a
-  `payload`:
+  bundle-declared input file.
+
+  **DO NOT call this for character reference images.** Despite the
+  natural-language intuition that "reference images are inputs,"
+  none of the current narrative bundles declares per-character refs
+  in `inputs[]`. Character reference images override the
+  `character_image` NODE OUTPUT via `dhee_write_node_content`. If you
+  call `dhee_write_input` with a fabricated `inputId` like
+  `character_ref_sarah`, the tool will return "Unknown inputId"
+  because no such input is declared. Read the "Chat attachments"
+  section below for the right pattern.
+
+  **DO use this for** inputs the bundle explicitly declares
+  (currently only `story_input` in some bundles; call
+  `dhee_describe_bundle` to see the actual list).
+
+  `payload` shapes:
     - `{ kind: 'text', content }` — inline text (story, JSON config)
     - `{ kind: 'base64', contentBase64 }` — small binary
     - `{ kind: 'localFile', sourcePath }` — copy from a path the
-      desktop staged (chat attachments land at
-      `<projectDir>/.dhee/attachments/`).
+      desktop staged.
   Emits `inputs.provided`. No cascade — inputs sit before the DAG.
 - `dhee_write_node_content(projectDir, nodeId, itemId?, payload, reason?)`
   — override a node's output content. Same payload shapes as
   `dhee_write_input`. Resolves outputPath from the bundle's pattern,
-  writes the bytes, marks the node user-pinned (the walker won't
-  re-fire it on upstream cascades), and invalidates downstream so the
-  next `dhee_run_bundle` cascades correctly. Use when:
+  writes the bytes, marks the node user-supplied (`generation.tool='user'`),
+  and invalidates downstream so the next `dhee_run_bundle` cascades
+  correctly. Use when:
     - the user wants to rewrite a generated prompt (better tone, more
       detail, fix a hallucination)
     - the user supplies a hand-edited image / JSON / plan
     - the user attaches a reference file to swap for a generated one.
-  The pin breaks ONLY on explicit `dhee_regenerate_node(nodeId)` —
-  ordinary upstream changes preserve the user's content.
+  The user-supplied content survives subsequent walks (walker is
+  state-as-truth — completed + file on disk → skip), but a cascade
+  invalidation triggered by an UPSTREAM change WILL clear it (and
+  preserve the old file as `.v<N>.<ext>`). That matches user intent:
+  if a character ref is updated, downstream shots should not be stuck
+  with the prior version. The user can re-attach.
 - `dhee_run_bundle(projectDir, stopAt?, runOnly?)` — dispatch the
   bundle's DAG. Blocks until the run finishes (success or failure)
   and returns the final video path on success. Multi-minute runs are
@@ -332,6 +349,65 @@ scoped to the project so you don't waste context on engine internals.
   file inline. For files that AREN'T bundle node outputs (user-
   uploaded references, exports). Prefer dhee_show_node_output for
   anything in the walkState.
+
+## Chat attachments (images / files the user drags in)
+
+When the user attaches a file in chat, their next message arrives
+with a machine-readable hint prepended on its own line:
+
+```
+[attachment kind=image path="/abs/path/to/file.png" name="sarah.png"]
+```
+
+**Reading the hint:** parse out `kind`, `path`, and `name`. The path
+is an absolute filesystem path the desktop already staged for you;
+pass it directly as `{ kind: 'localFile', sourcePath: '<path>' }` to
+a write tool.
+
+### Character reference images — `dhee_write_node_content` (NOT `dhee_write_input`)
+
+When the user attaches an image AND names/implies a character ("this
+is Sarah", "lock her face to this", "use this for the pawn shop
+owner"), the goal is to lock that character's `character_image` node
+output to the user's file.
+
+**The correct tool is `dhee_write_node_content`.** It writes to the
+node's canonical output path and stamps `generation.tool='user'` so
+the walker treats it as authoritative. `dhee_write_input` is WRONG
+for this case — no narrative bundle declares character-ref inputs.
+
+Step-by-step:
+
+  1. Identify the target character. Read characters_plan and match
+     the user's name to a character (case-insensitive on `name` or
+     `id` fields). If multiple plausible matches, ask the user.
+  2. Call:
+     ```
+     dhee_write_node_content({
+       projectDir,
+       nodeId: 'character_image',
+       itemId: '<character_id>',
+       payload: { kind: 'localFile', sourcePath: '<absolute path from the hint>' },
+       reason: 'user supplied reference image for <character name>'
+     })
+     ```
+  3. The tool cascades — shot images, scene clips, and the final
+     video downstream of this character are invalidated. Surface the
+     count to the user: *"Sarah locked. 14 downstream shots will
+     rerender on the next run."*
+  4. If `characters_plan` hasn't run yet (no characters to match),
+     tell the user we need to write the story + run at least up to
+     `characters_plan` before locking a face. Don't fabricate a
+     character id.
+
+### Other kinds
+
+- `kind=image` without character context: ask the user what they want
+  done with it. Don't silently shove it into a node.
+- `kind=comfy_workflow`: today the desktop's bundle authoring flow
+  consumes these elsewhere; the agent doesn't usually act on them.
+- `kind=text | video | audio`: kind-specific handlers will land
+  later. For now: if you don't know where it belongs, ask.
 
 **When to show vs read:** If the user asked "what does it look like"
 or "show me", call dhee_show_node_output. If they asked "what does
