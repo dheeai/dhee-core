@@ -1,0 +1,487 @@
+{
+  "76": {
+    "inputs": {
+      "image": "ref_image_1.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Reference Image 1"
+    }
+  },
+  "81": {
+    "inputs": {
+      "image": "ref_image_2.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Reference Image 2 (optional)"
+    }
+  },
+  "82": {
+    "inputs": {
+      "image": "ref_image_3.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Reference Image 3 (optional)"
+    }
+  },
+  "83": {
+    "inputs": {
+      "image": "ref_image_4.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Reference Image 4 (optional)"
+    }
+  },
+  "94": {
+    "inputs": {
+      "filename_prefix": "Flux2-Klein",
+      "images": [
+        "92:65",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "109": {
+    "inputs": {
+      "text": ""
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Text Multiline"
+    }
+  },
+  "92:61": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "92:62": {
+    "inputs": {
+      "steps": 4,
+      "width": 848,
+      "height": 480
+    },
+    "class_type": "Flux2Scheduler",
+    "_meta": {
+      "title": "Flux2Scheduler"
+    }
+  },
+  "92:63": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "92:70",
+        0
+      ],
+      "positive": [
+        "92:89:77",
+        0
+      ],
+      "negative": [
+        "92:89:76",
+        0
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFGGuider"
+    }
+  },
+  "92:64": {
+    "inputs": {
+      "noise": [
+        "92:73",
+        0
+      ],
+      "guider": [
+        "92:63",
+        0
+      ],
+      "sampler": [
+        "92:61",
+        0
+      ],
+      "sigmas": [
+        "92:62",
+        0
+      ],
+      "latent_image": [
+        "92:66",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "92:65": {
+    "inputs": {
+      "samples": [
+        "92:64",
+        0
+      ],
+      "vae": [
+        "92:72",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "92:70": {
+    "inputs": {
+      "unet_name": "flux-2-klein-9b.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "92:71": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "92:74": {
+    "inputs": {
+      "text": [
+        "109",
+        0
+      ],
+      "clip": [
+        "92:71",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "92:72": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "92:80": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "76",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "Scale Reference Image 1"
+    }
+  },
+  "92:85": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "81",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "Scale Reference Image 2"
+    }
+  },
+  "92:87": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "Scale Reference Image 3"
+    }
+  },
+  "92:89": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "83",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "Scale Reference Image 4"
+    }
+  },
+  "92:81": {
+    "inputs": {
+      "image": [
+        "92:80",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "92:73": {
+    "inputs": {
+      "noise_seed": 432262096973500
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "92:66": {
+    "inputs": {
+      "width": 848,
+      "height": 480,
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "92:86": {
+    "inputs": {
+      "conditioning": [
+        "92:74",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "92:79:78": {
+    "inputs": {
+      "pixels": [
+        "92:80",
+        0
+      ],
+      "vae": [
+        "92:72",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode Reference 1"
+    }
+  },
+  "92:79:77": {
+    "inputs": {
+      "conditioning": [
+        "92:74",
+        0
+      ],
+      "latent": [
+        "92:79:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Positive - Image 1"
+    }
+  },
+  "92:79:76": {
+    "inputs": {
+      "conditioning": [
+        "92:86",
+        0
+      ],
+      "latent": [
+        "92:79:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Negative - Image 1"
+    }
+  },
+  "92:84:78": {
+    "inputs": {
+      "pixels": [
+        "92:85",
+        0
+      ],
+      "vae": [
+        "92:72",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode Reference 2"
+    }
+  },
+  "92:84:77": {
+    "inputs": {
+      "conditioning": [
+        "92:79:77",
+        0
+      ],
+      "latent": [
+        "92:84:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Positive - Image 2"
+    }
+  },
+  "92:84:76": {
+    "inputs": {
+      "conditioning": [
+        "92:79:76",
+        0
+      ],
+      "latent": [
+        "92:84:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Negative - Image 2"
+    }
+  },
+  "92:88:78": {
+    "inputs": {
+      "pixels": [
+        "92:87",
+        0
+      ],
+      "vae": [
+        "92:72",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode Reference 3"
+    }
+  },
+  "92:88:77": {
+    "inputs": {
+      "conditioning": [
+        "92:84:77",
+        0
+      ],
+      "latent": [
+        "92:88:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Positive - Image 3"
+    }
+  },
+  "92:88:76": {
+    "inputs": {
+      "conditioning": [
+        "92:84:76",
+        0
+      ],
+      "latent": [
+        "92:88:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Negative - Image 3"
+    }
+  },
+  "92:89:78": {
+    "inputs": {
+      "pixels": [
+        "92:89",
+        0
+      ],
+      "vae": [
+        "92:72",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode Reference 4"
+    }
+  },
+  "92:89:77": {
+    "inputs": {
+      "conditioning": [
+        "92:88:77",
+        0
+      ],
+      "latent": [
+        "92:89:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Positive - Image 4"
+    }
+  },
+  "92:89:76": {
+    "inputs": {
+      "conditioning": [
+        "92:88:76",
+        0
+      ],
+      "latent": [
+        "92:89:78",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "ReferenceLatent Negative - Image 4"
+    }
+  }
+}

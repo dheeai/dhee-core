@@ -441,19 +441,23 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       ],
     });
 
-    // `reasoning.exclude: true` is an OpenRouter extension that tells
-    // reasoning models (qwen3.5, deepseek-r1, etc.) to NOT emit a
-    // chain-of-thought — without it, reasoning tokens consume the entire
-    // max_tokens budget and `content` comes back null. Harmless for
-    // non-reasoning models (the field is ignored).
+    // We deliberately do NOT stamp `reasoning: { exclude: true }` on
+    // image requests. On reasoning-VLM models (xiaomi/mimo-v2.5,
+    // nvidia/nemotron-*-reasoning), exclude=true suppresses the
+    // `content` field along with the reasoning trace — content comes
+    // back empty.
+    //
+    // The trade-off: non-reasoning vision models will use a tiny bit
+    // of completion budget on their internal trace if they have one,
+    // but that's amortized by the 4000-token default below. The text
+    // path (generate / generateStream) still uses exclude=true because
+    // those callers expect terse text answers.
     const response = await this.client.chat.completions.create({
       model: this.model,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       messages: messages as any,
       temperature: opts?.temperature ?? 0.1,
-      max_tokens: opts?.maxTokens ?? 2000,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      reasoning: { exclude: true } as any,
+      max_tokens: opts?.maxTokens ?? 4000,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any, opts?.signal ? { signal: opts.signal } : undefined);
 

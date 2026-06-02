@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dhee — darkroom UI study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0c0b09;            /* darkroom base */
+    --bg2:#131210;           /* lifted surface */
+    --bg3:#1a1815;           /* card */
+    --line:#2a2620;          /* hairline */
+    --ink:#ece3d2;           /* parchment text */
+    --ink-dim:#988e7a;       /* muted */
+    --ink-faint:#5f594c;     /* faintest */
+    --amber:#e9a23c;         /* sodium safelight accent */
+    --amber-soft:#caa05a;
+    --grease:#ff5a34;        /* chinagraph / grease-pencil mark */
+    --good:#7fae6b;
+    --r:10px;
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+    --sans:"IBM Plex Sans",system-ui,sans-serif;
+    --serif:"Fraunces",Georgia,serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:14px; line-height:1.5;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* atmosphere: safelight glow + vignette + film grain */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(900px 600px at 12% -5%, rgba(233,162,60,.10), transparent 60%),
+      radial-gradient(1100px 800px at 110% 120%, rgba(233,162,60,.05), transparent 55%),
+      radial-gradient(120% 120% at 50% 50%, transparent 60%, rgba(0,0,0,.55) 100%);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:999; opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode:overlay;
+  }
+
+  .app{position:relative; z-index:1; height:100vh; display:flex; flex-direction:column}
+
+  /* ───────── top bar ───────── */
+  .topbar{
+    display:flex; align-items:center; gap:18px; height:56px; padding:0 18px;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,rgba(255,255,255,.015),transparent);
+  }
+  .wordmark{font-family:var(--serif); font-weight:600; font-size:23px; letter-spacing:.01em; display:flex; align-items:baseline; gap:1px}
+  .wordmark .dot{width:6px; height:6px; border-radius:50%; background:var(--amber); display:inline-block; margin-left:2px; transform:translateY(-2px); box-shadow:0 0 10px var(--amber)}
+  .proj{font-family:var(--serif); font-style:italic; font-size:15px; color:var(--ink-dim)}
+  .proj b{font-style:normal; color:var(--ink); font-weight:500}
+  .sep{width:1px; height:22px; background:var(--line)}
+
+  /* reel / time-travel scrubber */
+  .reel{flex:1; display:flex; align-items:center; gap:0; height:34px; padding:0 4px; min-width:0;
+    border:1px solid var(--line); border-radius:6px; background:repeating-linear-gradient(90deg,#000 0 2px,transparent 2px 4px) , var(--bg2);
+    position:relative; overflow:hidden}
+  .reel .holes{position:absolute; left:0; right:0; height:4px; background-image:radial-gradient(circle,#000 1.4px,transparent 1.6px); background-size:9px 4px}
+  .reel .holes.t{top:2px} .reel .holes.b{bottom:2px}
+  .reel-track{display:flex; align-items:center; gap:3px; padding:6px 4px; overflow-x:auto; scrollbar-width:none; flex:1}
+  .reel-track::-webkit-scrollbar{display:none}
+  .frame{width:30px; height:18px; border-radius:2px; flex:0 0 auto; cursor:pointer; opacity:.5; transition:opacity .15s, transform .15s; border:1px solid rgba(0,0,0,.4)}
+  .frame:hover{opacity:.9; transform:scaleY(1.12)}
+  .frame.now{opacity:1; outline:1.5px solid var(--amber); outline-offset:1px}
+  .playhead-label{font-family:var(--mono); font-size:10px; color:var(--ink-faint); padding:0 8px; white-space:nowrap}
+
+  .chip{font-family:var(--mono); font-size:11px; color:var(--ink-dim); border:1px solid var(--line); border-radius:20px; padding:5px 11px; display:flex; align-items:center; gap:7px; white-space:nowrap; cursor:pointer; transition:border-color .15s,color .15s}
+  .chip:hover{border-color:var(--amber-soft); color:var(--ink)}
+  .chip .k{color:var(--amber)}
+  .chip .meter{width:36px; height:5px; border-radius:3px; background:var(--line); overflow:hidden}
+  .chip .meter i{display:block; height:100%; width:62%; background:linear-gradient(90deg,var(--good),var(--amber))}
+
+  /* ───────── body 3-pane ───────── */
+  .body{flex:1; display:flex; min-height:0}
+
+  /* agent rail (PRIMARY) */
+  .agent{width:330px; flex:0 0 330px; border-right:1px solid var(--line); display:flex; flex-direction:column; background:linear-gradient(180deg,rgba(233,162,60,.025),transparent 30%)}
+  .agent-head{padding:14px 16px 10px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:9px}
+  .agent-head .orb{width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 0 rgba(233,162,60,.5);animation:pulse 2.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(233,162,60,.45)}70%{box-shadow:0 0 0 7px rgba(233,162,60,0)}100%{box-shadow:0 0 0 0 rgba(233,162,60,0)}}
+  .agent-head .ttl{font-family:var(--mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-dim)}
+  .log{flex:1; overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:16px}
+  .log::-webkit-scrollbar{width:8px}.log::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+  .turn{display:flex; flex-direction:column; gap:6px}
+  .turn .who{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint)}
+  .turn.you .bubble{color:var(--ink); font-style:italic; font-family:var(--serif); font-size:15.5px; line-height:1.45}
+  .turn.dhee .bubble{color:var(--ink-dim); font-family:var(--mono); font-size:12.5px; line-height:1.6}
+  .turn.dhee .bubble b{color:var(--ink); font-weight:500}
+  .act{margin-top:4px; border:1px solid var(--line); border-radius:8px; padding:9px 11px; background:var(--bg2); cursor:pointer; transition:border-color .15s, background .15s}
+  .act:hover{border-color:var(--amber-soft); background:var(--bg3)}
+  .act .a-ttl{font-family:var(--mono); font-size:11px; color:var(--amber); display:flex; justify-content:space-between}
+  .act .a-sub{font-size:12px; color:var(--ink-dim); margin-top:3px}
+  .composer{border-top:1px solid var(--line); padding:12px 14px; display:flex; flex-direction:column; gap:8px}
+  .composer textarea{width:100%; resize:none; background:var(--bg2); border:1px solid var(--line); border-radius:8px; color:var(--ink); font-family:var(--serif); font-style:italic; font-size:14.5px; padding:10px 12px; min-height:46px; outline:none}
+  .composer textarea:focus{border-color:var(--amber-soft)}
+  .composer textarea::placeholder{color:var(--ink-faint); font-style:italic}
+  .composer .row{display:flex; justify-content:space-between; align-items:center}
+  .composer .hint{font-family:var(--mono); font-size:10px; color:var(--ink-faint)}
+  .send{font-family:var(--mono); font-size:11px; color:var(--bg); background:var(--amber); border:none; border-radius:6px; padding:7px 14px; cursor:pointer; font-weight:600}
+
+  /* stage (DEFAULT = OUTPUTS) */
+  .stage{flex:1; display:flex; flex-direction:column; min-width:0; background:
+     radial-gradient(700px 400px at 70% 0%, rgba(255,255,255,.018), transparent 60%)}
+  .stage-bar{display:flex; align-items:center; gap:14px; padding:11px 20px; border-bottom:1px solid var(--line)}
+  .crumbs{font-family:var(--mono); font-size:12px; color:var(--ink-dim)}
+  .crumbs b{color:var(--ink); font-weight:500}
+  .crumbs .slash{color:var(--ink-faint); margin:0 7px}
+  .spacer{flex:1}
+  .segmented{display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden}
+  .segmented button{font-family:var(--mono); font-size:11px; color:var(--ink-dim); background:transparent; border:none; padding:6px 13px; cursor:pointer; display:flex; align-items:center; gap:6px}
+  .segmented button.on{background:var(--amber); color:var(--bg); font-weight:600}
+  .bundle-pick{font-family:var(--mono); font-size:11px; color:var(--ink-dim); background:var(--bg2); border:1px solid var(--line); border-radius:7px; padding:6px 10px; cursor:pointer}
+
+  .stage-scroll{flex:1; overflow-y:auto; padding:22px 26px 40px}
+  .stage-scroll::-webkit-scrollbar{width:9px}.stage-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+
+  .focus-h{display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:4px}
+  .focus-h h2{font-family:var(--serif); font-weight:500; font-size:27px; margin:0; letter-spacing:.005em}
+  .focus-h .meta{font-family:var(--mono); font-size:11px; color:var(--ink-faint); text-align:right}
+  .focus-sub{font-family:var(--mono); font-size:11px; color:var(--ink-dim); letter-spacing:.04em; margin-bottom:20px; display:flex; gap:8px; align-items:center}
+  .cap-tag{font-family:var(--mono); font-size:10px; color:var(--amber); border:1px solid rgba(233,162,60,.3); border-radius:4px; padding:2px 6px; letter-spacing:.03em}
+
+  /* contact sheet (best-of-N) */
+  .sheet-label{font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); margin:6px 0 12px; display:flex; align-items:center; gap:10px}
+  .sheet-label::after{content:""; flex:1; height:1px; background:var(--line)}
+  .contact{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:16px}
+  .take{position:relative; cursor:pointer}
+  .take .still{aspect-ratio:16/9; border-radius:var(--r); border:1px solid var(--line); overflow:hidden; position:relative; transition:transform .18s, box-shadow .18s; filter:saturate(.92)}
+  .take:hover .still{transform:translateY(-3px); box-shadow:0 14px 30px -14px rgba(0,0,0,.8)}
+  .take .still::after{content:""; position:absolute; inset:0; box-shadow:inset 0 0 60px rgba(0,0,0,.4)}
+  .take .num{position:absolute; top:7px; left:8px; font-family:var(--mono); font-size:10px; color:var(--ink); background:rgba(0,0,0,.55); padding:2px 6px; border-radius:4px; letter-spacing:.05em; z-index:3}
+  .take .via{position:absolute; bottom:7px; left:8px; font-family:var(--mono); font-size:9.5px; color:var(--ink-dim); background:rgba(0,0,0,.5); padding:2px 6px; border-radius:4px; z-index:3}
+  .take .play{position:absolute; inset:0; display:none; align-items:center; justify-content:center; z-index:3}
+  .take.video .play{display:flex}
+  .take .play svg{width:34px;height:34px; opacity:.9; filter:drop-shadow(0 2px 6px rgba(0,0,0,.6))}
+  .take .tc{position:absolute; bottom:7px; right:8px; font-family:var(--mono); font-size:9.5px; color:var(--ink); background:rgba(0,0,0,.55); padding:2px 5px; border-radius:3px; z-index:3}
+  /* grease-pencil selection mark */
+  .grease{position:absolute; inset:-9px; z-index:4; pointer-events:none; opacity:0; transition:opacity .25s}
+  .take.sel .grease{opacity:1}
+  .take.sel .still{border-color:rgba(255,90,52,.5)}
+  .take .rej{position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0}
+  .take.rej-mark .rej{opacity:.55}
+  .take .pick-cta{position:absolute; bottom:-22px; left:0; right:0; text-align:center; font-family:var(--mono); font-size:10px; color:var(--ink-faint); opacity:0; transition:opacity .15s}
+  .take:hover .pick-cta{opacity:1}
+  .take.sel .pick-cta{opacity:1; color:var(--grease)}
+
+  /* prompt / text capability renderer */
+  .promptcard{border:1px solid var(--line); border-left:2px solid var(--amber); border-radius:8px; padding:14px 16px; background:var(--bg2); max-width:760px}
+  .promptcard .pc-h{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:7px}
+  .promptcard p{margin:0; font-family:var(--serif); font-size:15px; line-height:1.6; color:var(--ink)}
+
+  /* waveform capability (proves bundle-agnostic) */
+  .waveform{height:84px; border:1px solid var(--line); border-radius:8px; background:var(--bg2); display:flex; align-items:center; gap:2px; padding:0 14px; overflow:hidden}
+  .waveform i{flex:1; background:linear-gradient(180deg,var(--amber),var(--amber-soft)); border-radius:2px; opacity:.7; min-width:2px}
+
+  /* generic fallback renderer (ANY unknown capability) */
+  .fallback{border:1px dashed var(--line); border-radius:8px; padding:13px 15px; background:repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(255,255,255,.012) 8px,rgba(255,255,255,.012) 16px)}
+  .fallback .fb-h{font-family:var(--mono); font-size:10px; color:var(--ink-faint); letter-spacing:.08em; margin-bottom:8px}
+  .fallback pre{margin:0; font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); white-space:pre-wrap}
+  .fallback .key{color:var(--amber-soft)}
+
+  /* graph lens (the DEMOTED, refined projection — deliberately not spaghetti) */
+  .lens{display:none; padding:26px}
+  .lens.on{display:block}
+  .lens-flow{display:flex; align-items:center; gap:0; flex-wrap:wrap; max-width:880px; margin:10px auto}
+  .lnode{border:1px solid var(--line); border-radius:9px; padding:11px 15px; background:var(--bg2); min-width:118px; text-align:center; position:relative}
+  .lnode .ln-cap{font-family:var(--mono); font-size:9.5px; color:var(--amber); letter-spacing:.04em}
+  .lnode .ln-name{font-family:var(--serif); font-size:14px; margin-top:3px}
+  .lnode.done{border-color:rgba(127,174,107,.35)}
+  .lnode .dotn{position:absolute; top:-5px; right:-5px; width:9px; height:9px; border-radius:50%; background:var(--good)}
+  .ledge{width:46px; height:1px; background:linear-gradient(90deg,var(--line),var(--amber-soft),var(--line)); position:relative}
+  .ledge::after{content:"›"; position:absolute; right:-4px; top:-11px; color:var(--ink-faint); font-size:15px}
+  .lens-note{font-family:var(--mono); font-size:11px; color:var(--ink-faint); text-align:center; margin-top:26px}
+
+  /* inspector (ON-DEMAND: lineage / provenance) */
+  .inspector{width:300px; flex:0 0 300px; border-left:1px solid var(--line); display:flex; flex-direction:column; background:var(--bg)}
+  .insp-head{padding:13px 16px; border-bottom:1px solid var(--line); font-family:var(--mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-dim); display:flex; justify-content:space-between; align-items:center}
+  .insp-body{flex:1; overflow-y:auto; padding:16px}
+  .insp-still{aspect-ratio:16/9; border-radius:8px; border:1px solid var(--line); margin-bottom:14px; position:relative; overflow:hidden}
+  .insp-still .b{position:absolute; bottom:7px; left:8px; font-family:var(--mono); font-size:10px; background:rgba(0,0,0,.55); padding:2px 7px; border-radius:4px; color:var(--grease)}
+  .lineage{position:relative; padding-left:18px}
+  .lineage::before{content:""; position:absolute; left:4px; top:6px; bottom:6px; width:1px; background:var(--line)}
+  .anc{position:relative; padding:9px 0}
+  .anc::before{content:""; position:absolute; left:-17px; top:14px; width:7px; height:7px; border-radius:50%; background:var(--bg); border:1.5px solid var(--amber-soft)}
+  .anc .cap{font-family:var(--mono); font-size:10px; color:var(--amber); letter-spacing:.03em}
+  .anc .val{font-size:12.5px; color:var(--ink); margin-top:2px}
+  .anc .det{font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); margin-top:2px}
+  .insp-foot{border-top:1px solid var(--line); padding:12px 16px; font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); display:flex; justify-content:space-between}
+
+  .historybanner{position:absolute; top:64px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:11px; color:var(--bg); background:var(--amber); padding:5px 14px; border-radius:20px; z-index:20; opacity:0; pointer-events:none; transition:opacity .2s; box-shadow:0 6px 20px -6px rgba(233,162,60,.6)}
+  .historybanner.show{opacity:1}
+  .historybanner button{background:rgba(0,0,0,.2); border:none; color:var(--bg); font-family:var(--mono); font-size:10px; border-radius:12px; padding:2px 8px; margin-left:8px; cursor:pointer}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ───────── TOP BAR: wordmark · project · reel/time-travel · cost · branch ───────── -->
+  <div class="topbar">
+    <div class="wordmark">dhee<span class="dot"></span></div>
+    <div class="sep"></div>
+    <div class="proj"><b id="projName">The Lighthouse Keeper</b> · <span id="bundleName">narrative_relay</span></div>
+    <div class="reel" title="Reel — scrub to travel through the project's history">
+      <div class="holes t"></div><div class="holes b"></div>
+      <div class="reel-track" id="reelTrack"></div>
+      <span class="playhead-label" id="reelLabel">● now · event 142</span>
+    </div>
+    <div class="chip" id="branchChip" title="Branches — compare cuts"><span class="k">⌥</span> main · 2 branches</div>
+    <div class="chip" id="costChip" title="Live spend · cache savings"><span class="meter"><i></i></span> $14.20 <span style="color:var(--good)">· saved $9.40</span></div>
+  </div>
+
+  <div class="historybanner" id="histBanner">viewing history — event 88 <button id="returnNow">return to now ›</button></div>
+
+  <div class="body">
+    <!-- ───────── AGENT RAIL (primary driver) ───────── -->
+    <div class="agent">
+      <div class="agent-head"><span class="orb"></span><span class="ttl">director · dhee</span></div>
+      <div class="log" id="log">
+        <div class="turn you"><span class="who">you</span><div class="bubble">Open on the keeper climbing the spiral stairs at dusk — lonely, amber light.</div></div>
+        <div class="turn dhee"><span class="who">dhee</span>
+          <div class="bubble">Wrote <b>shot 3</b> from the beat. Generated <b>6 first-frame takes</b> on flux-klein, then re-oriented two with Qwen for the stair geometry.</div>
+          <div class="act" data-jump="contact"><div class="a-ttl">⊞ contact sheet · shot 3 <span>6 takes</span></div><div class="a-sub">pick the frame to carry into video →</div></div>
+        </div>
+        <div class="turn dhee"><span class="who">dhee</span>
+          <div class="bubble">Take <b>03·D</b> had the cleanest geometry. I selected it and queued the clip — <b>19 upstream shots replayed from cache</b>, no recompute.</div>
+        </div>
+      </div>
+      <div class="composer">
+        <textarea placeholder="Direct dhee… e.g. “try take C instead, warmer grade”"></textarea>
+        <div class="row"><span class="hint">⌘↵ to send · the agent drives the graph</span><button class="send">Direct ›</button></div>
+      </div>
+    </div>
+
+    <!-- ───────── STAGE (default = OUTPUTS, capability-rendered) ───────── -->
+    <div class="stage">
+      <div class="stage-bar">
+        <div class="crumbs"><b id="cbProj">The Lighthouse Keeper</b><span class="slash">/</span><span id="cbScene">Scene 1 · dusk</span><span class="slash">/</span><b id="cbShot">Shot 3</b></div>
+        <div class="spacer"></div>
+        <div class="segmented" id="seg">
+          <button class="on" data-view="outputs">▦ Outputs</button>
+          <button data-view="lens">⊙ Graph lens</button>
+        </div>
+        <select class="bundle-pick" id="bundlePick" title="Same UI renders any bundle by capability">
+          <option value="narrative">bundle: narrative_relay</option>
+          <option value="music">bundle: music_video</option>
+          <option value="weird">bundle: unknown_custom</option>
+        </select>
+      </div>
+
+      <!-- OUTPUTS view -->
+      <div class="stage-scroll" id="outputs">
+        <div class="focus-h">
+          <h2 id="focusTitle">Shot 3 — the spiral ascent</h2>
+          <div class="meta" id="focusMeta">scene 1 · 0:04–0:09<br>flux-klein · qwen-edit</div>
+        </div>
+        <div class="focus-sub" id="focusCaps"></div>
+
+        <div id="renderRoot"></div>
+      </div>
+
+      <!-- GRAPH LENS (demoted, refined projection — not spaghetti) -->
+      <div class="lens" id="lens">
+        <div class="sheet-label">the graph is just one lens — story flows into the shot you're holding</div>
+        <div class="lens-flow" id="lensFlow"></div>
+        <div class="lens-note">no wires to untangle · this is a projection of the event log, rendered top-down · the agent threads it for you</div>
+      </div>
+    </div>
+
+    <!-- ───────── INSPECTOR (on-demand: lineage / provenance) ───────── -->
+    <div class="inspector">
+      <div class="insp-head"><span>lineage · provenance</span><span id="inspCap" style="color:var(--amber)">shot.first_frame</span></div>
+      <div class="insp-body">
+        <div class="insp-still" id="inspStill"><span class="b" id="inspSel">take 03·D ✦ selected</span></div>
+        <div class="lineage" id="lineage"></div>
+      </div>
+      <div class="insp-foot"><span id="inspSeed">seed 4412 · klein</span><span id="inspCost" style="color:var(--good)">$0.80</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ────────────────────────────────────────────────────────────────────────
+   THE BUNDLE-AGNOSTIC CORE: a capability → renderer registry.
+   The UI never hardcodes node ids. A bundle self-describes via displayCapability
+   tags; the UI looks up a renderer for each capability. Unknown capability →
+   generic fallback renderer, so ANY bundle renders *something*.
+   ──────────────────────────────────────────────────────────────────────── */
+
+const GRADES = [
+  "linear-gradient(135deg,#1b2a33,#3a4f4a 55%,#caa05a)",
+  "linear-gradient(135deg,#241a16,#5a3a2a 50%,#e9a23c)",
+  "linear-gradient(140deg,#101820,#26323d 60%,#7aa0b0)",
+  "linear-gradient(135deg,#2a1d22,#4a2c33 55%,#b5654d)",
+  "linear-gradient(135deg,#161d18,#2e3d2c 55%,#7fae6b)",
+  "linear-gradient(135deg,#1e1822,#3a2c4a 55%,#9a7ac0)",
+  "linear-gradient(135deg,#231a14,#4a3320 55%,#caa05a)",
+  "linear-gradient(140deg,#0f1418,#1f2a30 60%,#5f7480)"
+];
+const grade = i => GRADES[i % GRADES.length];
+
+const PLAY = `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="rgba(0,0,0,.45)" stroke="#ece3d2" stroke-opacity=".5"/><path d="M10 8l6 4-6 4V8z" fill="#ece3d2"/></svg>`;
+const GREASE = `<svg class="grease" viewBox="0 0 220 130" preserveAspectRatio="none"><path d="M14,66 C8,30 60,10 116,11 C176,12 214,34 206,72 C200,104 150,122 100,120 C44,118 20,100 16,70" fill="none" stroke="#ff5a34" stroke-width="3.4" stroke-linecap="round" opacity=".92"/></svg>`;
+const REJ = `<svg class="rej" viewBox="0 0 100 60" preserveAspectRatio="none"><path d="M6,6 L94,54 M94,6 L6,54" stroke="#ff5a34" stroke-width="2"/></svg>`;
+
+/* RENDERER REGISTRY — keyed by displayCapability */
+const RENDERERS = {
+  // best-of-N image capability → contact sheet of takes
+  'shot.first_frame': (cap, items) => contactSheet(cap, items, false),
+  'character.image':  (cap, items) => contactSheet(cap, items, false),
+  // motion capabilities → contact sheet of video takes (play glyph + timecode)
+  'shot.video':  (cap, items) => contactSheet(cap, items, true),
+  'scene.video': (cap, items) => contactSheet(cap, items, true),
+  'final.video': (cap, items) => contactSheet(cap, items, true),
+  // text capability → prompt card
+  'shot.prompt': (cap, items) => `<div class="sheet-label">${cap}</div>` + items.map(it=>`
+      <div class="promptcard"><div class="pc-h">${it.num} · ${it.via}</div><p>${it.text}</p></div>`).join(''),
+  // a DIFFERENT bundle's capability — proves the registry generalizes
+  'track.waveform': (cap, items) => `<div class="sheet-label">${cap}</div>` + items.map(it=>
+      `<div style="margin-bottom:14px"><div class="focus-sub"><span class="cap-tag">${it.num}</span> ${it.text}</div>${waveform()}</div>`).join(''),
+};
+
+/* GENERIC FALLBACK — any capability with no registered renderer still shows */
+function fallbackRenderer(cap, items){
+  return `<div class="sheet-label">${cap} · generic</div>` + items.map(it=>`
+    <div class="fallback"><div class="fb-h">no renderer for "${cap}" — generic projection</div>
+    <pre>${Object.entries(it).map(([k,v])=>`<span class="key">${k}</span>: ${typeof v==='string'?v:JSON.stringify(v)}`).join('\n')}</pre></div>`).join('');
+}
+
+function waveform(){
+  let bars=''; for(let i=0;i<90;i++){const h=12+Math.abs(Math.sin(i*0.5))*60*Math.random();bars+=`<i style="height:${h}px"></i>`;}
+  return `<div class="waveform">${bars}</div>`;
+}
+
+function contactSheet(cap, items, isVideo){
+  const tiles = items.map(it=>`
+    <div class="take ${isVideo?'video':''} ${it.sel?'sel':''} ${it.rej?'rej-mark':''}" data-num="${it.num}" data-grade="${it.g}" data-via="${it.via}" data-seed="${it.seed||''}" data-cost="${it.cost||''}">
+      <div class="still" style="background:${grade(it.g)}">
+        <span class="num">${it.num}</span>
+        <span class="via">${it.via}</span>
+        ${isVideo?`<div class="play">${PLAY}</div><span class="tc">${it.tc||'0:05'}</span>`:''}
+        ${GREASE}${REJ}
+      </div>
+      <div class="pick-cta">${it.sel?'✦ selected — carried to video':'click to select'}</div>
+    </div>`).join('');
+  return `<div class="sheet-label">contact sheet · ${cap} · pick the best of ${items.length}</div><div class="contact">${tiles}</div>`;
+}
+
+/* ────────── SAMPLE DATA: three different bundles, same renderer path ────────── */
+const BUNDLES = {
+  narrative: {
+    proj:"The Lighthouse Keeper", bundle:"narrative_relay",
+    title:"Shot 3 — the spiral ascent", caps:["shot.prompt","shot.first_frame","shot.video"],
+    blocks:[
+      { cap:'shot.prompt', items:[{num:"PROMPT",via:"llm.generate",text:"Low-angle: the keeper ascends the iron spiral staircase, lantern swinging, dusk light bleeding amber through the salt-crusted glass above."}]},
+      { cap:'shot.first_frame', items:[
+        {num:"03·A",via:"klein",g:0,seed:1180,cost:0.8},{num:"03·B",via:"klein",g:1,seed:2290,cost:0.8},
+        {num:"03·C",via:"klein",g:3,seed:3310,cost:0.8,rej:true},{num:"03·D",via:"qwen reorient",g:6,seed:4412,cost:0.8,sel:true},
+        {num:"03·E",via:"klein",g:2,seed:5510,cost:0.8},{num:"03·F",via:"qwen reorient",g:4,seed:6633,cost:0.8}
+      ]},
+      { cap:'shot.video', items:[{num:"03·D▸",via:"ltx relay · from 03·D",g:6,tc:"0:05",cost:2.4}]}
+    ],
+    lens:[["story.beat","Beat 3"],["shot.prompt","Shot 3"],["shot.first_frame","6 takes → D"],["shot.video","Clip 3"],["final.video","The cut"]]
+  },
+  music: {
+    proj:"Neon Tide — single", bundle:"music_video",
+    title:"Verse 2 — the drop builds", caps:["track.waveform","shot.first_frame"],
+    blocks:[
+      { cap:'track.waveform', items:[{num:"STEM·A",text:"verse 2 · synth + sub-bass, 124 bpm"}]},
+      { cap:'shot.first_frame', items:[
+        {num:"V2·A",via:"klein",g:5,seed:21,cost:0.8},{num:"V2·B",via:"klein",g:7,seed:22,cost:0.8,sel:true},
+        {num:"V2·C",via:"klein",g:1,seed:23,cost:0.8},{num:"V2·D",via:"klein",g:3,seed:24,cost:0.8,rej:true}
+      ]}
+    ],
+    lens:[["lyric.line","Verse 2"],["track.waveform","Stem"],["shot.first_frame","4 takes → B"],["final.video","Music video"]]
+  },
+  weird: {
+    proj:"Custom community bundle", bundle:"unknown_custom",
+    title:"A capability the UI has never seen", caps:["voxel.scene","shot.first_frame"],
+    blocks:[
+      { cap:'voxel.scene', items:[{id:"vox_07", engine:"custom-voxel-runner", dims:"128³", palette:"sunset-12", note:"no registered renderer → generic projection keeps it visible"}]},
+      { cap:'shot.first_frame', items:[{num:"X·A",via:"klein",g:4,seed:99,cost:0.8,sel:true},{num:"X·B",via:"klein",g:0,seed:98,cost:0.8}]}
+    ],
+    lens:[["voxel.scene","Voxel build"],["shot.first_frame","Render → A"],["final.video","Export"]]
+  }
+};
+
+/* ────────── RENDER ────────── */
+let current = 'narrative';
+
+function render(key){
+  const b = BUNDLES[key]; current = key;
+  document.getElementById('projName').textContent = b.proj;
+  document.getElementById('cbProj').textContent = b.proj;
+  document.getElementById('bundleName').textContent = b.bundle;
+  document.getElementById('focusTitle').textContent = b.title;
+  document.getElementById('focusCaps').innerHTML = "exposes " + b.caps.map(c=>`<span class="cap-tag">${c}</span>`).join(' ');
+
+  const root = document.getElementById('renderRoot');
+  root.innerHTML = b.blocks.map(blk=>{
+    const r = RENDERERS[blk.cap] || ((c,i)=>fallbackRenderer(c,i));
+    return `<div style="margin-bottom:34px">${r(blk.cap, blk.items)}</div>`;
+  }).join('');
+
+  // graph lens
+  document.getElementById('lensFlow').innerHTML = b.lens.map((n,i)=>{
+    const done = i < b.lens.length-1;
+    return `<div class="lnode ${done?'done':''}">${done?'<span class="dotn"></span>':''}<div class="ln-cap">${n[0]}</div><div class="ln-name">${n[1]}</div></div>`
+      + (i<b.lens.length-1?'<div class="ledge"></div>':'');
+  }).join('');
+
+  bindTakes();
+}
+
+/* ────────── INTERACTIONS ────────── */
+function bindTakes(){
+  document.querySelectorAll('.take').forEach(t=>{
+    t.addEventListener('click', ()=>selectTake(t));
+  });
+}
+
+function selectTake(t){
+  const sheet = t.closest('.contact');
+  sheet.querySelectorAll('.take').forEach(x=>{x.classList.remove('sel'); x.querySelector('.pick-cta').textContent='click to select';});
+  t.classList.add('sel'); t.classList.remove('rej-mark');
+  t.querySelector('.pick-cta').textContent = '✦ selected — carried to video';
+
+  const num = t.dataset.num, via = t.dataset.via, seed = t.dataset.seed, g = t.dataset.grade, cost = t.dataset.cost;
+  // update inspector (lineage projection)
+  const still = document.getElementById('inspStill');
+  still.style.background = grade(+g);
+  document.getElementById('inspSel').textContent = `take ${num} ✦ selected`;
+  document.getElementById('inspSeed').textContent = `seed ${seed||'—'} · ${via}`;
+  document.getElementById('inspCost').textContent = cost?`$${(+cost).toFixed(2)}`:'—';
+  document.getElementById('lineage').innerHTML = [
+    ['shot.video', `Clip ${num}▸`, 'ltx relay · will re-project from this pick'],
+    ['shot.first_frame', `take ${num}`, `${via} · seed ${seed||'—'}`],
+    ['shot.prompt', 'Shot 3 prompt', 'llm.generate · gpt-class'],
+    ['story.beat', 'Beat 3 — the ascent', 'from your story'],
+    ['character.image', 'The keeper', 'reference · locked']
+  ].map(a=>`<div class="anc"><div class="cap">${a[0]}</div><div class="val">${a[1]}</div><div class="det">${a[2]}</div></div>`).join('');
+
+  // agent narrates the pick (append a turn)
+  appendAgent(`Selected <b>${num}</b>. Re-projecting the clip from this frame — upstream replays from cache, <b>no recompute</b>.`);
+}
+
+function appendAgent(html){
+  const log = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className='turn dhee';
+  div.innerHTML = `<span class="who">dhee</span><div class="bubble">${html}</div>`;
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
+}
+
+/* outputs / lens toggle — graph is just one optional lens */
+document.getElementById('seg').addEventListener('click', e=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  document.querySelectorAll('#seg button').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  const v = btn.dataset.view;
+  document.getElementById('outputs').style.display = v==='outputs'?'block':'none';
+  document.getElementById('lens').classList.toggle('on', v==='lens');
+});
+
+/* bundle switcher — same renderer path, different capabilities */
+document.getElementById('bundlePick').addEventListener('change', e=> render(e.target.value));
+
+/* reel / time-travel */
+const reel = document.getElementById('reelTrack');
+for(let i=0;i<40;i++){
+  const f=document.createElement('div'); f.className='frame'+(i===39?' now':''); f.style.background=grade(i);
+  f.dataset.ev=100+i;
+  f.addEventListener('click', ()=>scrubTo(f, 100+i));
+  reel.appendChild(f);
+}
+reel.scrollLeft = 9999;
+function scrubTo(f, ev){
+  document.querySelectorAll('.reel .frame').forEach(x=>x.classList.remove('now'));
+  f.classList.add('now');
+  const banner = document.getElementById('histBanner');
+  if(ev<139){ banner.classList.add('show'); banner.firstChild.textContent = `viewing history — event ${ev} `; document.getElementById('reelLabel').textContent = `◷ history · event ${ev}`;}
+  else { banner.classList.remove('show'); document.getElementById('reelLabel').textContent = `● now · event 142`; }
+}
+document.getElementById('returnNow').addEventListener('click', ()=>{
+  const frames=document.querySelectorAll('.reel .frame'); scrubTo(frames[frames.length-1],142);
+});
+
+render('narrative');
+</script>
+</body>
+</html>

@@ -153,8 +153,33 @@ X", you pass `"X"` (no extension, no path).
 - **dhee_read_artifact(project, path)** — read a file inside a
   project folder. Path is resolved against the project; reads
   outside the project are rejected.
-- **dhee_render_scene_bundle(project, scene)** — prompt-relay
-  scene render trigger. Stub — not yet wired.
+- **dhee_get_render_methods()** — list the render methods a project
+  can use, with tradeoffs and hardware requirements. Use when the
+  user asks "what rendering methods are available?", "what's the
+  difference between shot-by-shot and prompt relay?", or otherwise
+  needs to navigate the choice. Read-only, no side effects.
+- **dhee_set_render_method(project, method)** — change a project's
+  render method (the field in project.json that determines which
+  pipeline path runs end-to-end). Use when the user says "switch
+  this project to prompt relay" or "use shot-by-shot for this one."
+  Valid methods: `shot_by_shot`, `prompt_relay`, `qwen_chain`.
+  Each maps to a bundle id in project.json's `bundleSource`:
+
+  | renderMethod  | bundleSource                                  |
+  | ---           | ---                                           |
+  | shot_by_shot  | built-in:narrative_shot_by_shot               |
+  | prompt_relay  | built-in:narrative_prompt_relay               |
+  | qwen_chain    | built-in:narrative_qwen_chain_relay           |
+
+  The desktop wizard's kickoff message includes both `renderMethod`
+  AND the resolved `bundleSource` — pass `bundleSource` through to
+  `dhee_new` so the project.json is written correctly. Does NOT
+  trigger a render — just edits project.json. After this, the user
+  has to invoke `dhee_run_to` (or use the desktop's render button)
+  for the new method to take effect. If unsure which method, call
+  `dhee_get_render_methods` first and surface the options to the
+  user. Method choice is a project property like style and
+  templateId — set once, persists, drives every subsequent render.
 
 ## dhee_show_* tools — display generated artifacts
 

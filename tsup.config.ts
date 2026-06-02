@@ -1,59 +1,53 @@
 import { defineConfig } from 'tsup';
 
-export default defineConfig([
-  {
-    entry: {
-      index: 'src/index.ts',
-      // Embed entries — dhee-desktop (and other Electron hosts) load
-      // these as ESM via dynamic `import()`. They MUST be ESM because
-      // their transitive deps (`@mariozechner/pi-coding-agent`, `pi-ai`)
-      // are ESM-only packages with no CJS `require` exports.
-      'server/manager': 'src/server/manager.ts',
-      'server/runners/index': 'src/server/runners/index.ts',
-      'agent/pi/index': 'src/agent/pi/index.ts',
-      'core/llm/index': 'src/core/llm/index.ts',
-    },
-    format: ['esm'],
-    dts: true,
-    clean: true,
-    splitting: false,
-    sourcemap: true,
-    target: 'node20',
-    outDir: 'dist',
-    // Some transitive deps still use CommonJS-style `require()` even
-    // when the bundle is ESM. esbuild's ESM output replaces those with
-    // a "Dynamic require not supported" stub. The banner reinstates a
-    // working `require` via `createRequire(import.meta.url)`.
-    banner: {
-      js: "import { createRequire as __dhee_createRequire } from 'module'; const require = __dhee_createRequire(import.meta.url);",
-    },
+export default defineConfig({
+  entry: {
+    index: 'src/index.ts',
+    'server/runners/index': 'src/server/runners/index.ts',
+    // Phase 6.4: `./manager` entry deleted along with the no-op
+    // ConversationManager stub. Embed hosts import the surviving
+    // helpers (configurePostHogRuntime / loadDevEnv / analytics) from
+    // the main `dhee-core` barrel.
+    'core/llm/index': 'src/core/llm/index.ts',
+    'dag/index': 'src/dag/walker.ts',
   },
-  {
-    entry: {
-      'server/cli': 'src/server/cli.ts',
-      'server/index': 'src/server/index.ts',
-    },
-    format: ['cjs'],
-    // ESM-only `@mariozechner/pi-*` packages omit `exports.require`. If esbuild
-    // leaves them as externals, `node dist/server/cli.cjs` throws
-    // ERR_PACKAGE_PATH_NOT_EXPORTED. Force them into the CJS bundle.
-    noExternal: [
-      '@mariozechner/pi-coding-agent',
-      '@mariozechner/pi-ai',
-      '@mariozechner/pi-agent-core',
-      '@mariozechner/pi-tui',
-    ],
-    // Maps import.meta.url to a __filename-based URL in CJS output (avoids empty-import-meta warnings and broken paths).
-    shims: true,
-    clean: false,
-    splitting: false,
-    sourcemap: true,
-    target: 'node20',
-    outDir: 'dist',
-    outExtension() {
-      return {
-        js: '.cjs',
-      };
-    },
+  format: ['esm'],
+  dts: false,
+  clean: true,
+  splitting: false,
+  sourcemap: true,
+  target: 'node20',
+  outDir: 'dist',
+  banner: {
+    js: "import { createRequire as __dhee_createRequire } from 'module'; const require = __dhee_createRequire(import.meta.url);",
   },
-]);
+  // Copy the pi-agent skill files into the dist tree so the bundled
+  // `SKILL_DIR = resolve(__dirname, 'skill')` resolves to a real
+  // directory at runtime. Without this, `loadSkillsFromDir` returns []
+  // and the agent runs without our SKILL.md system prompt.
+  //
+  // Also copy the curated first-party bundles so the packaged desktop
+  // can ship them as built-in defaults (resolved at runtime via
+  // DHEE_APP_BUNDLES_DIR → <app>/Resources/bundles, lifted by the
+  // desktop's electron-builder extraResources config from this
+  // dist/bundles directory).
+  async onSuccess() {
+    const { cpSync, existsSync, rmSync } = await import('node:fs');
+    const dstSkill = 'dist/skill';
+    if (existsSync(dstSkill)) rmSync(dstSkill, { recursive: true, force: true });
+    cpSync('src/agent/pi/skill', dstSkill, { recursive: true });
+
+    // Curated default bundles. Add new defaults here when ready to
+    // ship them. The full src/dag/bundles tree stays in source for
+    // dev; only these get packaged so the .app stays small.
+    const FIRST_PARTY_BUNDLES = [
+      'narrative_prompt_relay',
+      'narrative_shot_by_shot',
+    ];
+    const dstBundles = 'dist/bundles';
+    if (existsSync(dstBundles)) rmSync(dstBundles, { recursive: true, force: true });
+    for (const id of FIRST_PARTY_BUNDLES) {
+      cpSync(`src/dag/bundles/${id}`, `${dstBundles}/${id}`, { recursive: true });
+    }
+  },
+});

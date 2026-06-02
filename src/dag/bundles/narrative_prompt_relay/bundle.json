@@ -1,0 +1,599 @@
+{
+  "id": "narrative_prompt_relay",
+  "version": "0.1.0",
+  "displayName": "Narrative Prompt Relay",
+  "summary": "Cinematic story video. Best for slow-to-moderate paced stories — not fast action.",
+  "techLine": "LTX-2 RELAY · DIRECTOR CHAIN",
+  "engineCompat": ">=0.1.0",
+  "description": "Full narrative pipeline from plot to final video, with LTX Director relay synthesis for the video stage on a local Comfy endpoint. Best fit: cinematic story-driven content with deliberate motion — characters speaking, single actions, moments held on screen. Not suited to fast action (sword fights mid-swing, car chases, frantic combat). When the source story implies fast action, the pipeline decomposes it into slower, single-action beats rather than rendering the action in one shot.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "comfy.image": ">=0.1.0",
+      "comfy.ltx_director": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0"
+    }
+  },
+  "inputs": [
+    {
+      "id": "story_input",
+      "kind": "file",
+      "path": "inputs/story.md",
+      "required": true,
+      "label": "Your story",
+      "placeholder": "A young engineer discovers a glitch in the city's traffic system. As she investigates, the patterns start to mirror her own memories...",
+      "multiline": true
+    },
+    {
+      "id": "targetDuration",
+      "kind": "project",
+      "field": "targetDuration",
+      "default": 60,
+      "label": "Duration",
+      "control": "pills",
+      "unit": "seconds",
+      "options": [
+        { "value": 30, "label": "30s" },
+        { "value": 60, "label": "60s" },
+        { "value": 120, "label": "120s" },
+        { "value": 180, "label": "180s" }
+      ]
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "cinematic_realism",
+      "label": "Style",
+      "control": "select",
+      "options": [
+        { "value": "cinematic_realism", "label": "Cinematic Realism" },
+        { "value": "animation", "label": "Animation" },
+        { "value": "noir", "label": "Film Noir" },
+        { "value": "documentary", "label": "Documentary" },
+        { "value": "anime", "label": "Anime" }
+      ]
+    },
+    {
+      "id": "aspect",
+      "kind": "project",
+      "field": "aspect",
+      "default": "16:9",
+      "label": "Aspect",
+      "control": "pills",
+      "options": [
+        { "value": "16:9", "label": "16:9" },
+        { "value": "9:16", "label": "9:16" },
+        { "value": "21:9", "label": "21:9" }
+      ]
+    },
+    {
+      "id": "resolution",
+      "kind": "project",
+      "field": "resolution",
+      "default": 1080,
+      "label": "Resolution",
+      "control": "pills",
+      "options": [
+        { "value": 720, "label": "720p" },
+        { "value": 1080, "label": "1080p" }
+      ]
+    }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "plot",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/plot.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/plot.md",
+          "tier": "heavy",
+          "outputFormat": "markdown"
+        }
+      },
+      "displayCapability": "plot.outline"
+    },
+    {
+      "id": "story",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "plot",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/story.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/story.md",
+          "tier": "heavy",
+          "outputFormat": "markdown"
+        }
+      },
+      "displayCapability": "story.prose"
+    },
+    {
+      "id": "story_essence",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "story",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/story_essence.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/story_essence.md",
+          "outputSchema": "schemas/story_essence.schema.json",
+          "tier": "medium",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "story.essence"
+    },
+    {
+      "id": "world_style",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "story_essence",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/world_style.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/world_style.md",
+          "tier": "heavy",
+          "outputFormat": "markdown"
+        }
+      },
+      "displayCapability": "style.world"
+    },
+    {
+      "id": "characters_plan",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/characters_plan.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/characters_plan.md",
+          "outputSchema": "schemas/characters_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "character.plan"
+    },
+    {
+      "id": "character_image_prompt",
+      "kind": "collection",
+      "itemSource": "characters_plan",
+      "inputs": [
+        {
+          "from": "characters_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/character_images/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/character_image.md",
+          "tier": "medium",
+          "outputFormat": "json"
+        }
+      },
+      "itemKey": "characters",
+      "displayCapability": "character.prompt",
+      "headlineField": "imagePrompt"
+    },
+    {
+      "id": "character_image",
+      "kind": "collection",
+      "itemSource": "character_image_prompt",
+      "inputs": [
+        {
+          "from": "character_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/characters/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.image",
+        "config": {
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1024,
+          "height": 1024
+        }
+      },
+      "displayCapability": "character.image"
+    },
+    {
+      "id": "settings_plan",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/settings_plan.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/settings_plan.md",
+          "outputSchema": "schemas/settings_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "setting.plan"
+    },
+    {
+      "id": "setting_image_prompt",
+      "kind": "collection",
+      "itemSource": "settings_plan",
+      "inputs": [
+        {
+          "from": "settings_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/setting_images/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/setting_image.md",
+          "tier": "medium",
+          "outputFormat": "json"
+        }
+      },
+      "itemKey": "settings",
+      "displayCapability": "setting.prompt",
+      "headlineField": "imagePrompt"
+    },
+    {
+      "id": "setting_image",
+      "kind": "collection",
+      "itemSource": "setting_image_prompt",
+      "inputs": [
+        {
+          "from": "setting_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/settings/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.image",
+        "config": {
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1920,
+          "height": 1080
+        }
+      },
+      "displayCapability": "setting.image"
+    },
+    {
+      "id": "scenes_plan",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "story",
+          "usage": "context"
+        },
+        {
+          "from": "story_essence",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/scenes_plan.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scenes_plan.md",
+          "outputSchema": "schemas/scenes_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json",
+          "maxTokens": 16000
+        }
+      },
+      "displayCapability": "scene.plan"
+    },
+    {
+      "id": "shot_image_prompt",
+      "kind": "collection",
+      "itemSource": "scenes_plan",
+      "inputs": [
+        {
+          "from": "scenes_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        },
+        {
+          "from": "characters_plan",
+          "usage": "context"
+        },
+        {
+          "from": "settings_plan",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/shot_image/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/shot_image_prompt.md",
+          "outputSchema": "schemas/shot_image_prompt.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json"
+        }
+      },
+      "itemKey": "shots",
+      "displayCapability": "shot.prompt",
+      "headlineField": "imagePrompt"
+    },
+    {
+      "id": "shot_image",
+      "kind": "collection",
+      "itemSource": "shot_image_prompt",
+      "inputs": [
+        {
+          "from": "shot_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "character_image",
+          "usage": "reference",
+          "scope": "all"
+        },
+        {
+          "from": "setting_image",
+          "usage": "reference",
+          "scope": "all"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/shots/{{item_id}}_first.png"
+      },
+      "runner": {
+        "tool": "comfy.image",
+        "config": {
+          "workflowPath": "workflows/klein.json",
+          "manifestPath": "workflows/klein.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1920,
+          "height": 1080
+        }
+      },
+      "displayCapability": "shot.first_frame"
+    },
+    {
+      "id": "shot_motion_directive",
+      "kind": "collection",
+      "itemSource": "scenes_plan",
+      "inputs": [
+        {
+          "from": "scenes_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/motion/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/shot_motion_directive.md",
+          "tier": "medium",
+          "outputFormat": "json"
+        }
+      },
+      "itemKey": "shots",
+      "displayCapability": "shot.motion",
+      "headlineField": "description"
+    },
+    {
+      "id": "scene_video_prompt",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "scenes_plan",
+          "usage": "input"
+        },
+        {
+          "from": "story_essence",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "prompts/scene_video_prompt.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scene_video_prompt.md",
+          "tier": "heavy",
+          "outputFormat": "markdown"
+        }
+      },
+      "displayCapability": "scene.video_prompt"
+    },
+    {
+      "id": "scene_clip",
+      "kind": "collection",
+      "itemSource": "scenes_plan",
+      "chunkBy": {
+        "constraint": "max_frames",
+        "limit": 1000,
+        "fps": 24,
+        "firstSegmentPlusOne": true
+      },
+      "inputs": [
+        {
+          "from": "shot_image",
+          "usage": "input",
+          "scope": "all"
+        },
+        {
+          "from": "shot_motion_directive",
+          "usage": "input",
+          "scope": "all"
+        },
+        {
+          "from": "scene_video_prompt",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/dag_relay/{{scene_id}}_{{chunk_id}}.mp4"
+      },
+      "runner": {
+        "tool": "comfy.ltx_director",
+        "config": {
+          "workflowPath": "workflows/ltx_director_local.json",
+          "endpoint": "self.local",
+          "fps": 24,
+          "width": 854,
+          "height": 480
+        }
+      },
+      "itemKey": "scenes",
+      "displayCapability": "scene.video"
+    },
+    {
+      "id": "final_video",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "scene_clip",
+          "usage": "input",
+          "scope": "all"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/final/final_video.mp4"
+      },
+      "runner": {
+        "tool": "ffmpeg.concat",
+        "config": {}
+      },
+      "displayCapability": "final.video"
+    }
+  ],
+  "display": {
+    "thumbnail": {
+      "from": "shot.first_frame",
+      "pick": "first_completed"
+    },
+    "stats": [
+      {
+        "label": "scenes",
+        "source": "scene.plan",
+        "path": "scenes.length"
+      },
+      {
+        "label": "shots",
+        "source": "scene.plan",
+        "path": "shots.length"
+      }
+    ]
+  }
+}

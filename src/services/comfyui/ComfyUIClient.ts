@@ -574,6 +574,17 @@ export class ComfyUIClient {
   ): Promise<CompletionResult> {
     const startTime = Date.now();
 
+    // Fast-fail tracking. Comfy doesn't give us a clean "your prompt
+    // is gone" signal — when the server restarts mid-render, /history
+    // just returns null and /queue no longer lists the id. We detect
+    // this by counting consecutive polls where the prompt is missing
+    // from BOTH /history and /queue (i.e. Comfy has no record). After
+    // a grace period (FAST_FAIL_GRACE_SEC, to absorb the just-queued
+    // race) and N consecutive missing polls, we give up.
+    let consecutivePromptMissing = 0;
+    const FAST_FAIL_GRACE_SEC = 30;
+    const FAST_FAIL_MAX_MISSING_POLLS = 3;
+
     // Emit initial progress
     if (progressCallback) {
       await this.callProgressCallback(
@@ -654,6 +665,9 @@ export class ComfyUIClient {
           const history = await this.getHistory(promptId);
 
           if (history) {
+            // Server knows the prompt — reset the missing-poll counter
+            // so an earlier transient null doesn't accumulate.
+            consecutivePromptMissing = 0;
             const outputs = history.outputs || {};
 
             if (Object.keys(outputs).length > 0) {
@@ -675,6 +689,30 @@ export class ComfyUIClient {
                 await this.callProgressCallback(progressCallback, 100, 'Complete!');
               }
               return { status: 'completed', prompt_id: promptId };
+            }
+          } else if (elapsed >= FAST_FAIL_GRACE_SEC) {
+            // /history returned null AFTER the grace window. If the
+            // prompt isn't in /queue either, Comfy has lost it — almost
+            // certainly a server restart mid-render. Count consecutive
+            // misses; bail after FAST_FAIL_MAX_MISSING_POLLS so we
+            // don't sit in an infinite loop.
+            const inQueue = await this.isPromptInQueue(promptId);
+            if (inQueue === false) {
+              consecutivePromptMissing += 1;
+              debugLog(
+                `[waitForCompletion] prompt ${promptId} missing from /history AND /queue (poll ${consecutivePromptMissing}/${FAST_FAIL_MAX_MISSING_POLLS})`,
+              );
+              if (consecutivePromptMissing >= FAST_FAIL_MAX_MISSING_POLLS) {
+                debugLog(
+                  `[waitForCompletion] giving up on ${promptId} — Comfy has no record after ${consecutivePromptMissing} consecutive missing polls (likely server restart)`,
+                );
+                return { status: 'error', prompt_id: promptId };
+              }
+            } else {
+              // Either the prompt IS in queue (still pending), or
+              // /queue itself failed (null result). Either way, don't
+              // accumulate the missing-poll counter.
+              consecutivePromptMissing = 0;
             }
           }
         }
@@ -896,8 +934,26 @@ export class ComfyUIClient {
         } catch {
           return; /* non-JSON */
         }
-        lastActivityTime = Date.now();
-        debugLog(`[queueAndWaitWS] WS msg: ${msg.type} prompt=${msg.data?.prompt_id || 'n/a'}`);
+        // Reset inactivity timer ONLY for prompt-relevant messages.
+        // Broadcast heartbeats (kaytool.resources, crystools.monitor,
+        // status) fire every ~500ms on some Comfy installs (esp. when
+        // the resource-monitor plugin is loaded). If we count those as
+        // "activity", the inactivity-timeout fallback to HTTP polling
+        // never triggers — we sit on the WS forever waiting for
+        // execution events that may never arrive (Comfy server-side
+        // bug where execution_success isn't routed to per-client WS).
+        // Per-prompt messages all carry data.prompt_id; broadcasts
+        // don't.
+        const promptIdInMsg = msg.data?.prompt_id;
+        const isBroadcastNoise =
+          !promptIdInMsg &&
+          (msg.type === 'kaytool.resources' ||
+            msg.type === 'crystools.monitor' ||
+            msg.type === 'status');
+        if (!isBroadcastNoise) {
+          lastActivityTime = Date.now();
+        }
+        debugLog(`[queueAndWaitWS] WS msg: ${msg.type} prompt=${promptIdInMsg || 'n/a'}`);
         const action = decideWsAction(msg, promptId);
         switch (action.kind) {
           case 'progress':
@@ -1159,8 +1215,21 @@ export class ComfyUIClient {
           }
 
           const data = JSON.parse(trimmed.slice(jsonStart));
-          lastActivityTime = Date.now(); // Reset inactivity timer on valid message
           const msgType: string = data.type;
+          // Reset inactivity timer ONLY for prompt-relevant messages.
+          // Broadcast heartbeats fire every ~500ms on some Comfy installs
+          // and would otherwise prevent the inactivity fallback from ever
+          // firing. See sister logic in queueAndWaitWS for the full
+          // explanation.
+          const promptIdInMsg = data.data?.prompt_id;
+          const isBroadcastNoise =
+            !promptIdInMsg &&
+            (msgType === 'kaytool.resources' ||
+              msgType === 'crystools.monitor' ||
+              msgType === 'status');
+          if (!isBroadcastNoise) {
+            lastActivityTime = Date.now();
+          }
 
           if (msgType === 'status' && data.data) {
             // Queue/server status updates
@@ -1472,6 +1541,41 @@ export class ComfyUIClient {
     const history = (await response.json()) as Record<string, HistoryEntry>;
     // Both local /history/{id} and cloud /history_v2/{id} wrap the entry under the prompt_id key
     return history[promptId] || null;
+  }
+
+  /**
+   * Lightweight check: is `promptId` known to the live Comfy server?
+   * Tries /queue (running + pending lists). Used by the poll loop's
+   * fast-fail path — if a prompt that USED to be queued is no longer
+   * in /queue AND not in /history, Comfy almost certainly restarted
+   * mid-render and the prompt is lost. Returns:
+   *   - true  → prompt id observed in /queue
+   *   - false → /queue responded but our id is absent
+   *   - null  → /queue request failed (treat as "unknown, keep polling")
+   *
+   * Cloud routes don't expose /queue the same way, so we return null
+   * on cloud — the existing job-status path handles cloud's lost
+   * prompts via /job/<id>/status returning 'failed'/'cancelled'.
+   */
+  private async isPromptInQueue(promptId: string): Promise<boolean | null> {
+    if (this.isCloud) return null;
+    try {
+      const response = await this.request('/queue');
+      if (!response.ok) return null;
+      const data = (await response.json()) as {
+        queue_running?: unknown[];
+        queue_pending?: unknown[];
+      };
+      // /queue entries are tuples like [number, prompt_id, ...]. We
+      // only care whether our id appears in the running or pending
+      // arrays.
+      const has = (list: unknown[] | undefined): boolean =>
+        Array.isArray(list) &&
+        list.some((entry) => Array.isArray(entry) && entry[1] === promptId);
+      return has(data.queue_running) || has(data.queue_pending);
+    } catch {
+      return null;
+    }
   }
 
   private async getCloudJobStatus(promptId: string): Promise<string | null> {
