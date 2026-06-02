@@ -94,10 +94,12 @@ creates the folder and opens chat, then leaves the rest to you):
      to write it to the bundle-declared path.
 
 5. **STOP. Ask before you run.** Multi-minute renders are expensive —
-   the user gets to say "go" before you fire `dhee_run_bundle`. Send
-   one short message: *"Project pinned to <bundleId>, story written.
-   Ready to start the pipeline? It'll take a few minutes."*
-   Wait for confirmation. Then call `dhee_run_bundle(projectDir)`.
+   the user gets to say "go" before you start. Send one short message:
+   *"Project pinned to <bundleId>, story written. Ready to start the
+   pipeline? It'll take a few minutes — you can watch it and interrupt
+   me any time if something looks off."* Wait for confirmation. Then
+   call `dhee_start_run(projectDir)` (non-blocking — you stay
+   responsive while it runs; see "Interactive runs" below).
 
 The legacy form-based wizard is gone. The agent guides the
 conversation; the user owns the bundle decision.
@@ -265,13 +267,52 @@ scoped to the project so you don't waste context on engine internals.
   preserve the old file as `.v<N>.<ext>`). That matches user intent:
   if a character ref is updated, downstream shots should not be stuck
   with the prior version. The user can re-attach.
-- `dhee_run_bundle(projectDir, stopAt?, runOnly?)` — dispatch the
-  bundle's DAG. Blocks until the run finishes (success or failure)
-  and returns the final video path on success. Multi-minute runs are
-  expected and normal.
+- `dhee_start_run(projectDir, stopAt?, runOnly?)` — **PREFER THIS in
+  interactive (desktop) sessions.** Dispatches the DAG and returns
+  IMMEDIATELY (non-blocking) — the run continues in the background
+  while you stay free to talk to the user. You'll be notified when it
+  finishes (a `[system] run completed/failed` message arrives). This is
+  what makes you interruptible: while a run is in flight you can answer
+  questions or redirect without the run blocking your turn.
+- `dhee_stop_run(projectDir?)` — abort the in-flight run and WAIT until
+  it has actually stopped (so a follow-up `dhee_start_run` is safe).
+  Call this when the user's message warrants halting the run.
+- `dhee_run_bundle(projectDir, stopAt?, runOnly?)` — the BLOCKING
+  variant: dispatch + wait, returns the final video path. Use only in
+  headless / non-interactive contexts where there's no human to
+  interject. In a desktop chat, use `dhee_start_run` instead.
 - `dhee_get_status(projectDir)` — summarize current walkState as
   counts + per-failed-node detail. Read-only and cheap; use this
   often.
+
+### Interactive runs — staying responsive + deciding when to abort
+
+A run started with `dhee_start_run` keeps going in the background while
+you remain free. When a user message arrives and a run **might be in
+flight**:
+
+1. **PULL ground truth first.** Call `dhee_get_status` — walkState /
+   the event log is the source of truth for what's running, done, or
+   failed. Never assume from memory; your view can drift while a
+   background run advances.
+2. **Then decide based on what they said:**
+   - **Mundane / informational** ("how long left?", "what's shot 3
+     about?", "which style did we pick?") → just answer. **Do NOT stop
+     the run** — stopping a multi-minute run to answer a question is
+     pure waste.
+   - **Substantive redirect about an artifact** ("shot 3's face is
+     warped", "make the setting darker", "wrong character in shot 5")
+     → `dhee_stop_run`, fix the **upstream LLM prompt** node
+     (`dhee_critique_node` for prompt fixes, `dhee_write_node_content`
+     for user-supplied content), then `dhee_start_run` to resume. The
+     walker skips already-completed shots — only the fixed node + its
+     downstream re-run. **Never restart the whole bundle to fix one
+     shot.**
+3. **When you're notified a run finished:** a `[system] run completed`
+   message means tell the user it's done and offer to show it — don't
+   auto-start another run. A `[system] run failed` message is
+   classified for you: *transient* (Comfy/tunnel was briefly flaky) →
+   offer to retry; *structural* → fix the upstream node then resume.
 - `dhee_regenerate_node(projectDir, nodeId, itemId?)` — invalidate a
   single node (optionally a single collection item) and re-run it +
   everything downstream. Use when the user wants a fresh roll of the
