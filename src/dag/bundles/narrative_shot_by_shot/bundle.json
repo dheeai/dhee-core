@@ -82,32 +82,9 @@
   "goal": "final_video",
   "nodes": [
     {
-      "id": "plot",
-      "kind": "stage",
-      "inputs": [],
-      "outputs": {
-        "format": "md",
-        "pattern": "plans/plot.md"
-      },
-      "runner": {
-        "tool": "llm.generate",
-        "config": {
-          "promptTemplate": "prompts/plot.md",
-          "tier": "heavy",
-          "outputFormat": "markdown"
-        }
-      },
-      "displayCapability": "plot.outline"
-    },
-    {
       "id": "story",
       "kind": "stage",
-      "inputs": [
-        {
-          "from": "plot",
-          "usage": "context"
-        }
-      ],
+      "inputs": [],
       "outputs": {
         "format": "md",
         "pattern": "plans/story.md"
