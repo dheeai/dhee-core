@@ -33,6 +33,7 @@ import type { BundleInputDecl } from './schema.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
+import { applyAspectToConfig } from './aspect.js';
 import { REPO_ROOT } from '../agent/pi/paths.js';
 import {
   loadWalkState,
@@ -1117,6 +1118,16 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       // Merge any swap-provided config overrides on top of node.runner.config.
       if (resolved.configOverride) {
         Object.assign(cfg, resolved.configOverride);
+      }
+      // Apply project-level aspect-ratio to the runner config's width
+      // + height (if both are numbers). Bundle authors declare baseline
+      // dimensions tuned for 16:9; the slate's aspect choice (9:16 for
+      // Shorts, 21:9 for ultra-wide) flows through here so every
+      // comfy/ltx node renders at the chosen aspect without per-runner
+      // code. See src/dag/aspect.ts.
+      const projectAspect = bundleInputs['aspect'];
+      if (typeof projectAspect === 'string') {
+        applyAspectToConfig(cfg, projectAspect);
       }
       const runtimeNode: NodeDef = {
         ...node,
