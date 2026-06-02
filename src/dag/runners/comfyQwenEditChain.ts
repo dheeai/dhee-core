@@ -26,6 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
+import { retryTransient } from './transientRetry.js';
 
 interface PriorShot { shotNumber: number; itemId?: string; outputAbs: string }
 interface ShotPromptJSON {
@@ -157,7 +158,10 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   const client = new ComfyUIClient({ outputDir: dirname(outputAbs), ...(baseUrl ? { baseUrl } : {}) });
 
   ctx.log(`comfy.qwen_edit_chain: uploading base + refs...`);
-  const upBase = await client.uploadImage(baseImagePath, 'input', true);
+  const upBase = await retryTransient(
+    () => client.uploadImage(baseImagePath, 'input', true),
+    { signal: ctx.signal, log: ctx.log, label: 'comfy.qwen_edit_chain upload base' },
+  );
   ctx.log(`  base → ${upBase.name}`);
 
   // Character refs come straight from the LLM's structured output —
@@ -181,7 +185,10 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
         error: `comfy.qwen_edit_chain: prompt declared character '${cid}' but no reference image is available (charMap keys: ${Object.keys(charMap).join(', ')}). Verify characters_plan and the LLM's emitted character id.`,
       };
     }
-    const u = await client.uploadImage(refPath, 'input', true);
+    const u = await retryTransient(
+      () => client.uploadImage(refPath, 'input', true),
+      { signal: ctx.signal, log: ctx.log, label: `comfy.qwen_edit_chain upload ref ${cid}` },
+    );
     upRefs.push(u.name);
     ctx.log(`  ref ${cid} → ${u.name}`);
   }
@@ -221,11 +228,15 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
 
   ctx.log(`comfy.qwen_edit_chain: submitting (seed=${seed})...`);
   const start = Date.now();
-  const { promptId, outputs } = await client.queueAndWaitWS(workflow, (p) => {
-    if (p.percentage !== undefined && p.message) {
-      ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
-    }
-  });
+  const { promptId, outputs } = await retryTransient(
+    () =>
+      client.queueAndWaitWS(workflow, (p) => {
+        if (p.percentage !== undefined && p.message) {
+          ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
+        }
+      }),
+    { signal: ctx.signal, log: ctx.log, label: 'comfy.qwen_edit_chain queue' },
+  );
   ctx.log(`  completed in ${Math.floor((Date.now() - start) / 1000)}s (prompt_id=${promptId})`);
 
   // ── Download ──

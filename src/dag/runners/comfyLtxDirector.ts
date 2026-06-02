@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
+import { retryTransient } from './transientRetry.js';
 
 interface ShotInput {
   shotNumber: number;
@@ -238,7 +239,10 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   ctx.log(`comfy.ltx_director: uploading ${cfg.firstFrames.length} first-frame images...`);
   const uploadedNames: string[] = [];
   for (let i = 0; i < cfg.firstFrames.length; i++) {
-    const u = await client.uploadImage(cfg.firstFrames[i]!, 'input', true);
+    const u = await retryTransient(
+      () => client.uploadImage(cfg.firstFrames[i]!, 'input', true),
+      { signal: ctx.signal, log: ctx.log, label: `comfy.ltx_director upload shot_${cfg.shots[i]!.shotNumber}` },
+    );
     ctx.log(`  shot ${cfg.shots[i]!.shotNumber}: ${basename(cfg.firstFrames[i]!)} → ${u.name}`);
     uploadedNames.push(u.name);
   }
@@ -336,11 +340,15 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
 
   ctx.log(`comfy.ltx_director: submitting (${cfg.shots.length} shots, ${totalFrames} frames = ${(totalFrames / fps).toFixed(2)}s @ ${fps}fps)`);
   const startTime = Date.now();
-  const { promptId, outputs: wsOutputs } = await client.queueAndWaitWS(workflow, (p) => {
-    if (p.percentage !== undefined && p.message) {
-      ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
-    }
-  });
+  const { promptId, outputs: wsOutputs } = await retryTransient(
+    () =>
+      client.queueAndWaitWS(workflow, (p) => {
+        if (p.percentage !== undefined && p.message) {
+          ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
+        }
+      }),
+    { signal: ctx.signal, log: ctx.log, label: 'comfy.ltx_director queue' },
+  );
   ctx.log(`  complete in ${Math.floor((Date.now() - startTime) / 1000)}s (prompt_id=${promptId})`);
 
   const histImages = await client.getOutputImages(promptId);
