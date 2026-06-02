@@ -169,10 +169,41 @@ export interface BundleDependencies {
  *                  for .json).
  * `kind: 'project'` — read a field from project.json. `field` is a
  *                  dot-path (e.g. 'targetDuration', 'goal.targetDuration').
+ *
+ * Presentation fields (`label`, `control`, `options`, `unit`,
+ * `placeholder`, `multiline`) are consumed by the desktop's New
+ * Project flow to render the right form control. They have no
+ * runtime semantics — the walker ignores them.
  */
+export interface BundleInputOption {
+  value: string | number | boolean;
+  label: string;
+}
+
+export type BundleInputControl = 'textarea' | 'text' | 'pills' | 'select' | 'number';
+
 export type BundleInputDecl =
-  | { id: string; kind: 'file'; path: string; required?: boolean }
-  | { id: string; kind: 'project'; field: string; default?: unknown; required?: boolean };
+  | {
+      id: string;
+      kind: 'file';
+      path: string;
+      required?: boolean;
+      label?: string;
+      placeholder?: string;
+      multiline?: boolean;
+    }
+  | {
+      id: string;
+      kind: 'project';
+      field: string;
+      default?: unknown;
+      required?: boolean;
+      label?: string;
+      control?: BundleInputControl;
+      options?: BundleInputOption[];
+      unit?: string;
+      placeholder?: string;
+    };
 
 export interface DagBundle {
   id: string;
@@ -192,6 +223,12 @@ export interface DagBundle {
    * the first sentence of `description`.
    */
   summary?: string;
+  /**
+   * Optional technical spec line — small uppercase mono caption on the
+   * bundle picker card (e.g. "LTX-2 RELAY · DIRECTOR CHAIN"). Lets the
+   * user see what's under the hood without explaining it in prose.
+   */
+  techLine?: string;
   description?: string;
   /**
    * Range of kshana engine versions this bundle is known to work

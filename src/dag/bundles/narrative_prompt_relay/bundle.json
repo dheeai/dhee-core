@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "displayName": "Narrative Prompt Relay",
   "summary": "Cinematic story video. Best for slow-to-moderate paced stories — not fast action.",
+  "techLine": "LTX-2 RELAY · DIRECTOR CHAIN",
   "engineCompat": ">=0.1.0",
   "description": "Full narrative pipeline from plot to final video, with LTX Director relay synthesis for the video stage on a local Comfy endpoint. Best fit: cinematic story-driven content with deliberate motion — characters speaking, single actions, moments held on screen. Not suited to fast action (sword fights mid-swing, car chases, frantic combat). When the source story implies fast action, the pipeline decomposes it into slower, single-action beats rather than rendering the action in one shot.",
   "dependencies": {
@@ -18,19 +19,53 @@
       "id": "story_input",
       "kind": "file",
       "path": "inputs/story.md",
-      "required": true
+      "required": true,
+      "label": "Your story",
+      "placeholder": "A young engineer discovers a glitch in the city's traffic system. As she investigates, the patterns start to mirror her own memories...",
+      "multiline": true
     },
     {
       "id": "targetDuration",
       "kind": "project",
       "field": "targetDuration",
-      "default": 25
+      "default": 60,
+      "label": "Duration",
+      "control": "pills",
+      "unit": "seconds",
+      "options": [
+        { "value": 30, "label": "30s" },
+        { "value": 60, "label": "60s" },
+        { "value": 120, "label": "120s" },
+        { "value": 180, "label": "180s" }
+      ]
     },
     {
       "id": "style",
       "kind": "project",
       "field": "style",
-      "default": "cinematic_realism"
+      "default": "cinematic_realism",
+      "label": "Style",
+      "control": "select",
+      "options": [
+        { "value": "cinematic_realism", "label": "Cinematic Realism" },
+        { "value": "animation", "label": "Animation" },
+        { "value": "noir", "label": "Film Noir" },
+        { "value": "documentary", "label": "Documentary" },
+        { "value": "anime", "label": "Anime" }
+      ]
+    },
+    {
+      "id": "aspect",
+      "kind": "project",
+      "field": "aspect",
+      "default": "16:9",
+      "label": "Aspect",
+      "control": "pills",
+      "options": [
+        { "value": "16:9", "label": "16:9" },
+        { "value": "9:16", "label": "9:16" },
+        { "value": "21:9", "label": "21:9" }
+      ]
     }
   ],
   "goal": "final_video",

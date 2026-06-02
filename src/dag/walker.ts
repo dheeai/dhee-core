@@ -1467,3 +1467,14 @@ export function loadBundle(path: string): DagBundle {
   }
   return raw;
 }
+
+// Re-export the pre-agent project bootstrap so the desktop can import
+// it via `dhee-core/dag`. See src/dag/initializeProject.ts.
+export { initializeProject } from './initializeProject.js';
+export type { InitializeProjectParams, InitializeProjectResult } from './initializeProject.js';
+
+// Re-export bundle listing so the desktop's Production Slate can
+// render the bundle picker without going through the agent.
+export { listBundles } from './listBundles.js';
+export type { BundleSummary } from './listBundles.js';
+
