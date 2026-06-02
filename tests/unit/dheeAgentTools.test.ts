@@ -541,6 +541,7 @@ describe('DHEE_TOOL_NAMES', () => {
       'dhee_swap_runner',
       'dhee_write_input',
       'dhee_write_node_content',
+      'dhee_set_project_field',
       'dhee_read',
       'dhee_ls',
       'dhee_grep',

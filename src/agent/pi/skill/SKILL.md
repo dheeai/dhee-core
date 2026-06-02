@@ -251,6 +251,21 @@ scoped to the project so you don't waste context on engine internals.
     - `{ kind: 'localFile', sourcePath }` — copy from a path the
       desktop staged.
   Emits `inputs.provided`. No cascade — inputs sit before the DAG.
+- `dhee_set_project_field(projectDir, inputId, value)` — set a
+  **project-kind** input (a setting stored on project.json, not a
+  file): `targetDuration`, `style`, `aspect`. **Use this whenever the
+  user states a setting in chat** — "make it 3 minutes" →
+  `dhee_set_project_field(inputId='targetDuration', value=180)`;
+  "switch to noir" → `(inputId='style', value='noir')`. Without this the
+  setting never reaches project.json and the pipeline silently falls
+  back to the bundle default (this is the bug that turned a requested
+  3-min video into 25s). Only writes inputs the bundle declares as
+  `kind:'project'` (run `dhee_describe_bundle` to see them); it cannot
+  touch `bundleSource`/`walkState`. It does NOT cascade: set it BEFORE
+  the first run and it's used automatically; if a plan already exists,
+  regenerate the first node that consumes it (e.g.
+  `dhee_regenerate_node('scenes_plan')` for `targetDuration`). For FILE
+  inputs (the story) use `dhee_write_input`, not this.
 - `dhee_write_node_content(projectDir, nodeId, itemId?, payload, reason?)`
   — override a node's output content. Same payload shapes as
   `dhee_write_input`. Resolves outputPath from the bundle's pattern,
