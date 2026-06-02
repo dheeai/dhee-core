@@ -174,6 +174,25 @@ single-select the first click submits.
   - When fixing multiple shots, issue separate `dhee_regenerate_node`
     calls — one per itemId. The walker handles the cascade per call.
 
+  - **Which tool for "change a shot" — by intent, not mechanism:**
+    - *Same shot, fresh roll, no new direction* (just unlucky output) →
+      `dhee_regenerate_node(nodeId, itemId)`.
+    - *Describe a change* ("make shot 1 a wide establishing shot",
+      "darker mood", "wrong character") → `dhee_critique_node` on that
+      shot's **prompt item** (`nodeId='shot_image_prompt',
+      itemId='scene_1_shot_1'`). This is the default for adjustments.
+    - *Supply exact finished content* (a hand-written file, an uploaded
+      image) → `dhee_write_node_content` on that item.
+
+  - **NEVER edit the root plan (`scenes_plan`) to change how one shot
+    looks.** `scenes_plan` is the whole storyboard — every shot fans
+    out of it, so overwriting it re-renders ALL shots (real incident
+    2026-06-02: "make shot 1 wider" became a full-storyboard rewrite +
+    cascade). Target the shot's own `shot_image_prompt` item instead.
+    Only touch `scenes_plan` to genuinely add / remove / reorder shots
+    — and `dhee_write_node_content` will make you `confirm=true` after
+    showing the blast radius.
+
 - **Quote tool errors verbatim. Don't confabulate root causes.**
   When a tool returns an error, read the WHOLE error message and
   surface it to the user as-is before proposing any fix. Real incident
