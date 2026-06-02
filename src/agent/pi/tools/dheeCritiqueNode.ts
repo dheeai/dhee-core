@@ -44,7 +44,7 @@ const Params = Type.Object({
   projectDir: Type.String({ description: 'Absolute path to the project directory.' }),
   nodeId: Type.String({
     description:
-      "The LLM-generated bundle node to critique. For broken images / videos, walk upstream first and target the prompt node that produced them — non-LLM nodes can't be critiqued directly.",
+      "The LLM node to adjust. For a per-shot change, target the shot's own prompt node — usually 'shot_image_prompt' WITH the itemId — so only that shot re-renders. Do NOT target the root plan node ('scenes_plan') to change one shot's look: that re-derives every shot. Reserve scenes_plan for genuinely adding / removing / reordering shots. For a broken image/video, walk upstream to its prompt node (non-LLM nodes can't be critiqued).",
   }),
   itemId: Type.Optional(
     Type.String({
@@ -161,7 +161,7 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
     name: 'dhee_critique_node',
     label: 'Critique LLM node',
     description:
-      "Apply an editorial critique to an LLM-generated bundle node. The runner prepends the critique to the next regeneration as a 'fix the previous output' instruction; the walker cascades downstream automatically. Two-phase: call FIRST with confirm omitted to preview the cascade impact, then with confirm=true to apply. Only works on nodes with llm.* runners — walk upstream from broken images/videos to find the right prompt node.",
+      "ADJUST or CORRECT what an LLM node produced, by describing the change in plain words — e.g. 'make shot 1 a wide establishing shot of the lighthouse', 'darker, rainier mood', 'wrong character — this is Marcus not Sarah'. NOT just for broken outputs; this is the go-to for ANY per-shot/per-node change you can describe rather than hand-author. The runner prepends your note to the next regeneration; the walker cascades only the true downstream. To change ONE shot, target that shot's own prompt item: nodeId='shot_image_prompt', itemId='scene_1_shot_1' — that re-renders only that shot, never the whole storyboard. Two-phase: call FIRST without confirm to preview the cascade, then confirm=true to apply. Only works on llm.* nodes — for a broken image/video, walk upstream to its prompt node and critique that.",
     parameters: Params,
     async execute(_id, params, signal) {
       const loadRes = loadProjectBundle(params.projectDir);

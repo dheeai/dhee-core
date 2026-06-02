@@ -49,6 +49,12 @@ const Params = Type.Object({
       description: 'Short note explaining WHY the override was applied. Recorded on the event log.',
     }),
   ),
+  confirm: Type.Optional(
+    Type.Boolean({
+      description:
+        'Required to proceed on a HIGH-BLAST-RADIUS write (editing a fan-out source node like scenes_plan, which re-renders every shot). Call FIRST without confirm to get the blast-radius preview, then confirm=true to apply. Surgical per-item edits (e.g. shot_image_prompt with an itemId) write immediately and ignore this.',
+    }),
+  ),
 });
 
 export interface WriteNodeContentDeps {
@@ -201,7 +207,7 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
     name: 'dhee_write_node_content',
     label: 'Write node content',
     description:
-      "Override a node's output with user content. Resolves the canonical path from the bundle's outputs.pattern, writes the bytes, marks the node as user-completed in walkState, and invalidates downstream nodes so the next dhee_run_bundle cascades. Use this to rewrite a generated prompt, hand-edit a JSON plan, or swap a generated image for one the user supplied (via attachments → kind='localFile').",
+      "Replace a node's output with EXACT bytes you already have — a file the user hand-wrote, an uploaded/attached image (kind='localFile'), a JSON object you've fully composed. This is for supplying finished content, NOT for describing a change: to ADJUST what an LLM produced ('make it wider', 'darker mood'), use dhee_critique_node instead — it's surgical and previews impact. Writes to the canonical path, marks the node user-completed, and cascades downstream. For a per-shot change, target that shot's item node (e.g. 'shot_image_prompt' + itemId). Editing a fan-out source like 'scenes_plan' re-renders every shot and requires confirm=true (you'll get a blast-radius preview first).",
     parameters: Params,
     async execute(_id, params) {
       // 1. Sanity checks.
@@ -261,7 +267,7 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
         );
       }
 
-      // 5. Materialize + write.
+      // 5. Materialize.
       let bytes: Buffer;
       try {
         bytes = resolveWritePayload(params.payload as WritePayload);
@@ -271,6 +277,44 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
           true,
         );
       }
+
+      // 5b. Blast-radius gate. Compute the cascade up front. Editing a
+      // FAN-OUT SOURCE node (one other collection nodes fan out over,
+      // e.g. scenes_plan → every shot_image_prompt/shot_image/scene_clip)
+      // WITHOUT an itemId rewrites the whole storyboard — every shot
+      // re-renders. That's the sledgehammer that turned "change shot 1"
+      // into "redo all shots." Require explicit confirm so the blast
+      // radius is seen first, and steer toward editing a single item's
+      // node. Surgical per-item edits (small cascade) write immediately.
+      const target: CascadeTarget = {
+        nodeId: params.nodeId,
+        ...(itemId ? { itemId } : {}),
+      };
+      const downstreamCascade = cascadeDownstreamKeys(params.projectDir, bundle, target);
+      const fanOutCollections = (bundle.nodes as NodeDef[])
+        .filter((n) => n.itemSource === params.nodeId)
+        .map((n) => n.id);
+      const isFanOutSourceWholeEdit = !itemId && fanOutCollections.length > 0;
+      const HIGH_BLAST = 3;
+      const highBlast = isFanOutSourceWholeEdit || downstreamCascade.length > HIGH_BLAST;
+      if (highBlast && !params.confirm) {
+        const downstreamList = downstreamCascade
+          .map((k) => (k.itemId !== undefined ? `${k.nodeId}:${k.itemId}` : k.nodeId))
+          .slice(0, 20);
+        const more = downstreamCascade.length > 20 ? ` …and ${downstreamCascade.length - 20} more` : '';
+        const steer = isFanOutSourceWholeEdit
+          ? `\n\n'${params.nodeId}' is the SOURCE the ${fanOutCollections.join(', ')} node(s) fan out over — overwriting it re-renders EVERY item. ` +
+            `To change ONE shot's look, edit that shot's own node instead (e.g. dhee_critique_node or dhee_write_node_content on 'shot_image_prompt' with itemId='<shot>'), which cascades only that shot. ` +
+            `Only overwrite '${params.nodeId}' when you genuinely need to add / remove / reorder items.`
+          : `\n\nThis is a large cascade. If you meant to change one item, target that item's node with an itemId instead.`;
+        return textResult(
+          `Preview — overwriting '${params.nodeId}'${itemId ? ` (item: ${itemId})` : ''} would invalidate ` +
+            `${downstreamCascade.length} downstream entr${downstreamCascade.length === 1 ? 'y' : 'ies'}: ` +
+            `${downstreamList.join(', ')}${more}.${steer}\n\n` +
+            `Nothing was written. Re-call with confirm=true to proceed anyway.`,
+        );
+      }
+
       // Open the event log up front so preserve calls can emit
       // version.added events for each rename.
       const log = openEventLog(params.projectDir);
@@ -311,16 +355,12 @@ export function makeWriteNodeContentTool(deps: WriteNodeContentDeps = {}) {
         generation: { tool: 'user', toolVersion: '0.1.0' },
       };
 
-      // Per-instance cascade. `cascadeDownstreamKeys` reads the event
-      // log + uses cascadeInvalidationKeys, so an edit on
+      // Per-instance cascade (computed up front for the blast-radius
+      // gate; reused here). `cascadeDownstreamKeys` reads the event log
+      // + uses cascadeInvalidationKeys, so an edit on
       // shot_image_prompt:scene_1_shot_3 invalidates ONLY
       // shot_image:scene_1_shot_3 and its true downstream — not
       // sibling shots. The target itself is excluded (we just wrote it).
-      const target: CascadeTarget = {
-        nodeId: params.nodeId,
-        ...(itemId ? { itemId } : {}),
-      };
-      const downstreamCascade = cascadeDownstreamKeys(params.projectDir, bundle, target);
       const invalidatedKeys: string[] = [];
       const downstreamNodeIdsSeen = new Set<string>();
       for (const dk of downstreamCascade) {

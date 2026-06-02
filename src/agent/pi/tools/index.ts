@@ -29,6 +29,9 @@ import { dheePresentBundleChoicesTool, makePresentBundleChoicesTool } from './dh
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
 import { dheeRunBundleTool, makeRunBundleTool } from './dheeRunBundle.js';
+import { dheeStartRunTool, makeStartRunTool } from './dheeStartRun.js';
+import { dheeStopRunTool, makeStopRunTool } from './dheeStopRun.js';
+import { dheeSetProjectFieldTool, makeSetProjectFieldTool } from './dheeSetProjectField.js';
 import { dheeSelectVersionTool, makeSelectVersionTool } from './dheeSelectVersion.js';
 import { dheeShowFileTool, makeShowFileTool } from './dheeShowFile.js';
 import { dheeShowNodeOutputTool, makeShowNodeOutputTool } from './dheeShowNodeOutput.js';
@@ -43,6 +46,8 @@ export const DHEE_TOOL_NAMES = [
   'dhee_present_bundle_choices',
   'dhee_describe_bundle',
   'dhee_run_bundle',
+  'dhee_start_run',
+  'dhee_stop_run',
   'dhee_get_status',
   'dhee_regenerate_node',
   'dhee_critique_node',
@@ -57,6 +62,7 @@ export const DHEE_TOOL_NAMES = [
   'dhee_swap_runner',
   'dhee_write_input',
   'dhee_write_node_content',
+  'dhee_set_project_field',
   'dhee_read',
   'dhee_ls',
   'dhee_grep',
@@ -78,12 +84,15 @@ export {
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
   dheeRunBundleTool,
+  dheeStartRunTool,
+  dheeStopRunTool,
   dheeSelectVersionTool,
   dheeShowFileTool,
   dheeShowNodeOutputTool,
   dheeSwapRunnerTool,
   dheeWriteInputTool,
   dheeWriteNodeContentTool,
+  dheeSetProjectFieldTool,
   dheeReadTool,
   dheeLsTool,
   dheeGrepTool,
@@ -102,12 +111,15 @@ export {
   makeReadArtifactTool,
   makeRegenerateNodeTool,
   makeRunBundleTool,
+  makeStartRunTool,
+  makeStopRunTool,
   makeSelectVersionTool,
   makeShowFileTool,
   makeShowNodeOutputTool,
   makeSwapRunnerTool,
   makeWriteInputTool,
   makeWriteNodeContentTool,
+  makeSetProjectFieldTool,
   makeReadTool,
   makeLsTool,
   makeGrepTool,
@@ -125,6 +137,8 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheePresentBundleChoicesTool);
   pi.registerTool(dheeDescribeBundleTool);
   pi.registerTool(dheeRunBundleTool);
+  pi.registerTool(dheeStartRunTool);
+  pi.registerTool(dheeStopRunTool);
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);
   pi.registerTool(dheeCritiqueNodeTool);
@@ -140,6 +154,7 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeSwapRunnerTool);
   pi.registerTool(dheeWriteInputTool);
   pi.registerTool(dheeWriteNodeContentTool);
+  pi.registerTool(dheeSetProjectFieldTool);
   pi.registerTool(dheeReadTool);
   pi.registerTool(dheeLsTool);
   pi.registerTool(dheeGrepTool);

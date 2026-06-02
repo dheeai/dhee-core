@@ -46,6 +46,7 @@ interface ToolLike {
       itemId?: string;
       payload: unknown;
       reason?: string;
+      confirm?: boolean;
     },
   ) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
 }
@@ -574,5 +575,88 @@ describe('dhee_write_node_content', () => {
       payload: { kind: 'text', content: 'x' },
     });
     expect(r.isError).toBe(true);
+  });
+
+  // ── Blast-radius gate (disambiguate-mutation-tools) ─────────────────
+  // A fan-out SOURCE node (scenes_plan: the shot_image_prompt collection
+  // fans out over it) edited WITHOUT an itemId re-renders every shot.
+  // That sledgehammer must require confirm; a per-item edit must not.
+
+  function fanOutBundle(): DagBundle {
+    return fakeBundle([
+      node('scenes_plan', 'plans/scenes_plan.json', 'json'),
+      {
+        ...node('shot_image_prompt', 'prompts/shots/{{item_id}}.json', 'json', [{ from: 'scenes_plan' }]),
+        kind: 'collection',
+        itemSource: 'scenes_plan',
+      } as unknown as NodeDef,
+      {
+        ...node('shot_image', 'assets/{{item_id}}.png', 'image', [{ from: 'shot_image_prompt' }]),
+        kind: 'collection',
+        itemSource: 'shot_image_prompt',
+      } as unknown as NodeDef,
+    ]);
+  }
+
+  it('17. overwriting a fan-out source (scenes_plan) without confirm → preview, NO write', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({ loadBundleForProject: fanOutBundle }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'scenes_plan',
+      payload: { kind: 'text', content: '{"scenes":[],"shots":[]}' },
+    });
+    // Informational preview, names the fan-out + steers to the item node.
+    expect(r.content[0].text).toMatch(/re-render|fan out|every item/i);
+    expect(r.content[0].text).toMatch(/shot_image_prompt/);
+    expect(r.content[0].text).toMatch(/confirm=true/);
+    // Nothing written.
+    expect(existsSync(join(projectDir, 'plans/scenes_plan.json'))).toBe(false);
+  });
+
+  it('18. overwriting scenes_plan WITH confirm=true → writes', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({ loadBundleForProject: fanOutBundle }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'scenes_plan',
+      payload: { kind: 'text', content: '{"scenes":[],"shots":[]}' },
+      confirm: true,
+    });
+    expect(r.isError).toBeFalsy();
+    expect(existsSync(join(projectDir, 'plans/scenes_plan.json'))).toBe(true);
+    expect(readWalkState(projectDir).nodes['scenes_plan']?.status).toBe('completed');
+  });
+
+  it('19. surgical per-item edit (shot_image_prompt + itemId) writes directly — no confirm needed', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({ loadBundleForProject: fanOutBundle }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'shot_image_prompt',
+      itemId: 'scene_1_shot_1',
+      payload: { kind: 'text', content: '{"imagePrompt":"wide establishing shot"}' },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(existsSync(join(projectDir, 'prompts/shots/scene_1_shot_1.json'))).toBe(true);
+    expect(readWalkState(projectDir).nodes['shot_image_prompt:scene_1_shot_1']?.status).toBe('completed');
+  });
+
+  it('20. a standalone leaf node (no downstream) writes directly', async () => {
+    const { projectDir } = setupProject();
+    dirs.push(projectDir);
+    const tool = makeWriteNodeContentTool({
+      loadBundleForProject: () => fakeBundle([node('plot', 'plans/plot.md')]),
+    }) as unknown as ToolLike;
+    const r = await tool.execute('t', {
+      projectDir,
+      nodeId: 'plot',
+      payload: { kind: 'text', content: '# new plot' },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(existsSync(join(projectDir, 'plans/plot.md'))).toBe(true);
   });
 });
