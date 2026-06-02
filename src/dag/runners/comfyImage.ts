@@ -21,8 +21,9 @@
  * { clientFactory }). Tests stub upload/queue/download.
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, extname, resolve } from 'node:path';
+import { basename, dirname, extname, resolve } from 'node:path';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
+import { retryTransient } from './transientRetry.js';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
@@ -464,20 +465,30 @@ export function createComfyImageRunner(opts?: {
     // FL2V additional uploads: first_frame + last_frame. These are
     // separate from base_image / referenceImages because the FL2V
     // workflow's manifest declares them as named inputs.
+    // Tunnel-flakiness-aware upload: 3 retries on 502/504/ECONNRESET
+    // etc. before treating as terminal. Permanent errors (4xx, malformed
+    // workflow) still bubble immediately.
+    const uploadWithRetry = (path: string) =>
+      retryTransient(() => client.uploadImage(path), {
+        signal: ctx.signal,
+        log: ctx.log,
+        label: `comfy.image upload ${basename(path)}`,
+      });
+
     let fl2vFirstUploaded: { name: string } | undefined;
     let fl2vLastUploaded: { name: string } | undefined;
     const fl2vFirstPath = (cfgWithUpstream['_fl2v_first_frame'] as string | undefined);
     const fl2vLastPath = (cfgWithUpstream['_fl2v_last_frame'] as string | undefined);
     if (fl2vFirstPath && existsSync(fl2vFirstPath)) {
       try {
-        fl2vFirstUploaded = await client.uploadImage(fl2vFirstPath);
+        fl2vFirstUploaded = await uploadWithRetry(fl2vFirstPath);
       } catch (err) {
         return { ok: false, error: `comfy.image: FL2V first_frame upload failed for ${fl2vFirstPath}: ${(err as Error).message}` };
       }
     }
     if (fl2vLastPath && existsSync(fl2vLastPath)) {
       try {
-        fl2vLastUploaded = await client.uploadImage(fl2vLastPath);
+        fl2vLastUploaded = await uploadWithRetry(fl2vLastPath);
       } catch (err) {
         return { ok: false, error: `comfy.image: FL2V last_frame upload failed for ${fl2vLastPath}: ${(err as Error).message}` };
       }
@@ -486,7 +497,7 @@ export function createComfyImageRunner(opts?: {
     let baseUploaded: { name: string } | undefined;
     if (cfg.baseImage) {
       try {
-        baseUploaded = await client.uploadImage(cfg.baseImage);
+        baseUploaded = await uploadWithRetry(cfg.baseImage);
       } catch (err) {
         return {
           ok: false,
@@ -501,7 +512,7 @@ export function createComfyImageRunner(opts?: {
           return { ok: false, error: 'comfy.image: aborted during upload' };
         }
         try {
-          refUploaded.push(await client.uploadImage(r));
+          refUploaded.push(await uploadWithRetry(r));
         } catch (err) {
           return {
             ok: false,
@@ -561,7 +572,11 @@ export function createComfyImageRunner(opts?: {
     }
     let queueResult: { outputs: Array<{ filename: string; subfolder?: string }> };
     try {
-      queueResult = await client.queueAndWait(workflow, ctx.signal);
+      queueResult = await retryTransient(() => client.queueAndWait(workflow, ctx.signal), {
+        signal: ctx.signal,
+        log: ctx.log,
+        label: 'comfy.image queue',
+      });
     } catch (err) {
       return { ok: false, error: `comfy.image: ${(err as Error).message}` };
     }
@@ -573,7 +588,11 @@ export function createComfyImageRunner(opts?: {
     const imageOut = queueResult.outputs.find((o) => /\.(png|jpg|jpeg|webp|mp4|webm|mov)$/i.test(o.filename))
       ?? queueResult.outputs[0]!;
     try {
-      await client.downloadOutput(imageOut.filename, imageOut.subfolder, outAbs);
+      await retryTransient(() => client.downloadOutput(imageOut.filename, imageOut.subfolder, outAbs), {
+        signal: ctx.signal,
+        log: ctx.log,
+        label: `comfy.image download ${imageOut.filename}`,
+      });
     } catch (err) {
       return { ok: false, error: `comfy.image: download failed: ${(err as Error).message}` };
     }
