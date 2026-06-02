@@ -1119,15 +1119,22 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       if (resolved.configOverride) {
         Object.assign(cfg, resolved.configOverride);
       }
-      // Apply project-level aspect-ratio to the runner config's width
-      // + height (if both are numbers). Bundle authors declare baseline
-      // dimensions tuned for 16:9; the slate's aspect choice (9:16 for
-      // Shorts, 21:9 for ultra-wide) flows through here so every
-      // comfy/ltx node renders at the chosen aspect without per-runner
-      // code. See src/dag/aspect.ts.
+      // Apply project-level aspect-ratio + resolution to the runner
+      // config's width + height (if both are numbers). Bundle authors
+      // declare baseline dimensions tuned for 16:9 at the runner's max
+      // supported resolution; the slate's aspect choice (9:16, 21:9)
+      // and resolution choice (720p, 1080p, 4K) flow through here so
+      // every comfy/ltx node renders correctly without per-runner
+      // code. Resolution is capped per-node by the bundle's baseline.
+      // See src/dag/aspect.ts.
       const projectAspect = bundleInputs['aspect'];
+      const projectResolution = bundleInputs['resolution'];
       if (typeof projectAspect === 'string') {
-        applyAspectToConfig(cfg, projectAspect);
+        applyAspectToConfig(
+          cfg,
+          projectAspect,
+          typeof projectResolution === 'number' ? projectResolution : undefined,
+        );
       }
       const runtimeNode: NodeDef = {
         ...node,

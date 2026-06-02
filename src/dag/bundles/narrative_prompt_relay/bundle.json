@@ -66,6 +66,18 @@
         { "value": "9:16", "label": "9:16" },
         { "value": "21:9", "label": "21:9" }
       ]
+    },
+    {
+      "id": "resolution",
+      "kind": "project",
+      "field": "resolution",
+      "default": 1080,
+      "label": "Resolution",
+      "control": "pills",
+      "options": [
+        { "value": 720, "label": "720p" },
+        { "value": 1080, "label": "1080p" }
+      ]
     }
   ],
   "goal": "final_video",

@@ -174,4 +174,69 @@ describe('walker applies aspect to runner config dimensions', () => {
     expect(capturedConfig!['width']).toBeUndefined();
     expect(capturedConfig!['height']).toBeUndefined();
   });
+
+  // ── Resolution flows through alongside aspect ─────────────────────
+
+  it('7. 16:9 + resolution=720 shrinks 1920x1080 to 720x408', async () => {
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({
+        name: 'X',
+        bundleSource: 'built-in:aspect-test',
+        aspect: '16:9',
+        resolution: 720,
+      }),
+    );
+    await walkBundle({
+      projectDir,
+      bundle: makeBundle({ width: 1920, height: 1080 }, [
+        { id: 'aspect', kind: 'project', field: 'aspect', default: '16:9' },
+        { id: 'resolution', kind: 'project', field: 'resolution', default: 1080 },
+      ]),
+    });
+    expect(capturedConfig!['width']).toBe(720);
+    expect(capturedConfig!['height']).toBe(408);
+  });
+
+  it('8. 9:16 + resolution=720 → portrait 408x720', async () => {
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({
+        name: 'X',
+        bundleSource: 'built-in:aspect-test',
+        aspect: '9:16',
+        resolution: 720,
+      }),
+    );
+    await walkBundle({
+      projectDir,
+      bundle: makeBundle({ width: 1920, height: 1080 }, [
+        { id: 'aspect', kind: 'project', field: 'aspect', default: '16:9' },
+        { id: 'resolution', kind: 'project', field: 'resolution', default: 1080 },
+      ]),
+    });
+    expect(capturedConfig!['width']).toBe(408);
+    expect(capturedConfig!['height']).toBe(720);
+  });
+
+  it('9. resolution caps at bundle baseline (LTX-shape 854 with user 1080 → 854)', async () => {
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({
+        name: 'X',
+        bundleSource: 'built-in:aspect-test',
+        aspect: '16:9',
+        resolution: 1080,
+      }),
+    );
+    await walkBundle({
+      projectDir,
+      bundle: makeBundle({ width: 854, height: 480 }, [
+        { id: 'aspect', kind: 'project', field: 'aspect', default: '16:9' },
+        { id: 'resolution', kind: 'project', field: 'resolution', default: 1080 },
+      ]),
+    });
+    expect(capturedConfig!['width']).toBe(854);
+    expect(capturedConfig!['height']).toBe(480);
+  });
 });

@@ -44,22 +44,34 @@ export function isSupportedAspect(aspect: string | undefined): aspect is Support
 }
 
 /**
- * Apply an aspect-ratio transform to a baseline width/height pair.
+ * Apply an aspect-ratio + resolution transform to a baseline
+ * width/height pair.
  *
  * - Unknown / undefined aspect → returns the input unchanged.
  * - Square input (w === h) → returns the input unchanged.
- * - Otherwise: uses the input's longer edge as the canvas size and
- *   recomputes the short edge from the target ratio. Short edge is
- *   rounded to the nearest multiple of 8.
+ * - Otherwise: the long-edge of the output is min(userResolution,
+ *   bundleBaseline). The short edge is derived from the aspect ratio
+ *   and rounded to the nearest multiple of 8.
+ *
+ * Capping to the bundle's baseline matters because video runners like
+ * LTX-2 have hard model-level caps; a user picking "4K" can't push a
+ * 854px-baseline LTX node above 854. For image runners with higher
+ * baselines (Klein at 1920) the user's lower picks (720p/1080p) work
+ * unconstrained.
  */
 export function applyAspect(
   aspect: string | undefined,
   width: number,
   height: number,
+  resolution?: number,
 ): { width: number; height: number } {
   if (!isSupportedAspect(aspect)) return { width, height };
   if (width === height) return { width, height };
-  const longEdge = Math.max(width, height);
+  const baseLong = Math.max(width, height);
+  const longEdge =
+    typeof resolution === 'number' && resolution > 0
+      ? Math.min(resolution, baseLong)
+      : baseLong;
   const targetRatio = ASPECT_RATIOS[aspect];
   // Portrait ratios produce a tall canvas (height > width).
   if (targetRatio < 1) {
@@ -72,19 +84,20 @@ export function applyAspect(
 }
 
 /**
- * Apply aspect to a runner config in place. Only touches the config
- * if both `width` and `height` are numbers; otherwise it's a no-op.
- * The walker calls this once per node, right before constructing the
- * RunnerContext.
+ * Apply aspect (+ optional resolution cap) to a runner config in
+ * place. Only touches the config if both `width` and `height` are
+ * numbers; otherwise it's a no-op. The walker calls this once per
+ * node, right before constructing the RunnerContext.
  */
 export function applyAspectToConfig(
   config: Record<string, unknown>,
   aspect: string | undefined,
+  resolution?: number,
 ): void {
   const w = config['width'];
   const h = config['height'];
   if (typeof w !== 'number' || typeof h !== 'number') return;
-  const out = applyAspect(aspect, w, h);
+  const out = applyAspect(aspect, w, h, resolution);
   config['width'] = out.width;
   config['height'] = out.height;
 }
