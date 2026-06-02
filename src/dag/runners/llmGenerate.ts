@@ -491,7 +491,18 @@ export function createLlmGenerateRunner(opts?: {
         });
         const got = resp.content ?? '';
         if (!got || got.trim() === '') {
+          // An empty response is a transient model hiccup (rate-limit
+          // blip, content-filter no-op, gateway truncation), NOT a
+          // structural problem — so retry it like a network error
+          // instead of bailing on the first occurrence. Only give up
+          // once the attempts are exhausted.
           lastErr = 'LLM returned empty response (no content).';
+          if (attempt < maxRetries) {
+            const backoffMs = 250 * Math.pow(2, attempt);
+            ctx.log(`llm.generate: attempt ${attempt + 1} returned empty; retrying in ${backoffMs}ms`);
+            await new Promise((r) => setTimeout(r, backoffMs));
+            continue;
+          }
           break;
         }
 
