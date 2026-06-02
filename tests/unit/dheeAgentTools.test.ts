@@ -525,6 +525,8 @@ describe('DHEE_TOOL_NAMES', () => {
       'dhee_present_bundle_choices',
       'dhee_describe_bundle',
       'dhee_run_bundle',
+      'dhee_start_run',
+      'dhee_stop_run',
       'dhee_get_status',
       'dhee_regenerate_node',
       'dhee_critique_node',
