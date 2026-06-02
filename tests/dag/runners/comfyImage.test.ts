@@ -65,6 +65,15 @@ let bundleDir: string;
 let projectDir: string;
 let refImage1: string;
 let baseImagePath: string;
+// COMFY_MODE controls whether the resolver honors the bundle's named
+// endpoint label (cloud) or force-routes to the local Comfy URL
+// (local, also the default when unset). The runner happy-path tests
+// configure `endpoint: 'test.endpoint'` + `ENDPOINT_test_endpoint` —
+// so the suite must run in cloud mode for those lookups to fire.
+// Locally most devs have COMFY_MODE=local in .env which would mask
+// this; CI runs with no env so the default 'local' wins and the test
+// silently breaks. Pin cloud mode here, restore afterEach.
+let savedComfyMode: string | undefined;
 
 beforeEach(() => {
   bundleDir = mkdtempSync(join(tmpdir(), 'comfy-bundle-'));
@@ -86,6 +95,9 @@ beforeEach(() => {
   refImage1 = join(projectDir, 'refs/char1.png');
   writeFileSync(refImage1, Buffer.from('fake-char-png'));
 
+  // Pin cloud mode so the resolver honors the bundle's named endpoint.
+  savedComfyMode = process.env['COMFY_MODE'];
+  process.env['COMFY_MODE'] = 'cloud';
   // Set up endpoint env for the happy path.
   process.env['ENDPOINT_test_endpoint'] = 'http://stub.local:8188';
 });
@@ -94,6 +106,8 @@ afterEach(() => {
   rmSync(bundleDir, { recursive: true, force: true });
   rmSync(projectDir, { recursive: true, force: true });
   delete process.env['ENDPOINT_test_endpoint'];
+  if (savedComfyMode === undefined) delete process.env['COMFY_MODE'];
+  else process.env['COMFY_MODE'] = savedComfyMode;
 });
 
 function makeCtx(opts: {
