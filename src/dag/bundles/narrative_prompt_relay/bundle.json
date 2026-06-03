@@ -527,8 +527,8 @@
           "workflowPath": "workflows/ltx_director_local.json",
           "endpoint": "self.local",
           "fps": 24,
-          "width": 854,
-          "height": 480
+          "width": 1280,
+          "height": 720
         }
       },
       "itemKey": "scenes",
