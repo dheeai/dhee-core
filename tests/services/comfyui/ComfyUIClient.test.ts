@@ -408,3 +408,55 @@ describe('ComfyUIClient request behavior', () => {
     ]);
   });
 });
+
+describe('ComfyUIClient.waitForCompletion local error detection', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('returns {status:error} when /history reports status_str=error (OOM) instead of polling a dead prompt forever', async () => {
+    // Regression: a local prompt that OOMs reports status_str=error in
+    // /history with no outputs. The HTTP-polling fallback used to match
+    // none of the completion branches (outputs empty, not "success") AND
+    // never hit the missing-poll fast-fail (which only fires when
+    // /history is ABSENT) — so it looped indefinitely, leaving the node
+    // stuck in_progress. waitForCompletion must surface the error.
+    const promptId = 'oom-prompt-1';
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      if (String(url).includes(`/history/${promptId}`)) {
+        return {
+          ok: true,
+          json: async () => ({
+            [promptId]: {
+              status: {
+                status_str: 'error',
+                completed: false,
+                messages: [
+                  ['execution_start', { prompt_id: promptId }],
+                  ['execution_error', { exception_type: 'torch.OutOfMemoryError', node_id: '47' }],
+                ],
+              },
+              outputs: {},
+            },
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const client = new ComfyUIClient({
+      baseUrl: 'http://localhost:8188',
+      outputDir: '/tmp',
+      timeout: 300,
+      apiKey: undefined,
+      isCloud: false,
+    });
+    // poll interval 1s: with the bug this never returns (loops every 1s),
+    // so the 4s test timeout trips. With the fix it returns on the first
+    // poll, before any sleep.
+    const result = await client.waitForCompletion(promptId, undefined, 1);
+    expect(result.status).toBe('error');
+    expect(result.prompt_id).toBe(promptId);
+  }, 4000);
+});

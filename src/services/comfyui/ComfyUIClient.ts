@@ -668,6 +668,22 @@ export class ComfyUIClient {
             // Server knows the prompt — reset the missing-poll counter
             // so an earlier transient null doesn't accumulate.
             consecutivePromptMissing = 0;
+
+            // Hard execution error reported in /history (e.g. an OOM at
+            // the sampler). The prompt died on the GPU: status_str is
+            // 'error', completed is false, and there are no outputs. None
+            // of the completion branches below match, and the missing-poll
+            // fast-fail never fires (it's gated on `!history`). Without
+            // this explicit check the loop polls a dead prompt forever and
+            // the node stays wedged `in_progress`. Surface it as an error.
+            if (history.status?.status_str === 'error') {
+              const kinds = (history.status?.messages ?? []).map((m) => m[0]);
+              debugLog(
+                `[waitForCompletion] prompt ${promptId} reported status_str=error in /history — failing. message kinds=${JSON.stringify(kinds)}`,
+              );
+              return { status: 'error', prompt_id: promptId };
+            }
+
             const outputs = history.outputs || {};
 
             if (Object.keys(outputs).length > 0) {

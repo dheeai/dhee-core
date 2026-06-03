@@ -33,7 +33,8 @@ import type { BundleInputDecl } from './schema.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
-import { applyAspectToConfig } from './aspect.js';
+import { applyAspect, applyAspectToConfig } from './aspect.js';
+import { effectiveFrameCap } from './chunkBudget.js';
 import { REPO_ROOT } from '../agent/pi/paths.js';
 import {
   loadWalkState,
@@ -233,7 +234,29 @@ function materializeCollection(
   projectDir: string,
   cli: WalkerCliParams,
   upstreamInstances: Map<string, NodeInstance[]>,
+  projectAspect?: string,
+  projectResolution?: number,
 ): NodeInstance[] {
+  // Resolution-aware chunk cap. `chunkBy.limit` is the model's
+  // audio-latent frame cap (resolution-independent); `maxFramePixels`
+  // is the VRAM ceiling on the chunk's latent VOLUME (frames × pixels).
+  // At higher resolutions the same frame count blows past VRAM, so we
+  // scale the per-chunk frame cap down by the actual render area. The
+  // render area is the node's baseline width/height after the same
+  // aspect+resolution transform the runner will see at run time.
+  // See src/dag/chunkBudget.ts.
+  const declaredCap = node.chunkBy?.limit ?? 0;
+  let effectiveCap = declaredCap;
+  if (node.chunkBy?.maxFramePixels) {
+    const cfg = (node.runner?.config ?? {}) as Record<string, unknown>;
+    const cw = cfg['width'];
+    const ch = cfg['height'];
+    if (typeof cw === 'number' && typeof ch === 'number') {
+      const { width: rw, height: rh } = applyAspect(projectAspect, cw, ch, projectResolution);
+      effectiveCap = effectiveFrameCap(declaredCap, rw, rh, node.chunkBy.maxFramePixels);
+    }
+  }
+
   // ── Legacy 'scene' path (ltx_prompt_relay's scene_clip chunking) ──
   if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
     const out: NodeInstance[] = [];
@@ -241,7 +264,7 @@ function materializeCollection(
       if (node.chunkBy && node.chunkBy.constraint === 'max_frames') {
         const fps = node.chunkBy.fps ?? 24;
         const firstPlusOne = node.chunkBy.firstSegmentPlusOne ?? false;
-        const chunks = chunkScene(projectDir, sceneNum, node.chunkBy.limit, fps, firstPlusOne);
+        const chunks = chunkScene(projectDir, sceneNum, effectiveCap, fps, firstPlusOne);
         if (chunks.length === 0) {
           throw new Error(`materializeCollection: no chunks computed for scene ${sceneNum}`);
         }
@@ -347,7 +370,7 @@ function materializeCollection(
         typeof raw === 'object' &&
         Array.isArray((raw as Record<string, unknown>)['shots'])
       ) {
-        const cap = node.chunkBy.limit;
+        const cap = effectiveCap;
         const fps = node.chunkBy.fps ?? 24;
         const firstPlusOne = node.chunkBy.firstSegmentPlusOne ?? false;
         const allShots = (raw as { shots: Array<{ id?: string; scene?: number; shotNumber?: number; duration?: number }> }).shots;
@@ -991,7 +1014,17 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   for (const node of ordered) {
     if (node.kind === 'collection') {
       if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
-        instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli, instancesById));
+        instancesById.set(
+          node.id,
+          materializeCollection(
+            node,
+            opts.projectDir,
+            cli,
+            instancesById,
+            typeof bundleInputs['aspect'] === 'string' ? bundleInputs['aspect'] : undefined,
+            typeof bundleInputs['resolution'] === 'number' ? bundleInputs['resolution'] : undefined,
+          ),
+        );
       } else {
         // Lazy: empty for now; materialized when we reach the node.
         instancesById.set(node.id, []);
@@ -1024,7 +1057,14 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     // instancesById. materializeCollection reads from these.
     if (node.kind === 'collection' && (instancesById.get(node.id) ?? []).length === 0) {
       try {
-        const materialized = materializeCollection(node, opts.projectDir, cli, instancesById);
+        const materialized = materializeCollection(
+          node,
+          opts.projectDir,
+          cli,
+          instancesById,
+          typeof bundleInputs['aspect'] === 'string' ? bundleInputs['aspect'] : undefined,
+          typeof bundleInputs['resolution'] === 'number' ? bundleInputs['resolution'] : undefined,
+        );
         instancesById.set(node.id, materialized);
       } catch (e) {
         const err = `${node.id}: materializeCollection failed: ${(e as Error).message}`;

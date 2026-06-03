@@ -19,7 +19,8 @@
         "constraint": "max_frames",
         "limit": 1000,
         "fps": 24,
-        "firstSegmentPlusOne": true
+        "firstSegmentPlusOne": true,
+        "maxFramePixels": 409920000
       },
       "inputs": [],
       "outputs": {
@@ -41,7 +42,11 @@
       "id": "final_video",
       "kind": "stage",
       "inputs": [
-        { "from": "scene_clip", "usage": "input", "scope": "all" }
+        {
+          "from": "scene_clip",
+          "usage": "input",
+          "scope": "all"
+        }
       ],
       "outputs": {
         "format": "video",
