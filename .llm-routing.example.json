@@ -32,11 +32,6 @@
       "apiKey": "lm-studio",
       "baseUrl": "http://127.0.0.1:1234/v1",
       "model": "huihui-qwen3-vl-8b-instruct-abliterated"
-    },
-    "content.remotion_code": {
-      "provider": "anthropic",
-      "apiKey": "sk-ant-code-key",
-      "model": "claude-sonnet-4-6"
     }
   }
 }
