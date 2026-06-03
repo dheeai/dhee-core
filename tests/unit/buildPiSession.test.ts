@@ -104,6 +104,24 @@ describe('buildPiSessionConfig', () => {
     expect(key).toBe('or-test-key-123');
   });
 
+  it('Phase 6.5b: modelBaseUrl overrides the resolved pi model endpoint', async () => {
+    const cfg = await buildPiSessionConfig({
+      sessionManager: SessionManager.inMemory(process.cwd()),
+      modelProvider: 'cloud',
+      apiKey: 'desktop-jwt',
+      modelBaseUrl: 'https://desktop.example.test/openai/api/v1',
+    });
+    expect(cfg.model).toBeDefined();
+    expect((cfg.model as { provider: string }).provider).toBe('cloud');
+    expect((cfg.model as { name: string }).name).toBe('Dhee Cloud');
+    expect((cfg.model as { id: string }).id).toBe('');
+    expect((cfg.model as { baseUrl: string }).baseUrl).toBe(
+      'https://desktop.example.test/openai/api/v1',
+    );
+    const key = await (cfg.authStorage as unknown as { getApiKey: (p: string) => Promise<string | undefined> }).getApiKey('cloud');
+    expect(key).toBe('desktop-jwt');
+  });
+
   it('Phase 6.5b: partial overrides (e.g. modelProvider without apiKey) do NOT activate the explicit-model path — falls back to auto-discovery', async () => {
     const cfg = await buildPiSessionConfig({
       sessionManager: SessionManager.inMemory(process.cwd()),

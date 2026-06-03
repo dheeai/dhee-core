@@ -34,11 +34,12 @@ import {
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
 } from '@mariozechner/pi-coding-agent';
-import { getModel } from '@mariozechner/pi-ai';
+import { getModel, type Model } from '@mariozechner/pi-ai';
 import { DHEE_TOOL_NAMES, registerDheeTools } from './tools/index.js';
 
 /** The skill name (from the YAML frontmatter `name:` field) we inject. */
 export const DHEE_SKILL_NAME = 'dhee';
+export const DHEE_CLOUD_PI_MODEL_PROVIDER = 'cloud';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = resolve(__dirname, 'skill');
@@ -102,7 +103,14 @@ export interface BuildPiSessionOptions {
    *   - AuthStorage gets `apiKey` set as a runtime credential for
    *     `modelProvider` (no on-disk auth.json mutation).
    *   - `getModel(modelProvider, modelId)` resolves the typed Model
-   *     that createAgentSession uses for every turn.
+   *     that createAgentSession uses for every turn. When
+   *     `modelBaseUrl` is supplied, that Model is cloned with the
+   *     caller's endpoint so desktop-owned proxies (Dhee Cloud,
+   *     LM Studio, etc.) do not fall back to pi-ai's public defaults.
+   *   - Dhee Cloud is the exception: desktop passes provider
+   *     `cloud`, apiKey, and modelBaseUrl without a modelId.
+   *     Core creates a private OpenAI-compatible model with a blank
+   *     protocol model id so the cloud proxy owns real model selection.
    *
    * Without this, pi-coding-agent falls back to whatever the user's
    * ~/.pi/agent/settings.json names — which is usually empty on
@@ -113,6 +121,35 @@ export interface BuildPiSessionOptions {
   modelProvider?: string;
   modelId?: string;
   apiKey?: string;
+  modelBaseUrl?: string;
+}
+
+function buildDheeCloudModel(baseUrl: string): Model<'openai-completions'> {
+  return {
+    id: '',
+    name: 'Dhee Cloud',
+    api: 'openai-completions',
+    provider: DHEE_CLOUD_PI_MODEL_PROVIDER,
+    baseUrl,
+    reasoning: false,
+    input: ['text'],
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    contextWindow: 128000,
+    maxTokens: 8192,
+    compat: {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      supportsUsageInStreaming: true,
+      maxTokensField: 'max_completion_tokens',
+      thinkingFormat: 'openai',
+    },
+  };
 }
 
 /**
@@ -176,14 +213,24 @@ export async function buildPiSessionConfig(
   // agent's `findInitialModel` heuristic (which reads ~/.pi/agent/
   // settings.json + auth.json + env vars, and returns null silently
   // when none align) — the desktop owns its own credentials.
-  if (opts.modelProvider && opts.modelId && opts.apiKey) {
+  if (opts.modelProvider && opts.apiKey) {
     const authStorage = AuthStorage.inMemory();
     authStorage.setRuntimeApiKey(opts.modelProvider, opts.apiKey);
     config.authStorage = authStorage;
+    const modelBaseUrl = opts.modelBaseUrl?.trim();
+    if (opts.modelProvider === DHEE_CLOUD_PI_MODEL_PROVIDER && modelBaseUrl) {
+      config.model = buildDheeCloudModel(modelBaseUrl);
+      return config;
+    }
+    if (!opts.modelId) return config;
+
     // getModel is strongly typed against MODELS table; cast to any so
     // the desktop can pass user-string provider/model ids without
     // dragging pi-ai's type union through every consumer.
-    config.model = getModel(opts.modelProvider as never, opts.modelId as never);
+    const model = getModel(opts.modelProvider as never, opts.modelId as never);
+    config.model = model && modelBaseUrl
+      ? { ...model, baseUrl: modelBaseUrl }
+      : model;
   }
 
   return config;
