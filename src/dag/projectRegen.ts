@@ -153,6 +153,25 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
     cascadeKeys = [...opts.nodeIds];
   }
 
+  // Open the event log ONCE for the whole invalidation. Every cascaded
+  // key gets a `node.invalidated` event so the event-sourced
+  // projections (projectInstanceGraph → the desktop Cards view,
+  // projectWalkState) reflect the cascade. Without this, walkState was
+  // cleared but the events-based UI still showed the nodes as
+  // 'completed' — the cascade was invisible (the bug behind "marking a
+  // node stale doesn't blank its downstream"). Best-effort: a log
+  // failure must not abort the invalidate.
+  let invLog: ReturnType<typeof openEventLog> | null = null;
+  try {
+    invLog = openEventLog(opts.projectDir);
+  } catch {
+    invLog = null;
+  }
+  const splitKey = (k: string): { nodeId: string; itemId?: string } => {
+    const [bare, ...rest] = k.split(':');
+    return rest.length > 0 ? { nodeId: bare ?? k, itemId: rest.join(':') } : { nodeId: bare ?? k };
+  };
+
   for (const key of cascadeKeys) {
     if (!walkState.nodes![key]) {
       // Cascade keys may include items never recorded in walkState
@@ -192,22 +211,40 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
     // Emit version.added so the event log records the preserved file —
     // closes the gap "which version went to which path." Best-effort:
     // event log failure must not abort the invalidate.
-    if (preservedRel) {
+    const { nodeId: bareNode, itemId } = splitKey(key);
+    if (preservedRel && invLog) {
       try {
-        const log = openEventLog(opts.projectDir);
-        const [bare, ...rest] = key.split(':');
-        const itemId = rest.length > 0 ? rest.join(':') : undefined;
-        log.append({
+        invLog.append({
           kind: 'version.added',
           actor: 'agent',
           branchId: 'main',
           payload: {
-            nodeId: bare ?? key,
+            nodeId: bareNode,
             ...(itemId ? { itemId } : {}),
             versionId: `preserved-${Date.now()}-${key}`,
             outputPath: preservedRel,
             source: 'runner',
             reason: 'preserved on invalidateNodes — prior auto-render moved aside before re-run',
+          },
+        });
+      } catch {
+        // best-effort
+      }
+    }
+    // Record the invalidation itself so the event-sourced projections
+    // (Cards view) mark this instance — and the whole cascade — stale.
+    if (invLog) {
+      try {
+        invLog.append({
+          kind: 'node.invalidated',
+          actor: 'agent',
+          branchId: 'main',
+          payload: {
+            nodeId: bareNode,
+            ...(itemId ? { itemId } : {}),
+            reason: opts.source
+              ? `invalidateNodes (${opts.source})`
+              : 'invalidateNodes cascade',
           },
         });
       } catch {

@@ -289,4 +289,35 @@ describe('invalidateNodes', () => {
     expect(named?.payload.nodeId).toBe('shot_image');
     expect(named?.payload.itemId).toBe('scene_1_shot_4');
   });
+
+  // Regression: the Cards / Inspector view reads `.dhee/events.jsonl`
+  // (projectInstanceGraph), NOT walkState. Before this fix invalidate
+  // cleared walkState but emitted NO node.invalidated event, so the
+  // cascade was invisible in the UI — marking a node stale left its
+  // downstream still showing 'completed'.
+  it('emits a node.invalidated event for each invalidated key (so the events-based Cards view shows the cascade)', async () => {
+    const result = await invalidateNodes({ projectDir, nodeIds: ['story'] });
+    expect(result.invalidated).toContain('story');
+
+    const eventsPath = join(projectDir, '.dhee/events.jsonl');
+    expect(existsSync(eventsPath)).toBe(true);
+    const events = readFileSync(eventsPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as { kind: string; payload: { nodeId?: string; itemId?: string } });
+    const inval = events.filter((e) => e.kind === 'node.invalidated');
+    expect(inval.some((e) => e.payload.nodeId === 'story')).toBe(true);
+  });
+
+  it('emits node.invalidated for a collection item with the right nodeId + itemId', async () => {
+    await invalidateNodes({ projectDir, nodeIds: ['shot_image:scene_1_shot_3'] });
+    const events = readFileSync(join(projectDir, '.dhee/events.jsonl'), 'utf8')
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as { kind: string; payload: { nodeId?: string; itemId?: string } });
+    const inval = events.filter((e) => e.kind === 'node.invalidated');
+    expect(
+      inval.some((e) => e.payload.nodeId === 'shot_image' && e.payload.itemId === 'scene_1_shot_3'),
+    ).toBe(true);
+  });
 });

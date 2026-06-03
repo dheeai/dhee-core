@@ -68,6 +68,8 @@ export {
 export type { BundleSource } from './bundleSource.js';
 export type { DagBundle, NodeDef, NodeInput, NodeOutput } from './schema.js';
 export { invalidateNodes, regenerateNode } from './projectRegen.js';
+export { writeNodeContent } from './writeNodeContent.js';
+export type { WriteNodeContentInput, WriteNodeContentResult } from './writeNodeContent.js';
 export type {
   InvalidateNodesOpts,
   InvalidateNodesResult,

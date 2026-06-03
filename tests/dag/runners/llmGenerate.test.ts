@@ -146,6 +146,65 @@ describe('llm.generate runner', () => {
     });
   });
 
+  // Empty response is transient (model hiccup) — it must be RETRIED,
+  // not bailed on the first occurrence.
+  describe('empty response retry', () => {
+    it('retries an empty response and succeeds when a later attempt returns content', async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), 'go');
+      let calls = 0;
+      const client = makeStubClient({
+        respond: async () => {
+          calls++;
+          // First two attempts return empty; third returns real content.
+          return calls < 3 ? { content: '' } : { content: '# Recovered\n\nprose' };
+        },
+      });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+
+      const result = await runner.run(makeCtx({
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'out.md',
+          tier: 'medium',
+          outputFormat: 'markdown',
+          maxRetries: 2,
+        },
+      }));
+
+      expect(result.ok).toBe(true);
+      expect(calls).toBe(3); // it actually used its attempts instead of bailing on #1
+      if (result.ok) {
+        expect(readFileSync(join(projectDir, result.outputPath), 'utf-8')).toContain('Recovered');
+      }
+    });
+
+    it('fails only after exhausting all attempts when every response is empty', async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), 'go');
+      let calls = 0;
+      const client = makeStubClient({
+        respond: async () => {
+          calls++;
+          return { content: '' };
+        },
+      });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+
+      const result = await runner.run(makeCtx({
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'out.md',
+          tier: 'medium',
+          outputFormat: 'markdown',
+          maxRetries: 2,
+        },
+      }));
+
+      expect(result.ok).toBe(false);
+      expect(calls).toBe(3); // 1 + 2 retries — NOT a single bail
+      if (!result.ok) expect(result.error).toMatch(/empty response/i);
+    });
+  });
+
   // Failure mode #2 — malformed JSON
   describe('malformed JSON output', () => {
     it('fails clearly with the raw LLM output captured in the error', async () => {
