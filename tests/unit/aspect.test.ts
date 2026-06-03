@@ -89,28 +89,42 @@ describe('applyAspect', () => {
     expect(cfg['height']).toBe(1080);
   });
 
-  // ── Resolution overrides the long edge ─────────────────────────────
+  // ── Resolution = SHORT edge ("720p" means 720p) ────────────────────
 
-  it('11. 16:9 + resolution=720 shrinks 1920x1080 to 720x408', () => {
-    // 720 * 9 / 16 = 405 → rounds to 408
-    expect(applyAspect('16:9', 1920, 1080, 720)).toEqual({ width: 720, height: 408 });
+  it('11. 16:9 + resolution=720 → 1280x720 (true 720p, short edge = 720)', () => {
+    expect(applyAspect('16:9', 1920, 1080, 720)).toEqual({ width: 1280, height: 720 });
   });
 
-  it('12. 9:16 + resolution=720 → 408x720 (portrait at 720p long edge)', () => {
-    expect(applyAspect('9:16', 1920, 1080, 720)).toEqual({ width: 408, height: 720 });
+  it('11b. 16:9 + resolution=1080 → 1920x1080 (true 1080p)', () => {
+    expect(applyAspect('16:9', 1920, 1080, 1080)).toEqual({ width: 1920, height: 1080 });
   });
 
-  it('13. resolution caps at bundle baseline (no upscale)', () => {
-    // bundle says 1920 max → user picks 4K (2160), should NOT exceed bundle baseline
+  it('12. 9:16 + resolution=720 → 720x1280 (portrait 720p, short edge = width)', () => {
+    expect(applyAspect('9:16', 1080, 1920, 720)).toEqual({ width: 720, height: 1280 });
+  });
+
+  it('12b. 21:9 + resolution=720 → 1680x720 (ultrawide 720p)', () => {
+    expect(applyAspect('21:9', 1920, 1080, 720)).toEqual({ width: 1680, height: 720 });
+  });
+
+  it('13. resolution caps at the baseline short edge (no upscale)', () => {
+    // 1920x1080 baseline → short edge maxes at 1080; picking 4K (2160) clamps.
     expect(applyAspect('16:9', 1920, 1080, 2160)).toEqual({ width: 1920, height: 1080 });
   });
 
-  it('14. LTX-shape 854x480 + resolution=720 → 720x408 (capped to 720)', () => {
-    expect(applyAspect('16:9', 854, 480, 720)).toEqual({ width: 720, height: 408 });
+  it('14. LTX baseline 854x480 + resolution=720 → 854x480 (node caps short edge at 480)', () => {
+    // The node was tuned for 480 short edge; 720p can't push it higher
+    // without raising the bundle baseline.
+    expect(applyAspect('16:9', 854, 480, 720)).toEqual({ width: 854, height: 480 });
   });
 
-  it('15. LTX-shape 854x480 + resolution=1080 → 854x480 (capped to bundle baseline)', () => {
+  it('15. LTX baseline 854x480 + resolution=1080 → 854x480 (still capped)', () => {
     expect(applyAspect('16:9', 854, 480, 1080)).toEqual({ width: 854, height: 480 });
+  });
+
+  it('16. raising the LTX baseline to 1280x720 lets resolution=720 yield true 720p', () => {
+    // This is the bundle change that unlocks 720p video.
+    expect(applyAspect('16:9', 1280, 720, 720)).toEqual({ width: 1280, height: 720 });
   });
 
   it('16. resolution=0 or negative is ignored (treated as undefined)', () => {
@@ -118,11 +132,11 @@ describe('applyAspect', () => {
     expect(applyAspect('16:9', 1920, 1080, -5)).toEqual({ width: 1920, height: 1080 });
   });
 
-  it('17. applyAspectToConfig threads resolution through', () => {
+  it('17. applyAspectToConfig threads resolution through (9:16 @720 → 720x1280)', () => {
     const cfg: Record<string, unknown> = { width: 1920, height: 1080 };
     applyAspectToConfig(cfg, '9:16', 720);
-    expect(cfg['width']).toBe(408);
-    expect(cfg['height']).toBe(720);
+    expect(cfg['width']).toBe(720);
+    expect(cfg['height']).toBe(1280);
   });
 
   it('18. square inputs ignore resolution', () => {

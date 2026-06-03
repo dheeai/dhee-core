@@ -177,7 +177,7 @@ describe('walker applies aspect to runner config dimensions', () => {
 
   // ── Resolution flows through alongside aspect ─────────────────────
 
-  it('7. 16:9 + resolution=720 shrinks 1920x1080 to 720x408', async () => {
+  it('7. 16:9 + resolution=720 → 1280x720 (true 720p, short edge)', async () => {
     writeFileSync(
       join(projectDir, 'project.json'),
       JSON.stringify({
@@ -194,11 +194,11 @@ describe('walker applies aspect to runner config dimensions', () => {
         { id: 'resolution', kind: 'project', field: 'resolution', default: 1080 },
       ]),
     });
-    expect(capturedConfig!['width']).toBe(720);
-    expect(capturedConfig!['height']).toBe(408);
+    expect(capturedConfig!['width']).toBe(1280);
+    expect(capturedConfig!['height']).toBe(720);
   });
 
-  it('8. 9:16 + resolution=720 → portrait 408x720', async () => {
+  it('8. 9:16 + resolution=720 → portrait 720x1280 (true 720p)', async () => {
     writeFileSync(
       join(projectDir, 'project.json'),
       JSON.stringify({
@@ -215,8 +215,8 @@ describe('walker applies aspect to runner config dimensions', () => {
         { id: 'resolution', kind: 'project', field: 'resolution', default: 1080 },
       ]),
     });
-    expect(capturedConfig!['width']).toBe(408);
-    expect(capturedConfig!['height']).toBe(720);
+    expect(capturedConfig!['width']).toBe(720);
+    expect(capturedConfig!['height']).toBe(1280);
   });
 
   it('9. resolution caps at bundle baseline (LTX-shape 854 with user 1080 → 854)', async () => {
