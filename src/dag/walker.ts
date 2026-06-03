@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
+import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
 
 function formatSrtTime(totalSeconds: number): string {
@@ -797,7 +798,24 @@ interface WalkResult {
  * Default `reviewLoopMax = 0` preserves single-shot behavior.
  */
 export async function walkBundle(opts: WalkerOptions): Promise<WalkResult> {
-  return walkBundleWithReviewLoop(opts, 0);
+  // Per-project single-flight guard. Two concurrent walks of the same
+  // project corrupt shared state (duplicate event seqs from independent
+  // EventLog handles, lost invalidations from last-writer-wins walkState
+  // snapshots). Acquire-or-reject, keyed per project, held across the
+  // whole review loop. See projectWalkLock.ts (2026-06-03 incident).
+  const lock = acquireWalkLock(opts.projectDir);
+  if (isWalkLockResult(lock)) {
+    const msg =
+      `a walk is already in progress for this project (${lock.holder}). ` +
+      `Stop it first (dhee_stop_run) or wait for it to finish before starting another.`;
+    (opts.log ?? ((m: string) => console.log(m)))(`walker: ${msg}`);
+    return { ok: false, error: msg, instances: [] };
+  }
+  try {
+    return await walkBundleWithReviewLoop(opts, 0);
+  } finally {
+    lock.release();
+  }
 }
 
 async function walkBundleWithReviewLoop(

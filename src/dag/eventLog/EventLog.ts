@@ -44,13 +44,23 @@ export interface EventLog {
  * Open (or create on first append) an event log for a project.
  *
  * Idempotent: opening a log twice returns two independent handles that
- * see the same on-disk state. Each handle re-derives `nextSeq` from the
- * file on first call, then caches it — so within one handle, appends
- * are amortized O(1) ignoring fsync.
+ * see the same on-disk state.
+ *
+ * Seq assignment re-derives from disk on EVERY append — it does NOT
+ * cache an in-memory counter. An earlier version cached `nextSeq` per
+ * handle and incremented locally; when two handles were live at once
+ * (two concurrent walks of one project) their counters diverged and
+ * both emitted the same `seq` (the 2026-06-03 duplicate-seq corruption).
+ * Re-deriving per append is O(file) but appends are infrequent (one per
+ * node, gated by multi-second runner work) and `append` is fully
+ * synchronous, so within a process appends can't interleave and each
+ * sees its predecessor's write. The per-project walk lock
+ * (projectWalkLock.ts) is the primary guard against concurrent walks;
+ * this re-derivation is the belt-and-suspenders that keeps the log
+ * sound even if a non-walk appender races a walk.
  */
 export function openEventLog(projectDir: string): EventLog {
   const path = eventLogPath(projectDir);
-  let cachedNextSeq: number | null = null;
 
   function deriveNextSeq(): number {
     if (!existsSync(path)) return 1;
@@ -75,13 +85,15 @@ export function openEventLog(projectDir: string): EventLog {
   }
 
   function nextSeq(): number {
-    if (cachedNextSeq === null) cachedNextSeq = deriveNextSeq();
-    return cachedNextSeq;
+    return deriveNextSeq();
   }
 
   function append<K extends EventKind>(input: EventAppendInput<K>): DheeEvent<K> {
     ensureDir();
-    const seq = nextSeq();
+    // Re-derive from disk every append (no cached counter) so two live
+    // handles can't both hand out the same seq. See the openEventLog
+    // doc comment for why.
+    const seq = deriveNextSeq();
     const event: DheeEvent<K> = {
       seq,
       id: nanoid(),
@@ -89,7 +101,6 @@ export function openEventLog(projectDir: string): EventLog {
       ...input,
     } as DheeEvent<K>;
     appendFileSync(path, JSON.stringify(event) + '\n');
-    cachedNextSeq = seq + 1;
     return event;
   }
 
