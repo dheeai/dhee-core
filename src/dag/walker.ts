@@ -1122,6 +1122,18 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   for (const node of ordered) {
     if (stopAtReached) break;
 
+    // Cooperative cancellation. stop_run → BackgroundTaskRunner.cancel()
+    // aborts the walker's signal. Check it BETWEEN nodes so no NEW node
+    // starts once an abort lands — the in-flight node's runner honors
+    // the signal via ctx.signal (comfy poll exits); this stops the loop
+    // from advancing to the next one. Without this the walker finished
+    // the current clip and dispatched the next (the 2026-06-03 "chunk_2
+    // started after stop" gap).
+    if (opts.signal?.aborted) {
+      log('walker: abort signal received — halting before next node');
+      break;
+    }
+
     // Lazy materialization for upstream-driven collections. By topo
     // order, every input.from upstream has already run; their output
     // files exist on disk and their instance metadata is in
@@ -1568,6 +1580,14 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       stopAtReached = true;
       log(`walker: reached stopAt='${opts.stopAt}', halting.`);
     }
+  }
+
+  // Aborted mid-walk → report cancellation rather than a misleading
+  // "goal node did not complete". BackgroundTaskRunner keys 'cancelled'
+  // off signal.aborted regardless of this return value, but a clear
+  // error helps direct callers (scripts, runProjectViaBundle).
+  if (opts.signal?.aborted) {
+    return { ok: false, error: 'walk cancelled (abort signal received)', instances: allInstances };
   }
 
   // Goal output (only meaningful when the goal node ran).

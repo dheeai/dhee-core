@@ -534,7 +534,8 @@ export class ComfyUIClient {
   async waitForCompletion(
     promptId: string,
     progressCallback?: ProgressCallback,
-    pollInterval: number = 10
+    pollInterval: number = 10,
+    externalSignal?: AbortSignal
   ): Promise<CompletionResult> {
     // Register the in-flight prompt so the cancel path can call
     // POST /interrupt on this client and stop the GPU job. Always
@@ -550,6 +551,20 @@ export class ComfyUIClient {
     // poll interval is the floor on "how long does Stopping… stay
     // stuck"; with it, abort-to-loop-exit is sub-millisecond.
     const abortController = new AbortController();
+    // Link a caller-supplied signal (the walker's ctx.signal, threaded
+    // through queueAndWaitWS's HTTP fallback). Without this, an abort
+    // that lands during the WS→HTTP transition is LOST: the WS
+    // abortHandler is already disabled (resolved=true) and this job may
+    // not yet be in the activeJobs registry that cancelAllActiveJobs()
+    // fires. Linking the signal here makes stop_run deterministic in the
+    // polling path. (2026-06-03 stop_run gap.)
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener('abort', () => abortController.abort(), { once: true });
+      }
+    }
     const cancelHandle: CancellableComfyJob = {
       promptId,
       interrupt: () => this.interrupt(),
@@ -892,7 +907,9 @@ export class ComfyUIClient {
               promptId,
               progressCallback
                 ? (pct, msg) => progressCallback({ percentage: pct, message: msg })
-                : undefined
+                : undefined,
+              undefined,
+              options.signal,
             );
           })
           .then(result => resolve({ result, promptId, clientId, outputs: collectedOutputs }))
@@ -911,7 +928,9 @@ export class ComfyUIClient {
               promptId,
               progressCallback
                 ? (pct, msg) => progressCallback({ percentage: pct, message: msg })
-                : undefined
+                : undefined,
+              undefined,
+              options.signal,
             );
           })
           .then(result => resolve({ result, promptId, clientId, outputs: collectedOutputs }))
