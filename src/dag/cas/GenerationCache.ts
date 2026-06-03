@@ -22,7 +22,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
-import { computeInputsHash, type InputsHashKey } from './inputsHash.js';
+import { computeInputsHash, type InputsHashKey } from '@dhee/runner-sdk';
 
 export interface CacheEntry {
   hash: string;

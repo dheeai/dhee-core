@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
-import { retryTransient } from './transientRetry.js';
+import { retryTransient, resolveEndpointUrl } from '@dhee/runner-sdk';
 
 interface ShotInput {
   shotNumber: number;
@@ -75,7 +75,6 @@ interface LtxDirectorConfig {
  * the env key (env names can't contain dots). So `self.local` reads
  * `ENDPOINT_self_local`.
  */
-import { resolveEndpointUrl } from './endpointResolver.js';
 
 // ── Prompt-shaping helpers (ported verbatim from probe-ltx-director.ts) ──
 

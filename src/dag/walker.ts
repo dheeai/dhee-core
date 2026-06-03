@@ -28,8 +28,9 @@ function formatSrtTime(totalSeconds: number): string {
     `${ms.toString().padStart(3, '0')}`
   );
 }
-import type { DagBundle, NodeDef, RunnerContext, RunnerResult } from './schema.js';
+import type { DagBundle, LLMAccess, NodeDef, RunnerContext, RunnerResult } from './schema.js';
 import type { BundleInputDecl } from './schema.js';
+import { createRunnerLLMAccess } from './llmAccess.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
@@ -159,6 +160,8 @@ export interface WalkerOptions {
   engine?: import('./eventLog/ProjectionEngine.js').ProjectionEngine;
   /** Branch this walk runs on; events tagged with it. Default 'main'. */
   branchId?: string;
+  /** Optional test/host override for the runner-facing LLM capability. */
+  llm?: LLMAccess;
 }
 
 interface NodeInstance {
@@ -805,6 +808,7 @@ async function walkBundleWithReviewLoop(
 async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const cli = opts.cli ?? {};
+  const llm = opts.llm ?? createRunnerLLMAccess(opts.projectDir);
 
   // Bundle dependency validation — fail BEFORE walking when a declared
   // runner isn't registered, version doesn't satisfy, or required
@@ -1280,6 +1284,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         inputs: resolvedInputs,
         ...(opts.signal ? { signal: opts.signal } : {}),
         log: (m) => log(`  ${m}`),
+        llm,
       };
 
       if (state) {
@@ -1495,4 +1500,3 @@ export type { InitializeProjectParams, InitializeProjectResult } from './initial
 // render the bundle picker without going through the agent.
 export { listBundles } from './listBundles.js';
 export type { BundleSummary } from './listBundles.js';
-

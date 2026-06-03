@@ -1,0 +1,20 @@
+{
+  "tool": "openrouter.image",
+  "version": "0.1.0",
+  "engineCompat": ">=0.1.0",
+  "credentials": ["OPENROUTER_API_KEY"],
+  "displayName": "OpenRouter Image",
+  "description": "Generates image artifacts via OpenRouter image-capable models.",
+  "entry": "dist/index.js",
+  "permissions": {
+    "network": ["openrouter.ai"],
+    "filesystem": "project",
+    "subprocess": false,
+    "env": [
+      "OPENROUTER_API_KEY",
+      "OPENROUTER_IMAGE_MODEL",
+      "OPENROUTER_HTTP_REFERER",
+      "OPENROUTER_APP_TITLE"
+    ]
+  }
+}

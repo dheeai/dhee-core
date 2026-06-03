@@ -36,7 +36,7 @@ import { copyFileSync } from 'node:fs';
 
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
-import type { InputsHashKey } from '../cas/inputsHash.js';
+import type { InputsHashKey } from '@dhee/runner-sdk';
 
 interface FfmpegShotClipConfig {
   shotNumber: number;

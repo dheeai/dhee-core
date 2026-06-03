@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
-import { retryTransient } from './transientRetry.js';
+import { retryTransient, resolveEndpointUrl } from '@dhee/runner-sdk';
 
 interface PriorShot { shotNumber: number; itemId?: string; outputAbs: string }
 interface ShotPromptJSON {
@@ -57,7 +57,6 @@ interface ChainConfig {
   forceRerun?: boolean;
 }
 
-import { resolveEndpointUrl } from './endpointResolver.js';
 
 async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   const cfg = ctx.node.runner.config as unknown as ChainConfig;

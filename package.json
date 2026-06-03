@@ -38,7 +38,7 @@
   "scripts": {
     "cli": "NODE_OPTIONS='--max-old-space-size=8192' tsx src/index.ts",
     "kill": "pkill -f 'tsx.*src/index.ts' || true; echo 'All dhee processes killed'",
-    "build": "pnpm -C frontend run build && tsup",
+    "build": "pnpm -C packages/runner-sdk run build && pnpm -C packages/openrouter-image-runner run build && pnpm -C frontend run build && tsup",
     "build:frontend": "pnpm -C frontend run build",
     "test:frontend": "pnpm -C frontend test",
     "test": "vitest run tests/unit/",
@@ -75,6 +75,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@dhee/runner-sdk": "workspace:*",
     "@fastify/cors": "^11.1.0",
     "@fastify/multipart": "^9.4.0",
     "@fastify/websocket": "^11.2.0",

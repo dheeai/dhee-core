@@ -23,23 +23,22 @@
  * cancellation skips remaining retries.
  *
  * Testability: the LLM client is injected via `clientFactory` so unit
- * tests stub it. The default factory uses the project's `LLMRouter`
- * with a tier→purpose mapping (because the router's public API takes
- * purposes, not raw tiers).
+ * tests stub it. In production the walker injects model access through
+ * `ctx.llm`, keeping runners decoupled from engine LLM internals.
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
 import { openGenerationCache } from '../cas/GenerationCache.js';
-import type { InputsHashKey } from '../cas/inputsHash.js';
+import type { InputsHashKey, LLMAccessTier } from '@dhee/runner-sdk';
 // ajv / ajv-formats ESM<>CJS interop: verbatimModuleSyntax preserves
 // the default import shape, but ajv's CJS exports the constructor
 // directly. The `* as` form lets us reach `.default` defensively.
 import * as ajvNs from 'ajv';
 import * as ajvFormatsNs from 'ajv-formats';
 import type { Runner, RunnerContext, RunnerResult, RunnerDescription } from '../schema.js';
-import type { LLMPurpose, LLMTier } from '../../core/llm/purposes.js';
-import { LLMRouter, loadRoutingFromEnv, isRoutingEnabledFromEnv } from '../../core/llm/router.js';
-import { getLLMConfig } from '../../core/llm/config.js';
+
+type LLMTier = LLMAccessTier;
+type LLMPurpose = string;
 
 // Pull the actual constructor from whichever export shape ajv ships.
 type AjvInstance = { compile: (schema: unknown) => (data: unknown) => boolean; errors?: Array<{ instancePath?: string; message?: string }> | null };
@@ -95,53 +94,6 @@ export interface LlmGenerateClient {
 
 export type LlmClientFactory = (tier: LLMTier, purpose?: LLMPurpose) => LlmGenerateClient;
 
-/**
- * Default client factory: route via LLMRouter using a representative
- * purpose for each tier. Bundles that want fine-grained routing can
- * declare `purpose:` explicitly instead of `tier:`.
- */
-const TIER_REPRESENTATIVE_PURPOSE: Record<LLMTier, LLMPurpose> = {
-  heavy: 'content.story',
-  medium: 'structured.scene_breakdown',
-  light: 'utility.image_review',
-};
-
-function defaultClientFactory(tier: LLMTier, purpose?: LLMPurpose): LlmGenerateClient {
-  // Read env-based default LLM config (LLM_PROVIDER + per-provider vars).
-  // Without this, the router uses hardcoded LM Studio defaults which
-  // require a local server running.
-  const envDefault = getLLMConfig();
-  // Honor LLM_ROUTING_ENABLED + LLM_TIER_*_MODEL env so bundles using
-  // `tier: 'heavy'` actually route to LLM_TIER_HEAVY_MODEL rather than
-  // falling back to OPENAI_MODEL. Without this, OPENAI_MODEL leaks
-  // through (e.g. a deprecated model) and overrides per-tier choices.
-  const routing = loadRoutingFromEnv();
-  const enabled = isRoutingEnabledFromEnv();
-  const router = new LLMRouter(envDefault, routing, enabled);
-  const eff = purpose ?? TIER_REPRESENTATIVE_PURPOSE[tier];
-  const client = router.getClient(eff);
-  return {
-    async generate(opts) {
-      // LLMClient supports responseFormat: { type: 'json_object' } but
-      // not { type: 'text' } — for text format we just omit it.
-      const passResponseFormat =
-        opts.responseFormat && opts.responseFormat.type === 'json_object'
-          ? { responseFormat: { type: 'json_object' as const } }
-          : {};
-      const resp = await client.generate({
-        messages: opts.messages,
-        ...(opts.signal ? { signal: opts.signal } : {}),
-        ...passResponseFormat,
-        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-        ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
-      });
-      // LLMResponse.content is string | null; normalize to string | undefined.
-      return { content: resp.content ?? undefined };
-    },
-    getModel: () => client.getModel(),
-  };
-}
-
 // ── Config validation ──────────────────────────────────────────────────
 
 function validateConfig(raw: unknown): { ok: true; cfg: LlmGenerateConfig } | { ok: false; error: string } {
@@ -164,7 +116,7 @@ function validateConfig(raw: unknown): { ok: true; cfg: LlmGenerateConfig } | { 
       error: `llm.generate: tier '${cfg.tier}' is not valid. Expected one of: ${VALID_TIERS.join(', ')}.`,
     };
   }
-  const fmt = cfg.outputFormat ?? 'markdown';
+  const fmt = typeof cfg.outputFormat === 'string' ? cfg.outputFormat : 'markdown';
   if (fmt !== 'markdown' && fmt !== 'json') {
     return { ok: false, error: `llm.generate: outputFormat '${fmt}' is not valid (expected 'markdown' or 'json').` };
   }
@@ -250,7 +202,7 @@ function validateAgainstSchema(value: unknown, schemaPath: string): { ok: true }
 export function createLlmGenerateRunner(opts?: {
   clientFactory?: LlmClientFactory;
 }): Runner {
-  const clientFactory = opts?.clientFactory ?? defaultClientFactory;
+  const clientFactory = opts?.clientFactory;
 
   const describe = (): RunnerDescription => ({
     id: 'llm.generate',
@@ -435,10 +387,36 @@ export function createLlmGenerateRunner(opts?: {
     // 4. Call LLM (with retries + abort).
     const tier: LLMTier = cfg.tier ?? 'medium';
     let client: LlmGenerateClient;
-    try {
-      client = clientFactory(tier, cfg.purpose);
-    } catch (err) {
-      return { ok: false, error: `llm.generate: failed to construct LLM client: ${(err as Error).message}` };
+    if (clientFactory) {
+      try {
+        client = clientFactory(tier, cfg.purpose);
+      } catch (err) {
+        return { ok: false, error: `llm.generate: failed to construct LLM client: ${(err as Error).message}` };
+      }
+    } else {
+      if (!ctx.llm) {
+        return {
+          ok: false,
+          error: 'llm.generate requires ctx.llm. The walker must inject LLM access into RunnerContext.',
+        };
+      }
+      let model = 'unknown';
+      client = {
+        async generate(llmOpts) {
+          const resp = await ctx.llm!.generateText({
+            messages: llmOpts.messages,
+            tier,
+            ...(cfg.purpose ? { purpose: cfg.purpose } : {}),
+            ...(llmOpts.signal ? { signal: llmOpts.signal } : {}),
+            ...(llmOpts.responseFormat ? { responseFormat: llmOpts.responseFormat } : {}),
+            ...(llmOpts.temperature !== undefined ? { temperature: llmOpts.temperature } : {}),
+            ...(llmOpts.maxTokens !== undefined ? { maxTokens: llmOpts.maxTokens } : {}),
+          });
+          model = resp.model ?? model;
+          return { content: resp.content };
+        },
+        getModel: () => model,
+      };
     }
 
     const maxRetries = cfg.maxRetries ?? 2;

@@ -23,10 +23,10 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
-import { retryTransient } from './transientRetry.js';
+import { retryTransient, resolveEndpointUrl } from '@dhee/runner-sdk';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
-import type { InputsHashKey } from '../cas/inputsHash.js';
+import type { InputsHashKey } from '@dhee/runner-sdk';
 
 // ── Public types ──────────────────────────────────────────────────────
 
@@ -90,7 +90,6 @@ const KLEIN_MAX_REFS = 4;
 
 // ── Endpoint resolution ────────────────────────────────────────────────
 
-import { resolveEndpointUrl } from './endpointResolver.js';
 import { extractShotReferences } from './extractShotReferences.js';
 
 // ── Default client factory (uses ComfyUIClient) ────────────────────────

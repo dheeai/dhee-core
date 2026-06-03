@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@dhee/runner-sdk':
+        specifier: workspace:*
+        version: link:packages/runner-sdk
       '@fastify/cors':
         specifier: ^11.1.0
         version: 11.1.0
@@ -202,6 +205,28 @@ importers:
       vitest:
         specifier: ^4.1.2
         version: 4.1.4(@types/node@24.12.2)(@vitest/coverage-v8@3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@22.19.1)(jiti@2.6.1)(jsdom@29.0.2)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3)))(jsdom@29.0.2)(vite@8.0.8(@types/node@24.12.2)(esbuild@0.27.1)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+
+  packages/openrouter-image-runner:
+    dependencies:
+      '@dhee/runner-sdk':
+        specifier: workspace:*
+        version: link:../runner-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.29
+        version: 22.19.1
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  packages/runner-sdk:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.29
+        version: 22.19.1
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
 
 packages:
 
@@ -1199,6 +1224,7 @@ packages:
   '@mariozechner/pi-tui@0.70.6':
     resolution: {integrity: sha512-orBJEwMdpBC38AXfdVBKT5ZvqNTcKg6g3NdoF5a9aNQzDI/dOTu1UNYFYyEOTFRiTxSR1nw8eovbCcaSyekWfw==}
     engines: {node: '>=20.0.0'}
+    deprecated: please use @earendil-works/pi-tui instead going forward
 
   '@mistralai/mistralai@2.2.1':
     resolution: {integrity: sha512-uKU8CZmL2RzYKmplsU01hii4p3pe4HqJefpWNRWXm1Tcm0Sm4xXfwSLIy4k7ZCPlbETCGcp69E7hZs+WOJ5itQ==}
@@ -1635,6 +1661,7 @@ packages:
   '@smithy/util-retry@4.3.6':
     resolution: {integrity: sha512-p6/FO1n2KxMeQyna067i0uJ6TSbb165ZhnRtCpWh4Foxqbfc6oW+XITaL8QkFJj3KFnDe2URt4gOhgU06EP9ew==}
     engines: {node: '>=18.0.0'}
+    deprecated: '@smithy/util-retry v4.3.6 contains a bug in Adaptive Retry, see https://github.com/smithy-lang/smithy-typescript/issues/1993. Upgrade to 4.3.7+'
 
   '@smithy/util-stream@4.5.25':
     resolution: {integrity: sha512-/PFpG4k8Ze8Ei+mMKj3oiPICYekthuzePZMgZbCqMiXIHHf4n2aZ4Ps0aSRShycFTGuj/J6XldmC0x0DwednIA==}
@@ -6241,7 +6268,7 @@ snapshots:
 
   '@types/node-fetch@2.6.13':
     dependencies:
-      '@types/node': 22.19.1
+      '@types/node': 24.12.2
       form-data: 4.0.5
 
   '@types/node@18.19.130':
