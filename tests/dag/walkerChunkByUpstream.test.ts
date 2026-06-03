@@ -531,6 +531,11 @@ describe('resolution-aware chunk cap (maxFramePixels)', () => {
       projectDir,
       bundle: makeSlateBundle(),
       bundleSource: 'built-in:chunkby-test',
+      // Pin the reference VRAM (12 GiB) so the chunk math is deterministic
+      // and the test never hits the real network GPU probe. R2/R3/R4 stub
+      // this; R1 was the lone holdout, which made it slow/flaky on a busy
+      // box or in CI (it timed out hitting the live Comfy probe twice).
+      probeGpuVramBytes: async () => 12 * 1024 ** 3,
     });
     expect(lo.ok).toBe(true);
     expect(countSceneChunks()).toBe(1);
@@ -542,6 +547,7 @@ describe('resolution-aware chunk cap (maxFramePixels)', () => {
       projectDir,
       bundle: makeSlateBundle(),
       bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => 12 * 1024 ** 3,
     });
     expect(hi.ok).toBe(true);
     expect(countSceneChunks()).toBe(2);
