@@ -445,3 +445,21 @@ prompted the migration are documented in the commit history of the
 - **Fix commit:** (this branch — fix/bundle-errors)
 
 ---
+
+### BUG-028 — Agent re-renders only the video on a resolution request, leaving images stale
+- **Status:** fixed
+- **Discovered:** 2026-06-03
+- **Reporter:** user (anticipated) + claude (reproduced via headless drive)
+- **Symptom:** Asked (via the headless pi-agent) to take eye-of-the-storm to true 720p — "the shot images need to be actual 720p too" — the agent invalidated only `scene_clip` + `final_video` and left all 39 `shot_image` nodes at their old 720×408 size. It then rendered 720p video conditioned on stale low-res frames (not true 720p quality).
+- **Evidence:**
+  - `lastInvalidatedIds: ["scene_clip","final_video"]`; all `shot_image:*` stayed `completed`; sample image dims 720×408 (old long-edge "720p"), final video 640×384.
+  - The project's `resolution` was ALREADY 720 — the images are low-res only because they were rendered BEFORE the aspect-edge semantics fix (when 720p meant long-edge 720 → 720×408). So nothing "changed" from the agent's view, and `completed` looks fine; it had no signal the images were stale.
+- **Suspected root cause:** confirmed — the agent has no way to tell that a `completed` artifact's dimensions no longer match the target aspect+resolution. Re-running the video stage felt sufficient.
+- **Manifestations to test:**
+  - Pure staleness check: old long-edge (720×408) vs true 720p (1280×720) → stale; LTX rounding (704 vs 720) → not stale; orientation flip → stale; square refs → never stale — `resolutionStaleness.test.ts`.
+  - Tool flags only the stale image, leaves fresh + square alone — `dheeCheckResolution.test.ts`.
+- **Fix:** new read-only agent tool `dhee_check_resolution(projectDir)` — reads each completed image's real dimensions (dependency-free PNG IHDR parse) and compares to `applyAspect(aspect, baseline, resolution)`, listing the stale ones. Pure helpers in `src/dag/resolutionStaleness.ts` (`isResolutionStale`, `readPngDims`). SKILL.md now requires: on any resolution/aspect request (or "looks low-res"), set the field → `dhee_check_resolution` → regenerate the flagged IMAGE nodes (cascades to video) — never stop at the video stage. `resolution` added to the documented project-field list.
+- **Test:** `tests/dag/resolutionStaleness.test.ts`; `tests/unit/dheeCheckResolution.test.ts`; allowlist via `tests/unit/dheeAgentTools.test.ts > DHEE_TOOL_NAMES`
+- **Fix commit:** (this branch — fix/bundle-errors)
+
+---
