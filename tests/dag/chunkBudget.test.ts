@@ -24,10 +24,12 @@
  *   9. Degenerate area (width 0) → limit unchanged.
  */
 import { describe, it, expect } from 'vitest';
-import { effectiveFrameCap } from '../../src/dag/chunkBudget.js';
+import { effectiveFrameCap, scaleBudgetForGpu } from '../../src/dag/chunkBudget.js';
 
 // 1000 frames × 854 × 480 — the proven-safe latent volume at 480p.
 const BUDGET = 409_920_000;
+// 12 GiB — the GPU the BUDGET was measured on (RTX 3060).
+const REF_VRAM = 12 * 1024 ** 3;
 
 describe('effectiveFrameCap', () => {
   it('1. no budget → returns limit unchanged', () => {
@@ -80,5 +82,45 @@ describe('effectiveFrameCap', () => {
   it('10. never returns below 8 frames', () => {
     // Absurdly small budget would floor to 0; clamp at the 8-frame floor.
     expect(effectiveFrameCap(1000, 1920, 1080, 100)).toBe(8);
+  });
+});
+
+describe('scaleBudgetForGpu', () => {
+  it('1. unknown GPU (null/0) → budget unchanged', () => {
+    expect(scaleBudgetForGpu(BUDGET, null, REF_VRAM)).toBe(BUDGET);
+    expect(scaleBudgetForGpu(BUDGET, 0, REF_VRAM)).toBe(BUDGET);
+    expect(scaleBudgetForGpu(BUDGET, undefined, REF_VRAM)).toBe(BUDGET);
+  });
+
+  it('2. same GPU as the reference → budget unchanged', () => {
+    expect(scaleBudgetForGpu(BUDGET, REF_VRAM, REF_VRAM)).toBe(BUDGET);
+  });
+
+  it('3. 24 GiB GPU → budget ~doubles', () => {
+    expect(scaleBudgetForGpu(BUDGET, 24 * 1024 ** 3, REF_VRAM)).toBe(BUDGET * 2);
+  });
+
+  it('4. 8 GiB GPU → budget shrinks proportionally', () => {
+    // 8/12 = 0.666… → floor(409,920,000 × 8/12) = 273,280,000.
+    expect(scaleBudgetForGpu(BUDGET, 8 * 1024 ** 3, REF_VRAM)).toBe(Math.floor((BUDGET * 8) / 12));
+  });
+
+  it('5. absent reference defaults to 12 GiB', () => {
+    expect(scaleBudgetForGpu(BUDGET, 24 * 1024 ** 3, undefined)).toBe(
+      scaleBudgetForGpu(BUDGET, 24 * 1024 ** 3, REF_VRAM),
+    );
+  });
+
+  it('6. composes with effectiveFrameCap: 12 GiB → cap 440, 24 GiB → cap 888 @720p', () => {
+    const at12 = scaleBudgetForGpu(BUDGET, 12 * 1024 ** 3, REF_VRAM);
+    const at24 = scaleBudgetForGpu(BUDGET, 24 * 1024 ** 3, REF_VRAM);
+    expect(effectiveFrameCap(1000, 1280, 720, at12)).toBe(440);
+    expect(effectiveFrameCap(1000, 1280, 720, at24)).toBe(888);
+  });
+
+  it('7. this 3060 reports 11.999 GiB → 12 GiB reference keeps the cap at 440 (no drift)', () => {
+    const actual3060 = 12_884_246_528; // measured via /system_stats
+    const scaled = scaleBudgetForGpu(BUDGET, actual3060, REF_VRAM);
+    expect(effectiveFrameCap(1000, 1280, 720, scaled)).toBe(440);
   });
 });

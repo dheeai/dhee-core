@@ -141,6 +141,37 @@ export function getComfyConfig(
   };
 }
 
+/**
+ * Probe the configured Comfy's GPU total VRAM (bytes), or null if it
+ * can't be determined (probe failed / timed out, headless, or a cloud
+ * route with no GPU device). Builds a short-timeout client from the same
+ * env-based config the runners use, so it queries the box that will run
+ * the render. Best-effort and bounded: a slow or absent Comfy resolves
+ * to null within ~12s rather than stalling the walk. Used to make scene
+ * chunking GPU-aware (see src/dag/chunkBudget.ts, BUG-026).
+ */
+export async function probeGpuVramBytes(
+  env: Record<string, string | undefined> = process.env as any,
+): Promise<number | null> {
+  try {
+    const cfg = getComfyConfig(env);
+    const client = new ComfyUIClient({
+      outputDir: '/tmp',
+      timeout: 10,
+      ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+      ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
+      ...(cfg.isCloud !== undefined ? { isCloud: cfg.isCloud } : {}),
+    });
+    const timeout = new Promise<null>((resolve) => {
+      const t = setTimeout(() => resolve(null), 12_000);
+      (t as { unref?: () => void }).unref?.();
+    });
+    return await Promise.race([client.getGpuVramTotalBytes(), timeout]);
+  } catch {
+    return null;
+  }
+}
+
 export interface ImageInfo {
   filename: string;
   subfolder: string;
@@ -1546,6 +1577,26 @@ export class ComfyUIClient {
   }
 
   // Helper methods
+
+  /**
+   * Total VRAM (bytes) of the GPU running this Comfy, via /system_stats.
+   * Returns null if the endpoint is unreachable or reports no device with
+   * a numeric `vram_total` — callers treat null as "GPU unknown, use the
+   * unscaled budget". Used by the walker to make scene chunking GPU-aware.
+   */
+  async getGpuVramTotalBytes(): Promise<number | null> {
+    try {
+      const response = await this.request('/system_stats');
+      if (!response.ok) return null;
+      const stats = (await response.json()) as {
+        devices?: Array<{ vram_total?: number }>;
+      };
+      const dev = (stats.devices ?? []).find((d) => typeof d.vram_total === 'number');
+      return dev?.vram_total ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   private async getHistory(promptId: string): Promise<HistoryEntry | null> {
     const response = await this.request(

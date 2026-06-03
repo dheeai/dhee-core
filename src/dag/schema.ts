@@ -88,6 +88,15 @@ export interface ChunkBy {
    * only `limit` applies (legacy). See src/dag/chunkBudget.ts.
    */
   maxFramePixels?: number;
+  /**
+   * Total GPU VRAM (bytes) the `maxFramePixels` budget was measured on.
+   * At walk time the walker probes the actual GPU's VRAM (Comfy
+   * /system_stats) and scales the budget by `actualVram / referenceVram`,
+   * so a budget tuned on a 12 GiB card automatically grows on a 24 GiB
+   * card (longer chunks) and shrinks on an 8 GiB card. Defaults to 12 GiB
+   * when absent. Only meaningful alongside `maxFramePixels`.
+   */
+  referenceVramBytes?: number;
 }
 
 export interface NodeDef {

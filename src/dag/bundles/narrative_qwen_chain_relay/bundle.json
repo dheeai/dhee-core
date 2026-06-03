@@ -487,7 +487,8 @@
         "limit": 1000,
         "fps": 24,
         "firstSegmentPlusOne": true,
-        "maxFramePixels": 409920000
+        "maxFramePixels": 409920000,
+        "referenceVramBytes": 12884901888
       },
       "inputs": [
         {

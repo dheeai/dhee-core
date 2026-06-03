@@ -24,6 +24,33 @@
 
 const ALIGN = 8;
 
+/** Default VRAM the bundle budgets are measured against — 12 GiB (RTX 3060). */
+const DEFAULT_REFERENCE_VRAM_BYTES = 12 * 1024 ** 3;
+
+/**
+ * Scale a px·frame budget by the actual GPU's VRAM relative to the VRAM
+ * the budget was measured on. A budget tuned at 12 GiB doubles on a
+ * 24 GiB card (longer chunks, fewer relay seams) and shrinks on an 8 GiB
+ * card (still fits). The scaling is proportional to total VRAM — a
+ * deliberate simplification: model weights take a fixed slab and only
+ * the latent scales, so this is slightly conservative on big cards (it
+ * under-counts the headroom freed once weights are resident), which is
+ * the safe direction. `gpuVramBytes` null/0 (probe failed, cloud,
+ * headless) → budget unchanged. See BUG-026.
+ */
+export function scaleBudgetForGpu(
+  budget: number,
+  gpuVramBytes: number | null | undefined,
+  referenceVramBytes?: number,
+): number {
+  if (typeof gpuVramBytes !== 'number' || gpuVramBytes <= 0) return budget;
+  const ref =
+    typeof referenceVramBytes === 'number' && referenceVramBytes > 0
+      ? referenceVramBytes
+      : DEFAULT_REFERENCE_VRAM_BYTES;
+  return Math.max(1, Math.floor((budget * gpuVramBytes) / ref));
+}
+
 export function effectiveFrameCap(
   limit: number,
   renderWidth: number,

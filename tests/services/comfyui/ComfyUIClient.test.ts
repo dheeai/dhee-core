@@ -460,3 +460,58 @@ describe('ComfyUIClient.waitForCompletion local error detection', () => {
     expect(result.prompt_id).toBe(promptId);
   }, 4000);
 });
+
+describe('ComfyUIClient.getGpuVramTotalBytes', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function makeClient(): ComfyUIClient {
+    return new ComfyUIClient({
+      baseUrl: 'http://localhost:8188',
+      outputDir: '/tmp',
+      timeout: 300,
+      apiKey: undefined,
+      isCloud: false,
+    });
+  }
+
+  it('returns the device vram_total from /system_stats', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        devices: [
+          {
+            name: 'NVIDIA GeForce RTX 3060',
+            vram_total: 12_884_246_528,
+            vram_free: 3_300_000_000,
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as typeof fetch;
+    await expect(makeClient().getGpuVramTotalBytes()).resolves.toBe(12_884_246_528);
+  });
+
+  it('returns null when /system_stats reports no device with vram_total', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ devices: [{ name: 'cpu' }] }),
+    });
+    global.fetch = fetchMock as typeof fetch;
+    await expect(makeClient().getGpuVramTotalBytes()).resolves.toBeNull();
+  });
+
+  it('returns null when /system_stats fails (non-ok)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) });
+    global.fetch = fetchMock as typeof fetch;
+    await expect(makeClient().getGpuVramTotalBytes()).resolves.toBeNull();
+  });
+
+  it('returns null when the request throws (unreachable Comfy)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    global.fetch = fetchMock as typeof fetch;
+    await expect(makeClient().getGpuVramTotalBytes()).resolves.toBeNull();
+  });
+});

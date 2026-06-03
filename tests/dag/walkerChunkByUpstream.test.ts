@@ -560,4 +560,49 @@ describe('resolution-aware chunk cap (maxFramePixels)', () => {
     // 601 frames ≤ limit 1000 → single chunk even at 720p.
     expect(countSceneChunks()).toBe(1);
   });
+
+  it('(R3) GPU-aware: a 24 GiB card keeps whole the 720p scene that splits on 12 GiB', async () => {
+    // Reference budget is tuned at 12 GiB. The probe seam reports the
+    // actual GPU; on a 24 GiB card the budget doubles (409.92M → 819.84M),
+    // so the 720p cap rises from 440 to 888 frames and the 601-frame scene
+    // fits in one chunk again — fewer relay seams on bigger hardware.
+    const bundle = makeSlateBundle();
+
+    // 12 GiB probe → splits into 2 (matches R1).
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const at12 = await walkBundle({
+      projectDir,
+      bundle,
+      bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => 12 * 1024 ** 3,
+    });
+    expect(at12.ok).toBe(true);
+    expect(countSceneChunks()).toBe(2);
+
+    // 24 GiB probe → stays whole.
+    seen.length = 0;
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const at24 = await walkBundle({
+      projectDir,
+      bundle,
+      bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => 24 * 1024 ** 3,
+    });
+    expect(at24.ok).toBe(true);
+    expect(countSceneChunks()).toBe(1);
+  });
+
+  it('(R4) probe returning null (GPU unknown) → budget unscaled, 12 GiB behavior', async () => {
+    // Cloud / headless / unreachable Comfy → null probe → budget stays at
+    // the 12 GiB reference, so chunking matches R1's 12 GiB split.
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const result = await walkBundle({
+      projectDir,
+      bundle: makeSlateBundle(),
+      bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => null,
+    });
+    expect(result.ok).toBe(true);
+    expect(countSceneChunks()).toBe(2);
+  });
 });
