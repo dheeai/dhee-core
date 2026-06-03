@@ -27,9 +27,48 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
+
+/**
+ * Probe for whether a bundle run is ACTUALLY executing right now.
+ *
+ * walkState is not authoritative for liveness: a node is written
+ * `in_progress` when the walker starts it, but if the run dies (process
+ * killed, crash, restart) the entry is never cleared — it dangles as a
+ * stale `in_progress` forever. Reading walkState alone, the agent then
+ * reports "still running 26m" for a render that stopped long ago and
+ * refuses to resume. The real liveness signal is the BackgroundTaskRunner:
+ * if it has no active task for this project, any `in_progress` is stale.
+ */
+export interface ActiveRunProbe {
+  /** False when the runner couldn't be consulted (headless/unknown). */
+  known: boolean;
+  /** projectName of the runner's active task, if any. */
+  activeProjectName?: string;
+}
+
+async function defaultProbeActiveRun(): Promise<ActiveRunProbe> {
+  try {
+    const mod = (await import('../../../server/runners/backgroundTaskRunnerSingleton.js')) as {
+      getBackgroundTaskRunner: () => { getActive: () => null | { spec?: { projectName?: string } } };
+    };
+    const active = mod.getBackgroundTaskRunner().getActive();
+    return active
+      ? { known: true, ...(active.spec?.projectName ? { activeProjectName: active.spec.projectName } : {}) }
+      : { known: true };
+  } catch {
+    // Couldn't load the runner (e.g. headless test) — don't assert
+    // liveness either way.
+    return { known: false };
+  }
+}
+
+export interface GetStatusDeps {
+  /** Test seam — override the active-run liveness probe. */
+  probeActiveRun?: () => Promise<ActiveRunProbe>;
+}
 
 const Params = Type.Object({
   projectDir: Type.String({
@@ -92,7 +131,8 @@ function fmtElapsed(seconds: number): string {
   return `${m}m${s.toString().padStart(2, '0')}s`;
 }
 
-export function makeGetStatusTool() {
+export function makeGetStatusTool(deps: GetStatusDeps = {}) {
+  const probeActiveRun = deps.probeActiveRun ?? defaultProbeActiveRun;
   return defineTool({
     name: 'dhee_get_status',
     label: 'Project status',
@@ -157,15 +197,34 @@ export function makeGetStatusTool() {
         );
       }
 
-      const inProgressDetail: string[] = [];
+      // Liveness reconciliation: walkState `in_progress` is only
+      // trustworthy while a run is actually executing. Consult the
+      // BackgroundTaskRunner — if it isn't running THIS project, any
+      // `in_progress` entry is a STALE leftover from an interrupted run
+      // (killed process / crash / restart), NOT live work.
       const inProgressKeys = keysByBucket['in_progress'] ?? [];
+      const probe = inProgressKeys.length > 0 ? await probeActiveRun() : { known: true as const };
+      const projectName = basename(params.projectDir.replace(/\/+$/, ''));
+      const runLiveForThisProject =
+        probe.known && probe.activeProjectName !== undefined && probe.activeProjectName === projectName;
+      // Only call an in_progress entry "stale" when we POSITIVELY know
+      // no run is active here (probe.known + no matching active task).
+      // If the probe couldn't run (headless), don't assert staleness.
+      const inProgressIsStale = probe.known && !runLiveForThisProject && inProgressKeys.length > 0;
+
+      const inProgressDetail: string[] = [];
       for (const key of inProgressKeys) {
         const entry = nodes[key]!;
-        const elapsed =
-          entry.startedAt != null
-            ? `  running ${fmtElapsed(Math.floor((now - entry.startedAt) / 1000))}`
-            : `  running (start time unknown)`;
-        inProgressDetail.push(`  - ${key}\n    ${elapsed}`);
+        const startedAgo =
+          entry.startedAt != null ? fmtElapsed(Math.floor((now - entry.startedAt) / 1000)) : 'unknown';
+        if (inProgressIsStale) {
+          inProgressDetail.push(
+            `  - ${key}\n    INTERRUPTED — marked in_progress ${startedAgo} ago but NO run is active now. ` +
+              `This did not finish; it was cut off (the run stopped). It will re-run on the next dispatch.`,
+          );
+        } else {
+          inProgressDetail.push(`  - ${key}\n    running ${startedAgo}`);
+        }
       }
 
       // Header includes wall-clock + last-query awareness so the LLM
@@ -187,11 +246,23 @@ export function makeGetStatusTool() {
         `  failed:      ${(buckets['failed'] ?? []).length}`,
       ];
       if (inProgressDetail.length > 0) {
-        summary.push(``, `In progress:`, ...inProgressDetail);
-        summary.push(
-          ``,
-          `(If the elapsed time is well past typical, the render may have stalled — check Comfy queue. Otherwise wait for the user to ask before re-querying.)`,
-        );
+        if (inProgressIsStale) {
+          summary.push(
+            ``,
+            `Interrupted (NOT running — no active run for this project):`,
+            ...inProgressDetail,
+          );
+          summary.push(
+            ``,
+            `These node(s) are stale walkState leftovers from a run that stopped, NOT live work — do NOT tell the user "it's still running". To finish them, dispatch a run (dhee_start_run / dhee_run_bundle); the walker re-runs interrupted + failed nodes and skips completed ones.`,
+          );
+        } else {
+          summary.push(``, `In progress (run is active):`, ...inProgressDetail);
+          summary.push(
+            ``,
+            `(If the elapsed time is well past typical, the render may have stalled — check Comfy queue. Otherwise wait for the user to ask before re-querying.)`,
+          );
+        }
       }
       if (failedDetail.length > 0) {
         summary.push(``, `Failed nodes:`, ...failedDetail);
