@@ -299,9 +299,17 @@ scoped to the project so you don't waste context on engine internals.
      target. **Always run this before declaring a resolution request done**,
      even if `resolution` was already set (the existing renders can still
      predate it).
-  3. For every stale node it reports, `dhee_regenerate_node(nodeId,
-     itemId)` — that re-renders the IMAGE at the target size and cascades
-     to the scene clips + final cut. Do NOT stop at the video stage.
+  3. Regenerate ALL flagged image nodes in ONE run: take the DISTINCT
+     node ids from the report (e.g. `character_image`, `setting_image`,
+     `shot_image`) and `dhee_run_bundle(runOnly=[those ids])` (or
+     `dhee_start_run`). The walker re-renders them in dependency order —
+     reference images (character/setting) before the shots that use them
+     — then cascades to the scene clips + final cut. Do NOT regenerate
+     them one node at a time with separate `dhee_regenerate_node` calls:
+     each call re-runs the entire downstream cascade, so a shot can be
+     re-rendered against a reference image that hasn't been fixed yet, and
+     the video ends up rendered two or three times over. Do NOT stop at
+     the video stage — the clips must be conditioned on the new images.
 - `dhee_write_node_content(projectDir, nodeId, itemId?, payload, reason?)`
   — override a node's output content. Same payload shapes as
   `dhee_write_input`. Resolves outputPath from the bundle's pattern,
