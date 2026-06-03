@@ -141,6 +141,37 @@ export function getComfyConfig(
   };
 }
 
+/**
+ * Probe the configured Comfy's GPU total VRAM (bytes), or null if it
+ * can't be determined (probe failed / timed out, headless, or a cloud
+ * route with no GPU device). Builds a short-timeout client from the same
+ * env-based config the runners use, so it queries the box that will run
+ * the render. Best-effort and bounded: a slow or absent Comfy resolves
+ * to null within ~12s rather than stalling the walk. Used to make scene
+ * chunking GPU-aware (see src/dag/chunkBudget.ts, BUG-026).
+ */
+export async function probeGpuVramBytes(
+  env: Record<string, string | undefined> = process.env as any,
+): Promise<number | null> {
+  try {
+    const cfg = getComfyConfig(env);
+    const client = new ComfyUIClient({
+      outputDir: '/tmp',
+      timeout: 10,
+      ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+      ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
+      ...(cfg.isCloud !== undefined ? { isCloud: cfg.isCloud } : {}),
+    });
+    const timeout = new Promise<null>((resolve) => {
+      const t = setTimeout(() => resolve(null), 12_000);
+      (t as { unref?: () => void }).unref?.();
+    });
+    return await Promise.race([client.getGpuVramTotalBytes(), timeout]);
+  } catch {
+    return null;
+  }
+}
+
 export interface ImageInfo {
   filename: string;
   subfolder: string;
@@ -503,7 +534,8 @@ export class ComfyUIClient {
   async waitForCompletion(
     promptId: string,
     progressCallback?: ProgressCallback,
-    pollInterval: number = 10
+    pollInterval: number = 10,
+    externalSignal?: AbortSignal
   ): Promise<CompletionResult> {
     // Register the in-flight prompt so the cancel path can call
     // POST /interrupt on this client and stop the GPU job. Always
@@ -519,6 +551,20 @@ export class ComfyUIClient {
     // poll interval is the floor on "how long does Stopping… stay
     // stuck"; with it, abort-to-loop-exit is sub-millisecond.
     const abortController = new AbortController();
+    // Link a caller-supplied signal (the walker's ctx.signal, threaded
+    // through queueAndWaitWS's HTTP fallback). Without this, an abort
+    // that lands during the WS→HTTP transition is LOST: the WS
+    // abortHandler is already disabled (resolved=true) and this job may
+    // not yet be in the activeJobs registry that cancelAllActiveJobs()
+    // fires. Linking the signal here makes stop_run deterministic in the
+    // polling path. (2026-06-03 stop_run gap.)
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener('abort', () => abortController.abort(), { once: true });
+      }
+    }
     const cancelHandle: CancellableComfyJob = {
       promptId,
       interrupt: () => this.interrupt(),
@@ -668,6 +714,22 @@ export class ComfyUIClient {
             // Server knows the prompt — reset the missing-poll counter
             // so an earlier transient null doesn't accumulate.
             consecutivePromptMissing = 0;
+
+            // Hard execution error reported in /history (e.g. an OOM at
+            // the sampler). The prompt died on the GPU: status_str is
+            // 'error', completed is false, and there are no outputs. None
+            // of the completion branches below match, and the missing-poll
+            // fast-fail never fires (it's gated on `!history`). Without
+            // this explicit check the loop polls a dead prompt forever and
+            // the node stays wedged `in_progress`. Surface it as an error.
+            if (history.status?.status_str === 'error') {
+              const kinds = (history.status?.messages ?? []).map((m) => m[0]);
+              debugLog(
+                `[waitForCompletion] prompt ${promptId} reported status_str=error in /history — failing. message kinds=${JSON.stringify(kinds)}`,
+              );
+              return { status: 'error', prompt_id: promptId };
+            }
+
             const outputs = history.outputs || {};
 
             if (Object.keys(outputs).length > 0) {
@@ -845,7 +907,9 @@ export class ComfyUIClient {
               promptId,
               progressCallback
                 ? (pct, msg) => progressCallback({ percentage: pct, message: msg })
-                : undefined
+                : undefined,
+              undefined,
+              options.signal,
             );
           })
           .then(result => resolve({ result, promptId, clientId, outputs: collectedOutputs }))
@@ -864,7 +928,9 @@ export class ComfyUIClient {
               promptId,
               progressCallback
                 ? (pct, msg) => progressCallback({ percentage: pct, message: msg })
-                : undefined
+                : undefined,
+              undefined,
+              options.signal,
             );
           })
           .then(result => resolve({ result, promptId, clientId, outputs: collectedOutputs }))
@@ -1530,6 +1596,26 @@ export class ComfyUIClient {
   }
 
   // Helper methods
+
+  /**
+   * Total VRAM (bytes) of the GPU running this Comfy, via /system_stats.
+   * Returns null if the endpoint is unreachable or reports no device with
+   * a numeric `vram_total` — callers treat null as "GPU unknown, use the
+   * unscaled budget". Used by the walker to make scene chunking GPU-aware.
+   */
+  async getGpuVramTotalBytes(): Promise<number | null> {
+    try {
+      const response = await this.request('/system_stats');
+      if (!response.ok) return null;
+      const stats = (await response.json()) as {
+        devices?: Array<{ vram_total?: number }>;
+      };
+      const dev = (stats.devices ?? []).find((d) => typeof d.vram_total === 'number');
+      return dev?.vram_total ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   private async getHistory(promptId: string): Promise<HistoryEntry | null> {
     const response = await this.request(

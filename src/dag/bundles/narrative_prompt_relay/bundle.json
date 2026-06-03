@@ -33,10 +33,22 @@
       "control": "pills",
       "unit": "seconds",
       "options": [
-        { "value": 30, "label": "30s" },
-        { "value": 60, "label": "60s" },
-        { "value": 120, "label": "120s" },
-        { "value": 180, "label": "180s" }
+        {
+          "value": 30,
+          "label": "30s"
+        },
+        {
+          "value": 60,
+          "label": "60s"
+        },
+        {
+          "value": 120,
+          "label": "120s"
+        },
+        {
+          "value": 180,
+          "label": "180s"
+        }
       ]
     },
     {
@@ -47,11 +59,26 @@
       "label": "Style",
       "control": "select",
       "options": [
-        { "value": "cinematic_realism", "label": "Cinematic Realism" },
-        { "value": "animation", "label": "Animation" },
-        { "value": "noir", "label": "Film Noir" },
-        { "value": "documentary", "label": "Documentary" },
-        { "value": "anime", "label": "Anime" }
+        {
+          "value": "cinematic_realism",
+          "label": "Cinematic Realism"
+        },
+        {
+          "value": "animation",
+          "label": "Animation"
+        },
+        {
+          "value": "noir",
+          "label": "Film Noir"
+        },
+        {
+          "value": "documentary",
+          "label": "Documentary"
+        },
+        {
+          "value": "anime",
+          "label": "Anime"
+        }
       ]
     },
     {
@@ -62,9 +89,18 @@
       "label": "Aspect",
       "control": "pills",
       "options": [
-        { "value": "16:9", "label": "16:9" },
-        { "value": "9:16", "label": "9:16" },
-        { "value": "21:9", "label": "21:9" }
+        {
+          "value": "16:9",
+          "label": "16:9"
+        },
+        {
+          "value": "9:16",
+          "label": "9:16"
+        },
+        {
+          "value": "21:9",
+          "label": "21:9"
+        }
       ]
     },
     {
@@ -75,8 +111,14 @@
       "label": "Resolution",
       "control": "pills",
       "options": [
-        { "value": 720, "label": "720p" },
-        { "value": 1080, "label": "1080p" }
+        {
+          "value": 720,
+          "label": "720p"
+        },
+        {
+          "value": 1080,
+          "label": "1080p"
+        }
       ]
     }
   ],
@@ -499,7 +541,9 @@
         "constraint": "max_frames",
         "limit": 1000,
         "fps": 24,
-        "firstSegmentPlusOne": true
+        "firstSegmentPlusOne": true,
+        "maxFramePixels": 409920000,
+        "referenceVramBytes": 12884901888
       },
       "inputs": [
         {

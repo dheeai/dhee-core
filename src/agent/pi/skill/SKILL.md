@@ -272,8 +272,8 @@ scoped to the project so you don't waste context on engine internals.
   Emits `inputs.provided`. No cascade — inputs sit before the DAG.
 - `dhee_set_project_field(projectDir, inputId, value)` — set a
   **project-kind** input (a setting stored on project.json, not a
-  file): `targetDuration`, `style`, `aspect`. **Use this whenever the
-  user states a setting in chat** — "make it 3 minutes" →
+  file): `targetDuration`, `style`, `aspect`, `resolution`. **Use this
+  whenever the user states a setting in chat** — "make it 3 minutes" →
   `dhee_set_project_field(inputId='targetDuration', value=180)`;
   "switch to noir" → `(inputId='style', value='noir')`. Without this the
   setting never reaches project.json and the pipeline silently falls
@@ -285,6 +285,31 @@ scoped to the project so you don't waste context on engine internals.
   regenerate the first node that consumes it (e.g.
   `dhee_regenerate_node('scenes_plan')` for `targetDuration`). For FILE
   inputs (the story) use `dhee_write_input`, not this.
+- **Resolution / aspect changes make already-rendered IMAGES stale —
+  not just the video.** When the user sets/changes `resolution` or
+  `aspect`, or says the output looks low-res or the wrong size: the
+  existing images may have been rendered at a different size and are now
+  stale even though they show `completed`. The video is conditioned on
+  the shot images, so re-running ONLY the video bakes the wrong-sized
+  frames in — the output won't actually be the requested resolution.
+  Required flow:
+  1. `dhee_set_project_field` the new `resolution`/`aspect` if it changed.
+  2. `dhee_check_resolution(projectDir)` — it reads each completed
+     image's real dimensions and lists the ones that no longer match the
+     target. **Always run this before declaring a resolution request done**,
+     even if `resolution` was already set (the existing renders can still
+     predate it).
+  3. Regenerate ALL flagged image nodes in ONE run: take the DISTINCT
+     node ids from the report (e.g. `character_image`, `setting_image`,
+     `shot_image`) and `dhee_run_bundle(runOnly=[those ids])` (or
+     `dhee_start_run`). The walker re-renders them in dependency order —
+     reference images (character/setting) before the shots that use them
+     — then cascades to the scene clips + final cut. Do NOT regenerate
+     them one node at a time with separate `dhee_regenerate_node` calls:
+     each call re-runs the entire downstream cascade, so a shot can be
+     re-rendered against a reference image that hasn't been fixed yet, and
+     the video ends up rendered two or three times over. Do NOT stop at
+     the video stage — the clips must be conditioned on the new images.
 - `dhee_write_node_content(projectDir, nodeId, itemId?, payload, reason?)`
   — override a node's output content. Same payload shapes as
   `dhee_write_input`. Resolves outputPath from the bundle's pattern,
@@ -352,6 +377,14 @@ flight**:
   everything downstream. Use when the user wants a fresh roll of the
   dice on a node — same prompt, different output. NOT for fixing a
   prompt that's structurally wrong (use `dhee_critique_node` for that).
+- `dhee_check_resolution(projectDir)` — read-only audit: compares every
+  completed image's real dimensions against the project's target
+  aspect+resolution and lists the STALE ones (rendered at the wrong
+  size). Use on any resolution/aspect request, or when the user says the
+  output looks low-res / wrong-size, BEFORE concluding it's done.
+  Regenerate the nodes it flags (their images re-render at the target and
+  cascade to the video) — re-running only the video would keep the
+  wrong-sized frames. See the resolution-staleness rule above.
 - `dhee_critique_node(projectDir, nodeId, itemId?, critique, confirm?)`
   — apply an editorial critique to an LLM-generated node. Use when an
   artifact is broken because the underlying prompt is wrong: missing

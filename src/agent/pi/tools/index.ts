@@ -16,6 +16,7 @@ import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 
 import { dheeApplyWorkflowAliasesTool, makeApplyWorkflowAliasesTool } from './dheeApplyWorkflowAliases.js';
 import { dheeAskQuestionTool, makeAskQuestionTool } from './dheeAskQuestion.js';
+import { dheeCheckResolutionTool, makeCheckResolutionTool } from './dheeCheckResolution.js';
 import { dheeCheckWorkflowTool, makeCheckWorkflowTool } from './dheeCheckWorkflow.js';
 import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProject.js';
 import { dheeCritiqueNodeTool, makeCritiqueNodeTool } from './dheeCritiqueNode.js';
@@ -51,6 +52,7 @@ export const DHEE_TOOL_NAMES = [
   'dhee_get_status',
   'dhee_regenerate_node',
   'dhee_critique_node',
+  'dhee_check_resolution',
   'dhee_check_workflow',
   'dhee_apply_workflow_aliases',
   'dhee_read_artifact',
@@ -72,6 +74,7 @@ export const DHEE_TOOL_NAMES = [
 export {
   dheeApplyWorkflowAliasesTool,
   dheeAskQuestionTool,
+  dheeCheckResolutionTool,
   dheeCheckWorkflowTool,
   dheeCreateProjectTool,
   dheeCritiqueNodeTool,
@@ -99,6 +102,7 @@ export {
   dheeFindTool,
   makeApplyWorkflowAliasesTool,
   makeAskQuestionTool,
+  makeCheckResolutionTool,
   makeCheckWorkflowTool,
   makeCreateProjectTool,
   makeCritiqueNodeTool,
@@ -142,6 +146,7 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);
   pi.registerTool(dheeCritiqueNodeTool);
+  pi.registerTool(dheeCheckResolutionTool);
   pi.registerTool(dheeCheckWorkflowTool);
   pi.registerTool(dheeApplyWorkflowAliasesTool);
   pi.registerTool(dheeReadArtifactTool);

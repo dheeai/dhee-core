@@ -31,6 +31,7 @@ import { join, relative, resolve } from 'node:path';
 import { cascadeInvalidationKeys, type CascadeTarget } from './cascadeInvalidationKeys.js';
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
+import { isWalkLocked } from './projectWalkLock.js';
 import type {
   RunProjectViaBundleOpts,
   RunProjectViaBundleResult,
@@ -278,6 +279,22 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
  */
 export async function regenerateNode(opts: RegenerateNodeOpts): Promise<RegenerateNodeResult> {
   const key = opts.itemId ? `${opts.nodeId}:${opts.itemId}` : opts.nodeId;
+
+  // Bail BEFORE mutating state if a walk is already running for this
+  // project. Without this, we'd invalidate nodes (a real state mutation)
+  // and then have the walk rejected by the lock — leaving the project
+  // half-changed under a live walk. The walk lock in walkBundle is the
+  // hard guard; this is the clean early exit. (TOCTOU between here and
+  // walkBundle's acquire is harmless — walkBundle still rejects.)
+  if (isWalkLocked(opts.projectDir)) {
+    return {
+      ok: false,
+      nodeId: opts.nodeId,
+      error:
+        `cannot regenerate '${key}': a walk is already in progress for this project. ` +
+        `Stop it first (dhee_stop_run) or wait for it to finish, then retry.`,
+    };
+  }
 
   const inv = await invalidateNodes({
     projectDir: opts.projectDir,

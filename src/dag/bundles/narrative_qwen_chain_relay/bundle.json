@@ -486,7 +486,9 @@
         "constraint": "max_frames",
         "limit": 1000,
         "fps": 24,
-        "firstSegmentPlusOne": true
+        "firstSegmentPlusOne": true,
+        "maxFramePixels": 409920000,
+        "referenceVramBytes": 12884901888
       },
       "inputs": [
         {

@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
+import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
 
 function formatSrtTime(totalSeconds: number): string {
@@ -33,7 +34,8 @@ import type { BundleInputDecl } from './schema.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
-import { applyAspectToConfig } from './aspect.js';
+import { applyAspect, applyAspectToConfig } from './aspect.js';
+import { effectiveFrameCap, scaleBudgetForGpu } from './chunkBudget.js';
 import { REPO_ROOT } from '../agent/pi/paths.js';
 import {
   loadWalkState,
@@ -161,6 +163,32 @@ export interface WalkerOptions {
   engine?: import('./eventLog/ProjectionEngine.js').ProjectionEngine;
   /** Branch this walk runs on; events tagged with it. Default 'main'. */
   branchId?: string;
+  /**
+   * Test seam — probe the render GPU's total VRAM (bytes). Used to make
+   * scene chunking GPU-aware: a chunk-frame budget tuned on a 12 GiB card
+   * scales up on bigger cards (longer chunks) and down on smaller ones.
+   * Probed once per walk, only when a bundle node declares
+   * `chunkBy.maxFramePixels`. Returns null when the GPU is unknown
+   * (probe failed / cloud / headless) → budget stays unscaled. Defaults
+   * to the env-configured Comfy `/system_stats` probe.
+   */
+  probeGpuVramBytes?: () => Promise<number | null>;
+}
+
+/**
+ * Default GPU-VRAM probe: query the env-configured Comfy `/system_stats`.
+ * Dynamic-imported so headless callers without Comfy don't pay the cost
+ * and tests can inject a stub via WalkerOptions. Any failure → null.
+ */
+async function defaultProbeGpuVramBytes(): Promise<number | null> {
+  try {
+    const mod = (await import('../services/comfyui/ComfyUIClient.js')) as {
+      probeGpuVramBytes: () => Promise<number | null>;
+    };
+    return await mod.probeGpuVramBytes();
+  } catch {
+    return null;
+  }
 }
 
 interface NodeInstance {
@@ -233,7 +261,36 @@ function materializeCollection(
   projectDir: string,
   cli: WalkerCliParams,
   upstreamInstances: Map<string, NodeInstance[]>,
+  projectAspect?: string,
+  projectResolution?: number,
+  gpuVramBytes?: number | null,
 ): NodeInstance[] {
+  // Resolution- AND GPU-aware chunk cap. `chunkBy.limit` is the model's
+  // audio-latent frame cap (resolution-independent); `maxFramePixels`
+  // is the VRAM ceiling on the chunk's latent VOLUME (frames × pixels).
+  // At higher resolutions the same frame count blows past VRAM, so we
+  // scale the per-chunk frame cap down by the actual render area, AND we
+  // scale the VRAM budget itself by the actual GPU's VRAM (bigger card →
+  // longer chunks). The render area is the node's baseline width/height
+  // after the same aspect+resolution transform the runner will see at
+  // run time. See src/dag/chunkBudget.ts.
+  const declaredCap = node.chunkBy?.limit ?? 0;
+  let effectiveCap = declaredCap;
+  if (node.chunkBy?.maxFramePixels) {
+    const cfg = (node.runner?.config ?? {}) as Record<string, unknown>;
+    const cw = cfg['width'];
+    const ch = cfg['height'];
+    if (typeof cw === 'number' && typeof ch === 'number') {
+      const { width: rw, height: rh } = applyAspect(projectAspect, cw, ch, projectResolution);
+      const budget = scaleBudgetForGpu(
+        node.chunkBy.maxFramePixels,
+        gpuVramBytes,
+        node.chunkBy.referenceVramBytes,
+      );
+      effectiveCap = effectiveFrameCap(declaredCap, rw, rh, budget);
+    }
+  }
+
   // ── Legacy 'scene' path (ltx_prompt_relay's scene_clip chunking) ──
   if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
     const out: NodeInstance[] = [];
@@ -241,7 +298,7 @@ function materializeCollection(
       if (node.chunkBy && node.chunkBy.constraint === 'max_frames') {
         const fps = node.chunkBy.fps ?? 24;
         const firstPlusOne = node.chunkBy.firstSegmentPlusOne ?? false;
-        const chunks = chunkScene(projectDir, sceneNum, node.chunkBy.limit, fps, firstPlusOne);
+        const chunks = chunkScene(projectDir, sceneNum, effectiveCap, fps, firstPlusOne);
         if (chunks.length === 0) {
           throw new Error(`materializeCollection: no chunks computed for scene ${sceneNum}`);
         }
@@ -347,7 +404,7 @@ function materializeCollection(
         typeof raw === 'object' &&
         Array.isArray((raw as Record<string, unknown>)['shots'])
       ) {
-        const cap = node.chunkBy.limit;
+        const cap = effectiveCap;
         const fps = node.chunkBy.fps ?? 24;
         const firstPlusOne = node.chunkBy.firstSegmentPlusOne ?? false;
         const allShots = (raw as { shots: Array<{ id?: string; scene?: number; shotNumber?: number; duration?: number }> }).shots;
@@ -741,7 +798,24 @@ interface WalkResult {
  * Default `reviewLoopMax = 0` preserves single-shot behavior.
  */
 export async function walkBundle(opts: WalkerOptions): Promise<WalkResult> {
-  return walkBundleWithReviewLoop(opts, 0);
+  // Per-project single-flight guard. Two concurrent walks of the same
+  // project corrupt shared state (duplicate event seqs from independent
+  // EventLog handles, lost invalidations from last-writer-wins walkState
+  // snapshots). Acquire-or-reject, keyed per project, held across the
+  // whole review loop. See projectWalkLock.ts (2026-06-03 incident).
+  const lock = acquireWalkLock(opts.projectDir);
+  if (isWalkLockResult(lock)) {
+    const msg =
+      `a walk is already in progress for this project (${lock.holder}). ` +
+      `Stop it first (dhee_stop_run) or wait for it to finish before starting another.`;
+    (opts.log ?? ((m: string) => console.log(m)))(`walker: ${msg}`);
+    return { ok: false, error: msg, instances: [] };
+  }
+  try {
+    return await walkBundleWithReviewLoop(opts, 0);
+  } finally {
+    lock.release();
+  }
 }
 
 async function walkBundleWithReviewLoop(
@@ -981,6 +1055,25 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     }
   };
 
+  // GPU-aware chunking: probe the render GPU's VRAM ONCE (only when a
+  // node actually declares a maxFramePixels budget), then scale that
+  // budget by actual/reference VRAM at materialization. Bigger card →
+  // longer chunks; smaller card → shorter. Probe failure (cloud /
+  // headless / unreachable) → null → budget stays unscaled. See
+  // src/dag/chunkBudget.ts (BUG-026).
+  const needsGpuProbe = ordered.some(
+    (n) => n.kind === 'collection' && typeof n.chunkBy?.maxFramePixels === 'number',
+  );
+  let gpuVramBytes: number | null = null;
+  if (needsGpuProbe) {
+    gpuVramBytes = await (opts.probeGpuVramBytes ?? defaultProbeGpuVramBytes)();
+    if (gpuVramBytes) {
+      log(`walker: GPU VRAM probe → ${(gpuVramBytes / 1024 ** 3).toFixed(1)} GiB (chunk budget scales to this card)`);
+    } else {
+      log(`walker: GPU VRAM unknown (probe returned null) — chunk budget unscaled (12 GiB reference)`);
+    }
+  }
+
   // Materialize instances per node. For 'scene'-sourced collections
   // with CLI-provided scene ids, we can materialize up front. For
   // upstream-driven collections (where items come from a not-yet-run
@@ -991,7 +1084,18 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   for (const node of ordered) {
     if (node.kind === 'collection') {
       if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
-        instancesById.set(node.id, materializeCollection(node, opts.projectDir, cli, instancesById));
+        instancesById.set(
+          node.id,
+          materializeCollection(
+            node,
+            opts.projectDir,
+            cli,
+            instancesById,
+            typeof bundleInputs['aspect'] === 'string' ? bundleInputs['aspect'] : undefined,
+            typeof bundleInputs['resolution'] === 'number' ? bundleInputs['resolution'] : undefined,
+            gpuVramBytes,
+          ),
+        );
       } else {
         // Lazy: empty for now; materialized when we reach the node.
         instancesById.set(node.id, []);
@@ -1018,13 +1122,33 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   for (const node of ordered) {
     if (stopAtReached) break;
 
+    // Cooperative cancellation. stop_run → BackgroundTaskRunner.cancel()
+    // aborts the walker's signal. Check it BETWEEN nodes so no NEW node
+    // starts once an abort lands — the in-flight node's runner honors
+    // the signal via ctx.signal (comfy poll exits); this stops the loop
+    // from advancing to the next one. Without this the walker finished
+    // the current clip and dispatched the next (the 2026-06-03 "chunk_2
+    // started after stop" gap).
+    if (opts.signal?.aborted) {
+      log('walker: abort signal received — halting before next node');
+      break;
+    }
+
     // Lazy materialization for upstream-driven collections. By topo
     // order, every input.from upstream has already run; their output
     // files exist on disk and their instance metadata is in
     // instancesById. materializeCollection reads from these.
     if (node.kind === 'collection' && (instancesById.get(node.id) ?? []).length === 0) {
       try {
-        const materialized = materializeCollection(node, opts.projectDir, cli, instancesById);
+        const materialized = materializeCollection(
+          node,
+          opts.projectDir,
+          cli,
+          instancesById,
+          typeof bundleInputs['aspect'] === 'string' ? bundleInputs['aspect'] : undefined,
+          typeof bundleInputs['resolution'] === 'number' ? bundleInputs['resolution'] : undefined,
+          gpuVramBytes,
+        );
         instancesById.set(node.id, materialized);
       } catch (e) {
         const err = `${node.id}: materializeCollection failed: ${(e as Error).message}`;
@@ -1456,6 +1580,14 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       stopAtReached = true;
       log(`walker: reached stopAt='${opts.stopAt}', halting.`);
     }
+  }
+
+  // Aborted mid-walk → report cancellation rather than a misleading
+  // "goal node did not complete". BackgroundTaskRunner keys 'cancelled'
+  // off signal.aborted regardless of this return value, but a clear
+  // error helps direct callers (scripts, runProjectViaBundle).
+  if (opts.signal?.aborted) {
+    return { ok: false, error: 'walk cancelled (abort signal received)', instances: allInstances };
   }
 
   // Goal output (only meaningful when the goal node ran).

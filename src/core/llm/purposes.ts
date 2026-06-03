@@ -30,7 +30,6 @@ export const HEAVY_PURPOSES = [
   'content.world_style',
   'content.shot_image_prompt',
   'content.shot_motion_directive',
-  'content.remotion_code',
 ] as const;
 
 /**
@@ -45,7 +44,6 @@ export const MEDIUM_PURPOSES = [
   'structured.workflow_analysis',
   'structured.input_classification',
   'structured.prompt_refinement',
-  'structured.infographic_expansion',
 ] as const;
 
 /**

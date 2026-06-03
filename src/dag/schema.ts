@@ -76,6 +76,27 @@ export interface ChunkBy {
    * runners so chunk sizing accounts for the offset. Defaults false.
    */
   firstSegmentPlusOne?: boolean;
+  /**
+   * VRAM safety budget, expressed as a maximum (frames × pixels)
+   * product for one chunk's latent. `limit` is the model's audio-latent
+   * frame cap (resolution-independent); this is the GPU memory cap
+   * (resolution-DEPENDENT, since the sampled latent volume grows with
+   * width×height). When set, the walker scales the per-chunk frame cap
+   * down at higher resolutions so the chunk still fits in VRAM:
+   * `min(limit, floor(maxFramePixels / renderArea))`. Measured at the
+   * proven baseline (e.g. 1000 × 854 × 480 = 409,920,000). Absent →
+   * only `limit` applies (legacy). See src/dag/chunkBudget.ts.
+   */
+  maxFramePixels?: number;
+  /**
+   * Total GPU VRAM (bytes) the `maxFramePixels` budget was measured on.
+   * At walk time the walker probes the actual GPU's VRAM (Comfy
+   * /system_stats) and scales the budget by `actualVram / referenceVram`,
+   * so a budget tuned on a 12 GiB card automatically grows on a 24 GiB
+   * card (longer chunks) and shrinks on an 8 GiB card. Defaults to 12 GiB
+   * when absent. Only meaningful alongside `maxFramePixels`.
+   */
+  referenceVramBytes?: number;
 }
 
 export interface NodeDef {

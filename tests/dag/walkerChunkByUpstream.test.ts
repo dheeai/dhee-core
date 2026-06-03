@@ -424,3 +424,191 @@ describe('BUG-014 — walker chunkBy on upstream-driven materialization', () => 
     expect(paths.size).toBe(3);
   });
 });
+
+/**
+ * Resolution-aware chunk cap (chunkBy.maxFramePixels).
+ *
+ * The OOM that motivated this: an LTX video chunk is one latent of
+ * (frames × width × height). chunkBy.limit caps FRAMES (the audio-latent
+ * model cap, resolution-independent), but VRAM is bounded by the latent
+ * VOLUME. A 1000-frame chunk that fits at 854×480 OOMs the sampler at
+ * 1280×720. maxFramePixels caps frames×pixels, so picking 720p produces
+ * shorter chunks that still fit. See src/dag/chunkBudget.ts.
+ */
+function makeSlateBundle(): DagBundle {
+  return {
+    id: 'chunkby-test',
+    version: '0.1.0',
+    engineCompat: '>=0.1.0',
+    goal: 'scene_clip',
+    inputs: [
+      { id: 'aspect', kind: 'project', field: 'aspect', default: '16:9' },
+      { id: 'resolution', kind: 'project', field: 'resolution', default: 1080 },
+    ],
+    nodes: [
+      {
+        id: 'scenes_plan',
+        kind: 'stage',
+        inputs: [],
+        outputs: { format: 'json', pattern: 'plans/scenes_plan.json' },
+        runner: { tool: 'stub.recorder', config: {} },
+      },
+      {
+        id: 'scene_clip',
+        kind: 'collection',
+        itemSource: 'scenes_plan',
+        inputs: [{ from: 'scenes_plan', usage: 'input' }],
+        outputs: { format: 'video', pattern: 'out/{{scene_id}}_{{chunk_id}}.mp4' },
+        // Baseline tuned for true 720p; aspect/resolution flow through.
+        runner: { tool: 'stub.recorder', config: { width: 1280, height: 720 } },
+        itemKey: 'scenes',
+        chunkBy: {
+          constraint: 'max_frames',
+          limit: 1000,
+          fps: 24,
+          firstSegmentPlusOne: true,
+          // 1000 × 854 × 480 — proven-safe latent volume at 480p.
+          maxFramePixels: 409_920_000,
+        },
+      },
+    ],
+  };
+}
+
+function makeSlateBundleNoBudget(): DagBundle {
+  const b = makeSlateBundle();
+  for (const n of b.nodes) {
+    if (n.chunkBy) delete n.chunkBy.maxFramePixels;
+  }
+  return b;
+}
+
+function preSeedPlanWithSlate(plan: object, aspect: string, resolution: number): void {
+  mkdirSync(join(projectDir, 'plans'), { recursive: true });
+  writeFileSync(join(projectDir, 'plans/scenes_plan.json'), JSON.stringify(plan));
+  writeFileSync(
+    join(projectDir, 'project.json'),
+    JSON.stringify({
+      id: 'p',
+      aspect,
+      resolution,
+      walkState: {
+        bundleSource: 'built-in:chunkby-test',
+        bundleVersion: '0.1.0',
+        engineVersion: '0.1.0',
+        nodes: {
+          scenes_plan: { status: 'completed', outputPath: 'plans/scenes_plan.json' },
+        },
+        lastInvalidatedIds: [],
+      },
+    }),
+  );
+}
+
+// A 5-shot scene, 5s each = 120 frames/shot (601 with the first-segment +1).
+// At 480p (effective cap ≈ 992) → fits in ONE chunk.
+// At 720p (effective cap 440) → must split into TWO.
+const FIVE_SHOT_SCENE = {
+  scenes: [{ id: 'scene_1', title: 's1', mainSubject: 'x', narrativeMode: 'setup' }],
+  shots: Array.from({ length: 5 }, (_, i) => ({
+    id: `scene_1_shot_${i + 1}`,
+    scene: 1,
+    shotNumber: i + 1,
+    duration: 5,
+  })),
+};
+
+function countSceneChunks(): number {
+  const ws = readWalkState();
+  return Object.keys(ws).filter((k) => k.startsWith('scene_clip:scene_1_chunk_')).length;
+}
+
+describe('resolution-aware chunk cap (maxFramePixels)', () => {
+  it('(R1) 480p keeps the scene whole; 720p splits it (same plan, same bundle)', async () => {
+    // 480p — effective cap ≈ 992, scene of 601 frames fits in one chunk.
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 480);
+    const lo = await walkBundle({
+      projectDir,
+      bundle: makeSlateBundle(),
+      bundleSource: 'built-in:chunkby-test',
+      // Pin the reference VRAM (12 GiB) so the chunk math is deterministic
+      // and the test never hits the real network GPU probe. R2/R3/R4 stub
+      // this; R1 was the lone holdout, which made it slow/flaky on a busy
+      // box or in CI (it timed out hitting the live Comfy probe twice).
+      probeGpuVramBytes: async () => 12 * 1024 ** 3,
+    });
+    expect(lo.ok).toBe(true);
+    expect(countSceneChunks()).toBe(1);
+
+    // 720p — effective cap 440, the same 601-frame scene must split.
+    seen.length = 0;
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const hi = await walkBundle({
+      projectDir,
+      bundle: makeSlateBundle(),
+      bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => 12 * 1024 ** 3,
+    });
+    expect(hi.ok).toBe(true);
+    expect(countSceneChunks()).toBe(2);
+  });
+
+  it('(R2) without maxFramePixels, resolution does NOT change chunk count (back-compat)', async () => {
+    // Legacy bundles have no VRAM budget — the frame cap stays `limit`
+    // regardless of resolution, so 720p chunks exactly like 480p.
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const result = await walkBundle({
+      projectDir,
+      bundle: makeSlateBundleNoBudget(),
+      bundleSource: 'built-in:chunkby-test',
+    });
+    expect(result.ok).toBe(true);
+    // 601 frames ≤ limit 1000 → single chunk even at 720p.
+    expect(countSceneChunks()).toBe(1);
+  });
+
+  it('(R3) GPU-aware: a 24 GiB card keeps whole the 720p scene that splits on 12 GiB', async () => {
+    // Reference budget is tuned at 12 GiB. The probe seam reports the
+    // actual GPU; on a 24 GiB card the budget doubles (409.92M → 819.84M),
+    // so the 720p cap rises from 440 to 888 frames and the 601-frame scene
+    // fits in one chunk again — fewer relay seams on bigger hardware.
+    const bundle = makeSlateBundle();
+
+    // 12 GiB probe → splits into 2 (matches R1).
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const at12 = await walkBundle({
+      projectDir,
+      bundle,
+      bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => 12 * 1024 ** 3,
+    });
+    expect(at12.ok).toBe(true);
+    expect(countSceneChunks()).toBe(2);
+
+    // 24 GiB probe → stays whole.
+    seen.length = 0;
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const at24 = await walkBundle({
+      projectDir,
+      bundle,
+      bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => 24 * 1024 ** 3,
+    });
+    expect(at24.ok).toBe(true);
+    expect(countSceneChunks()).toBe(1);
+  });
+
+  it('(R4) probe returning null (GPU unknown) → budget unscaled, 12 GiB behavior', async () => {
+    // Cloud / headless / unreachable Comfy → null probe → budget stays at
+    // the 12 GiB reference, so chunking matches R1's 12 GiB split.
+    preSeedPlanWithSlate(FIVE_SHOT_SCENE, '16:9', 720);
+    const result = await walkBundle({
+      projectDir,
+      bundle: makeSlateBundle(),
+      bundleSource: 'built-in:chunkby-test',
+      probeGpuVramBytes: async () => null,
+    });
+    expect(result.ok).toBe(true);
+    expect(countSceneChunks()).toBe(2);
+  });
+});
