@@ -23,7 +23,7 @@
  *  12. createdAt is an ISO string.
  */
 import { describe, it, expect, afterAll } from 'vitest';
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initializeProject } from '../../src/dag/initializeProject.js';
@@ -203,5 +203,52 @@ describe('initializeProject', () => {
     const project = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
     expect(typeof project.createdAt).toBe('string');
     expect(new Date(project.createdAt as string).toISOString()).toBe(project.createdAt);
+  });
+
+  it('13. user bundleSource is persisted for user-installed bundles', () => {
+    const bundlesDir = tmpDir();
+    const projectDir = tmpDir();
+    made.push(bundlesDir, projectDir);
+    mkdirSync(join(bundlesDir, 'youtube_short_text_video'), { recursive: true });
+    writeFileSync(
+      join(bundlesDir, 'youtube_short_text_video', 'bundle.json'),
+      JSON.stringify({
+        id: 'youtube_short_text_video',
+        version: '0.1.0',
+        goal: 'final_video',
+        inputs: [{ id: 'story_input', kind: 'file', path: 'inputs/story.md', required: true }],
+        nodes: [
+          {
+            id: 'final_video',
+            kind: 'stage',
+            inputs: [],
+            outputs: { format: 'video', pattern: 'final/out.mp4' },
+            runner: { tool: 'ffmpeg.concat', config: {} },
+          },
+        ],
+      }),
+      'utf8'
+    );
+
+    const prev = process.env['DHEE_USER_BUNDLES_DIR'];
+    process.env['DHEE_USER_BUNDLES_DIR'] = bundlesDir;
+    try {
+      const result = initializeProject({
+        projectDir,
+        name: 'YouTube Package Project',
+        bundleId: 'youtube_short_text_video',
+        bundleSource: 'user:youtube_short_text_video',
+        inputs: { story_input: 'A creator finds a better way to tell a story.' },
+      });
+      expect(result.ok).toBe(true);
+      const project = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+      expect(project.bundleSource).toBe('user:youtube_short_text_video');
+      expect(readFileSync(join(projectDir, 'inputs', 'story.md'), 'utf8')).toBe(
+        'A creator finds a better way to tell a story.'
+      );
+    } finally {
+      if (prev === undefined) delete process.env['DHEE_USER_BUNDLES_DIR'];
+      else process.env['DHEE_USER_BUNDLES_DIR'] = prev;
+    }
   });
 });

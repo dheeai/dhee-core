@@ -36,6 +36,12 @@ export interface InitializeProjectParams {
   name: string;
   /** Bundle id to pin (e.g. "narrative_prompt_relay"). */
   bundleId: string;
+  /**
+   * Optional full source URI to persist (e.g.
+   * "user:youtube_short_text_video"). When omitted, the legacy
+   * behavior persists "built-in:<bundleId>".
+   */
+  bundleSource?: string;
   /** Optional human-readable description. */
   description?: string;
   /**
@@ -52,7 +58,7 @@ export type InitializeProjectResult =
   | { ok: false; error: string };
 
 export function initializeProject(params: InitializeProjectParams): InitializeProjectResult {
-  const { projectDir, name, bundleId, description, inputs = {} } = params;
+  const { projectDir, name, bundleId, bundleSource, description, inputs = {} } = params;
 
   if (!existsSync(projectDir)) {
     return { ok: false, error: `Project directory '${projectDir}' does not exist.` };
@@ -67,14 +73,31 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     };
   }
 
-  const bundle = loadBundleManifest(bundleId);
+  const sourceUri = bundleSource ?? `built-in:${bundleId}`;
+  let parsedSource: ReturnType<typeof parseBundleSource>;
+  try {
+    parsedSource = parseBundleSource(sourceUri);
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Bundle source '${sourceUri}' is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (parsedSource.scheme !== 'registry' && parsedSource.id !== bundleId) {
+    return {
+      ok: false,
+      error: `Bundle source '${sourceUri}' does not match bundleId '${bundleId}'.`,
+    };
+  }
+
+  const bundle = loadBundleManifestFromSource(sourceUri);
   if (!bundle) {
-    return { ok: false, error: `Bundle '${bundleId}' could not be loaded.` };
+    return { ok: false, error: `Bundle source '${sourceUri}' could not be loaded.` };
   }
 
   const project: Record<string, unknown> = {
     name,
-    bundleSource: `built-in:${bundleId}`,
+    bundleSource: sourceUri,
     ...(description ? { description } : {}),
     createdAt: new Date().toISOString(),
   };
@@ -90,9 +113,9 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
   return { ok: true, projectDir };
 }
 
-function loadBundleManifest(bundleId: string): DagBundle | null {
+function loadBundleManifestFromSource(bundleSource: string): DagBundle | null {
   try {
-    const source = parseBundleSource(`built-in:${bundleId}`);
+    const source = parseBundleSource(bundleSource);
     const dirOrJson = resolveBundleDir(source);
     const manifestPath = statSync(dirOrJson).isDirectory()
       ? join(dirOrJson, 'bundle.json')
@@ -126,7 +149,7 @@ function applyBundleInputs(
   projectDir: string,
   project: Record<string, unknown>,
   decls: BundleInputDecl[],
-  values: Record<string, unknown>,
+  values: Record<string, unknown>
 ): { error?: string } {
   for (const decl of decls) {
     const provided = Object.prototype.hasOwnProperty.call(values, decl.id)
@@ -145,11 +168,7 @@ function applyBundleInputs(
       writeFileSync(absPath, content, 'utf8');
     } else {
       const resolved =
-        provided !== undefined
-          ? provided
-          : decl.default !== undefined
-            ? decl.default
-            : undefined;
+        provided !== undefined ? provided : decl.default !== undefined ? decl.default : undefined;
       if (resolved === undefined) {
         if (decl.required) {
           return { error: `Required input '${decl.id}' (project.${decl.field}) was not provided.` };

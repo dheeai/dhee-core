@@ -40,6 +40,13 @@ export type BundleSource =
   | { scheme: 'user'; id: string }
   | { scheme: 'registry'; id: string; version: string };
 
+export type BundleSourceScheme = BundleSource['scheme'];
+
+export interface BundleSearchRoot {
+  dir: string;
+  scheme: Exclude<BundleSourceScheme, 'registry'>;
+}
+
 export class BundleSourceError extends Error {
   constructor(message: string) {
     super(message);
@@ -63,7 +70,7 @@ export function parseBundleSource(uri: string): BundleSource {
   if (colonIdx < 0) {
     throw new BundleSourceError(
       `Bundle source URI '${uri}' has no scheme. ` +
-        `Expected one of: built-in:<id>, user:<id>, registry:<scope>/<name>@<version>.`,
+        `Expected one of: built-in:<id>, user:<id>, registry:<scope>/<name>@<version>.`
     );
   }
   const scheme = uri.slice(0, colonIdx);
@@ -85,7 +92,7 @@ export function parseBundleSource(uri: string): BundleSource {
     const atIdx = rest.lastIndexOf('@');
     if (atIdx < 0) {
       throw new BundleSourceError(
-        `registry: requires a version pin (e.g. 'registry:scope/name@1.2.0'), got '${rest}'.`,
+        `registry: requires a version pin (e.g. 'registry:scope/name@1.2.0'), got '${rest}'.`
       );
     }
     const id = rest.slice(0, atIdx);
@@ -98,7 +105,7 @@ export function parseBundleSource(uri: string): BundleSource {
   throw new BundleSourceError(
     `Unknown scheme '${scheme}' in URI '${uri}'. ` +
       `Expected one of: ${VALID_SCHEMES.join(', ')}. ` +
-      `(Common mistake: 'builtin' should be 'built-in' with a hyphen.)`,
+      `(Common mistake: 'builtin' should be 'built-in' with a hyphen.)`
   );
 }
 
@@ -111,18 +118,22 @@ export function parseBundleSource(uri: string): BundleSource {
  * (`<studiosDir>/bundles`) without recompiling kshana-core.
  */
 export function getBundleSearchRoots(): string[] {
-  const roots: string[] = [];
+  return getBundleSearchRootEntries().map(entry => entry.dir);
+}
+
+export function getBundleSearchRootEntries(): BundleSearchRoot[] {
+  const entries: BundleSearchRoot[] = [];
   const userDir = process.env['DHEE_USER_BUNDLES_DIR']?.trim();
-  if (userDir) roots.push(userDir);
+  if (userDir) entries.push({ dir: userDir, scheme: 'user' });
   const appDir = process.env['DHEE_APP_BUNDLES_DIR']?.trim();
-  if (appDir) roots.push(appDir);
+  if (appDir) entries.push({ dir: appDir, scheme: 'built-in' });
   // Legacy `user:` location — back-compat for projects that predate
   // the env-driven layout.
-  roots.push(resolve(homedir(), '.kshana/bundles'));
+  entries.push({ dir: resolve(homedir(), '.kshana/bundles'), scheme: 'user' });
   // Dev / source fallback — the in-repo source tree. Keeps vitest +
   // headless scripts working without setting env vars.
-  roots.push(resolve(REPO_ROOT, 'src/dag/bundles'));
-  return roots;
+  entries.push({ dir: resolve(REPO_ROOT, 'src/dag/bundles'), scheme: 'built-in' });
+  return entries;
 }
 
 /**
@@ -140,7 +151,7 @@ export function resolveBundleDir(source: BundleSource): string {
   if (source.scheme === 'registry') {
     throw new BundleSourceError(
       `registry: scheme is not yet implemented. ` +
-        `It is reserved for a future bundle registry feature; for now use built-in: or user:.`,
+        `It is reserved for a future bundle registry feature; for now use built-in: or user:.`
     );
   }
 
@@ -155,7 +166,6 @@ export function resolveBundleDir(source: BundleSource): string {
     if (existsSync(asJson)) return asJson;
   }
   throw new BundleSourceError(
-    `${source.scheme} bundle '${source.id}' not found. ` +
-      `Searched:\n  - ${tried.join('\n  - ')}`,
+    `${source.scheme} bundle '${source.id}' not found. ` + `Searched:\n  - ${tried.join('\n  - ')}`
   );
 }
