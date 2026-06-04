@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const WATERMARK_PNG_CANDIDATES: readonly string[] = [
+  'assets/watermark_dhee.png',
   'assets/watermark_dhee_studio.png',
   'assets/watermark.png',
 ];

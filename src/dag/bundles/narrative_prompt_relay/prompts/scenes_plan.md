@@ -6,6 +6,9 @@ Story:
 Story essence:
 {{story_essence}}
 
+Settings (the ONLY locations available — every `settingId` you emit MUST be one of these exact ids):
+{{settings_plan}}
+
 Target duration: {{targetDuration}} seconds total.
 
 A scene is a contiguous unit in one location/setting. A shot is a
@@ -13,25 +16,33 @@ single camera setup within a scene. Each shot has a fixed duration
 (use clean integers, sum across all shots must equal the target
 duration). Most shots should be 3–6 seconds.
 
-**Scene count rule.** Scene boundaries are SETTING CHANGES in the
-story, not duration buckets. Walk through the story in order and
-start a new scene every time the camera cuts to a different
-location/setting from `settings_plan`. Examples:
+**Scene count — DO THIS FIRST, before writing any shots.** Look at the
+`Settings` list above and walk the story in order, noting each time the
+camera moves to a DIFFERENT location. Your `scenes` array length MUST
+equal the number of distinct location visits — nothing else determines
+it. (A location the camera leaves and returns to counts each time it
+returns.)
 
-  - Entire story in one room → 1 scene (even at 180s).
-  - Room → cutaway to cubicle → back to room → 3 scenes
-    (scene_1=room, scene_2=cubicle, scene_3=room again). Scene 1
-    and Scene 3 reuse the SAME `settingId` because the setting
-    repeats, but they're separate scenes because the camera left
-    and came back.
-  - Room → 5-shot montage of 4 different intercut locations at
-    the end → 1 main scene + 1 montage scene (the montage is one
-    scene because the rapid-cut sequence is conceptually one beat,
-    even though it shows multiple settings; assign its settingId
-    to the "montage" settings_plan entry).
+A new scene is created ONLY by a location change. It is NOT created by:
+a new character entering, a new action, a new story beat, or a shift in
+`narrativeMode`. `narrativeMode` (setup/rising/climax/resolution) is a
+LABEL for a scene's role — NEVER a reason to split. If the entire story
+unfolds in ONE location, it is ONE scene with many shots, no matter how
+many characters act or how much happens — even at 180s. The downstream
+renderer chunks a long single-location scene into clips automatically;
+do NOT pre-split it into beats.
 
-A typical short film is 1–4 scenes. Setting reuse is fine — just
-emit a new scene_N each time the location changes.
+Examples:
+
+  - Entire story under one tree — many characters, attempts, a climax →
+    ONE scene (one location), with as many shots as the duration needs.
+  - Room → cutaway to cubicle → back to room → 3 scenes (scene_1=room,
+    scene_2=cubicle, scene_3=room again; scenes 1 and 3 reuse the same
+    settingId because the camera left and returned).
+  - Room → end montage of 4 intercut locations → 1 main scene + 1
+    montage scene (the rapid-cut montage is conceptually one beat).
+
+A typical short film is 1–4 scenes. Setting reuse is fine.
 
 Within a scene, use however many shots you need to fill the time at
 3–6s each. A 180-second one-room scene is roughly 30–45 shots —
@@ -60,7 +71,7 @@ fan-out per shot without re-traversing the scenes):
       "title": "short title",
       "mainSubject": "what the scene is principally about",
       "narrativeMode": one of: "setup", "rising", "climax", "resolution",
-      "settingId": "snake_case id from the settings_plan"
+      "settingId": "MUST be one of the exact ids from the Settings list above — never invent a new one"
     }
   ],
   "shots": [

@@ -27,7 +27,8 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
-import type { BundleInputDecl, DagBundle } from './schema.js';
+import { openEventLog } from './eventLog/EventLog.js';
+import type { BundleInputDecl, DagBundle, NodeDef } from './schema.js';
 
 export interface InitializeProjectParams {
   /** Absolute path of an existing (already-created) project directory. */
@@ -86,8 +87,89 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     }
   }
 
+  // A file-input can pre-populate a NODE'S OUTPUT (e.g. an "Art direction"
+  // style guide → plans/world_style.md, which is the world_style node's
+  // output). Mark that node completed so the first walk uses the provided
+  // content verbatim. Without this, the walker treats the node as pending
+  // (walkState only had the FILE, not a completion), preserves the file as
+  // a version, runs the runner, and OVERWRITES the user's content — the
+  // runner's skip-if-output-exists can't help once the walker has moved
+  // the file aside. See writeNodeContent (the override path) for the same
+  // completion-recording, applied here at creation time.
+  prePopulateProvidedOutputs(projectDir, project, bundle, inputs);
+
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2), 'utf8');
   return { ok: true, projectDir };
+}
+
+interface PrePopMatch {
+  nodeId: string;
+  outputPath: string;
+  format: NodeDef['outputs']['format'];
+}
+
+function prePopulateProvidedOutputs(
+  projectDir: string,
+  project: Record<string, unknown>,
+  bundle: DagBundle,
+  inputs: Record<string, unknown>,
+): void {
+  // Find provided (non-empty) kind:file inputs whose path exactly matches
+  // a node's (non-templated) output pattern.
+  const matches: PrePopMatch[] = [];
+  for (const decl of bundle.inputs ?? []) {
+    if (decl.kind !== 'file') continue;
+    const v = inputs[decl.id];
+    if (v === undefined || v === null || v === '') continue;
+    const node = (bundle.nodes as NodeDef[]).find((n) => n.outputs?.pattern === decl.path);
+    if (node) matches.push({ nodeId: node.id, outputPath: decl.path, format: node.outputs.format });
+  }
+  if (matches.length === 0) return;
+
+  // 1. project.json walkState — for legacy callers that read it directly.
+  const walkState = (project['walkState'] ?? {}) as { nodes?: Record<string, unknown> };
+  walkState.nodes = walkState.nodes ?? {};
+  const nowIso = new Date().toISOString();
+  for (const m of matches) {
+    walkState.nodes[m.nodeId] = {
+      status: 'completed',
+      outputPath: m.outputPath,
+      completedAt: nowIso,
+      generation: { tool: 'user', toolVersion: '0.1.0' },
+    };
+  }
+  project['walkState'] = walkState;
+
+  // 2. Event log — the ProjectionEngine rebuilds walkState from events, so
+  //    the completion MUST be an event or the projection shows it pending.
+  //    Emit bundle.bound first (matching source+version) so the walker's
+  //    reinit check sees a matching prior bind and won't wipe these.
+  const log = openEventLog(projectDir);
+  log.append({
+    branchId: 'main',
+    actor: 'user',
+    kind: 'bundle.bound',
+    payload: {
+      bundleSource: project['bundleSource'] as string,
+      bundleVersion: bundle.version,
+      engineVersion: '0.1.0',
+    },
+  });
+  for (const m of matches) {
+    log.append({
+      branchId: 'main',
+      actor: 'user',
+      kind: 'node.completed',
+      payload: {
+        nodeId: m.nodeId,
+        versionId: `user-init-${m.nodeId}`,
+        outputPath: m.outputPath,
+        artifact: { format: m.format },
+        generation: { tool: 'user', toolVersion: '0.1.0', cached: false },
+        metadata: { reason: 'provided at project creation' },
+      },
+    });
+  }
 }
 
 function loadBundleManifest(bundleId: string): DagBundle | null {

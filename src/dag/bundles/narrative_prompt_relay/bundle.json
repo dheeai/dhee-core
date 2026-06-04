@@ -25,6 +25,14 @@
       "multiline": true
     },
     {
+      "id": "style_guide",
+      "kind": "file",
+      "path": "plans/world_style.md",
+      "label": "Art direction (optional)",
+      "placeholder": "Paste a full visual style guide — palette, light, linework, character locks, what to avoid. It becomes the project's style bible verbatim (no LLM rewrite). Leave blank to auto-generate from your story + style preset.",
+      "multiline": true
+    },
+    {
       "id": "targetDuration",
       "kind": "project",
       "field": "targetDuration",
@@ -49,7 +57,8 @@
           "value": 180,
           "label": "180s"
         }
-      ]
+      ],
+      "allowCustom": true
     },
     {
       "id": "style",
@@ -79,7 +88,8 @@
           "value": "anime",
           "label": "Anime"
         }
-      ]
+      ],
+      "allowCustom": true
     },
     {
       "id": "aspect",
@@ -112,6 +122,10 @@
       "control": "pills",
       "options": [
         {
+          "value": 480,
+          "label": "480p"
+        },
+        {
           "value": 720,
           "label": "720p"
         },
@@ -119,7 +133,8 @@
           "value": 1080,
           "label": "1080p"
         }
-      ]
+      ],
+      "allowCustom": true
     }
   ],
   "goal": "final_video",
@@ -376,6 +391,10 @@
         {
           "from": "story_essence",
           "usage": "context"
+        },
+        {
+          "from": "settings_plan",
+          "usage": "context"
         }
       ],
       "outputs": {
@@ -504,7 +523,9 @@
     },
     {
       "id": "scene_video_prompt",
-      "kind": "stage",
+      "kind": "collection",
+      "itemSource": "scenes_plan",
+      "itemKey": "scenes",
       "inputs": [
         {
           "from": "scenes_plan",
@@ -521,7 +542,7 @@
       ],
       "outputs": {
         "format": "md",
-        "pattern": "prompts/scene_video_prompt.md"
+        "pattern": "prompts/videos/scenes/{{scene_id}}.md"
       },
       "runner": {
         "tool": "llm.generate",
