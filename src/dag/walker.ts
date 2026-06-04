@@ -215,6 +215,26 @@ interface NodeInstance {
 }
 
 /**
+ * Pick the `scene_video_prompt` instance that supplies a `scene_clip`'s
+ * global prompt. Per-scene global prompts: `scene_clip:scene_N` must read
+ * `scene_video_prompt:scene_N`, not the first instance — otherwise every
+ * clip is conditioned on scene 1's brief (the bug behind the repeating
+ * spoken title). Falls back to the first instance when `scene_video_prompt`
+ * is a single `stage` node (legacy one-prompt-for-the-whole-video bundles)
+ * or when no instance matches the clip's scene.
+ */
+export function pickSceneVideoPrompt<T extends { sceneNumber?: number }>(
+  svpInsts: T[],
+  sceneNumber: number | undefined,
+): T | undefined {
+  if (sceneNumber !== undefined) {
+    const match = svpInsts.find((s) => s.sceneNumber === sceneNumber);
+    if (match) return match;
+  }
+  return svpInsts[0];
+}
+
+/**
  * Backward-walk: starting from the goal node, find all node defs that
  * (transitively) feed it. Returns nodes in dependency order (leaves first).
  */
@@ -668,9 +688,12 @@ function buildRunnerConfig(
           firstFrames.push(path);
         }
         // globalPrompt from scene_video_prompt's output, if present.
+        // Per-scene: this clip reads its OWN scene's brief
+        // (scene_clip:scene_N → scene_video_prompt:scene_N). Falls back
+        // to the first instance for single-stage (one-global) bundles.
         let globalPrompt = '';
         const svpInsts = instancesById.get('scene_video_prompt') ?? [];
-        const svp = svpInsts[0];
+        const svp = pickSceneVideoPrompt(svpInsts, inst.sceneNumber);
         if (svp?.outputRel) {
           const svpPath = resolve(projectDir, svp.outputRel);
           if (existsSync(svpPath)) globalPrompt = readFileSync(svpPath, 'utf-8');

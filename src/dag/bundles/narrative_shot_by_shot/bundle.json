@@ -345,6 +345,10 @@
         {
           "from": "story_essence",
           "usage": "context"
+        },
+        {
+          "from": "settings_plan",
+          "usage": "context"
         }
       ],
       "outputs": {

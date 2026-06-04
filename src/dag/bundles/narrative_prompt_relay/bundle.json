@@ -391,6 +391,10 @@
         {
           "from": "story_essence",
           "usage": "context"
+        },
+        {
+          "from": "settings_plan",
+          "usage": "context"
         }
       ],
       "outputs": {
@@ -519,7 +523,9 @@
     },
     {
       "id": "scene_video_prompt",
-      "kind": "stage",
+      "kind": "collection",
+      "itemSource": "scenes_plan",
+      "itemKey": "scenes",
       "inputs": [
         {
           "from": "scenes_plan",
@@ -536,7 +542,7 @@
       ],
       "outputs": {
         "format": "md",
-        "pattern": "prompts/scene_video_prompt.md"
+        "pattern": "prompts/videos/scenes/{{scene_id}}.md"
       },
       "runner": {
         "tool": "llm.generate",

@@ -27,6 +27,8 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initializeProject } from '../../src/dag/initializeProject.js';
+import { openEventLog } from '../../src/dag/eventLog/EventLog.js';
+import { projectWalkState } from '../../src/dag/eventLog/projectWalkState.js';
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), 'dhee-init-test-'));
@@ -248,6 +250,52 @@ describe('initializeProject', () => {
       inputs: { story_input: 'a' },
     });
     expect(existsSync(join(projectDir, 'plans', 'world_style.md'))).toBe(false);
+  });
+
+  it('16. a file-input that pre-populates a node output marks that node completed', () => {
+    // style_guide writes plans/world_style.md, which IS the world_style
+    // node's output. Init must record world_style as completed so the
+    // FIRST walk uses it verbatim instead of running the runner and
+    // overwriting it. The walker reads completion from the event-log
+    // projection, so we assert on that (not just project.json walkState).
+    const projectDir = tmpDir();
+    made.push(projectDir);
+    const guide = '# Aesthetic\nLuminous storybook anime, Studio Colorido register.';
+    const r = initializeProject({
+      projectDir,
+      name: 'X',
+      bundleId: 'narrative_prompt_relay',
+      inputs: { story_input: 'a', style_guide: guide },
+    });
+    expect(r.ok).toBe(true);
+
+    // File written verbatim.
+    expect(readFileSync(join(projectDir, 'plans', 'world_style.md'), 'utf8')).toBe(guide);
+
+    // project.json walkState (legacy callers).
+    const pj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(pj.walkState?.nodes?.world_style?.status).toBe('completed');
+    expect(pj.walkState?.nodes?.world_style?.outputPath).toBe('plans/world_style.md');
+
+    // The event-log projection the walker actually reads → world_style completed.
+    const ws = projectWalkState([...openEventLog(projectDir).read()]);
+    expect(ws.nodes['world_style']?.status).toBe('completed');
+    expect(ws.bundleSource).toBe('built-in:narrative_prompt_relay');
+  });
+
+  it('17. with NO pre-populating file-input, nothing is pre-completed', () => {
+    const projectDir = tmpDir();
+    made.push(projectDir);
+    initializeProject({
+      projectDir,
+      name: 'X',
+      bundleId: 'narrative_prompt_relay',
+      inputs: { story_input: 'a' }, // no style_guide
+    });
+    const pj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(pj.walkState?.nodes?.world_style).toBeUndefined();
+    // No event log written when nothing was pre-completed.
+    expect(existsSync(join(projectDir, '.dhee', 'events.jsonl'))).toBe(false);
   });
 
   it('12. createdAt is an ISO date string', () => {
