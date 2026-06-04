@@ -26,8 +26,10 @@
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RunnerRegistry, type RunnerManifest } from './registry.js';
+import type { RunnerRegistry, RunnerManifest } from './registry.js';
 import type { Runner } from '../schema.js';
+
+const loadedEntryPaths = new Set<string>();
 
 /**
  * Scan each search dir for runner packages and register them into
@@ -100,6 +102,7 @@ async function tryLoadRunnerPackage(
     );
     return;
   }
+  if (loadedEntryPaths.has(entryPath)) return;
 
   let mod: { runner?: Runner };
   try {
@@ -119,4 +122,5 @@ async function tryLoadRunnerPackage(
   }
 
   reg.register(manifest, mod.runner);
+  loadedEntryPaths.add(entryPath);
 }

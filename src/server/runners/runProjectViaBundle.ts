@@ -24,6 +24,7 @@ import type { DagBundle, NodeDef } from '../../dag/schema.js';
 import type { GenericProjectFile } from './runProjectViaBundle-stubs.js';
 import type { AssetEvent } from './runProjectViaBundle-stubs.js';
 import { openProjectionEngine } from '../../dag/eventLog/ProjectionEngine.js';
+import { ensureDefaultRunnersDiscovered } from '../../dag/runners/readiness.js';
 
 export interface RunProjectViaBundleOpts {
   projectDir: string;
@@ -125,12 +126,17 @@ export async function runProjectViaBundle(
   }
   log(`runProjectViaBundle: ${project.bundleSource} → bundle '${bundle.id}' v${bundle.version}`);
 
-  // 5. Auto-discover scenes from project.json (for collection nodes).
+  // 5. Discover installed external runners before the walker validates
+  // bundle.dependencies.runners. This imports runner code only at run setup;
+  // bundle list/resolve IPC paths stay manifest-only and read-only.
+  await ensureDefaultRunnersDiscovered(undefined, { force: true });
+
+  // 6. Auto-discover scenes from project.json (for collection nodes).
   // Falls back to scene ids found in project.scenes[]; if none, the
   // walker may still run if the bundle has no scene-keyed collections.
   const sceneIds = discoverSceneIdsFromProject(project, bundle);
 
-  // 6. Walk the bundle.
+  // 7. Walk the bundle.
   // The ProjectionEngine writes the event log + the back-compat
   // walkState snapshot under the hood. Opening it is cheap (just
   // discovers nextSeq from the file); creating it here means EVERY

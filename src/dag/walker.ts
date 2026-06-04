@@ -67,6 +67,18 @@ export {
   BundleSourceError,
 } from './bundleSource.js';
 export type { BundleSource } from './bundleSource.js';
+export {
+  checkBundleRunnerReadiness,
+  checkBundleSourceRunnerReadiness,
+  ensureDefaultRunnersDiscovered,
+  getRunnerSearchRoots,
+  listRunnerManifests,
+} from './runners/readiness.js';
+export type {
+  BundleRunnerReadiness,
+  RequiredRunnerReadiness,
+  RunnerManifestSummary,
+} from './runners/readiness.js';
 export type { DagBundle, NodeDef, NodeInput, NodeOutput } from './schema.js';
 export { invalidateNodes, regenerateNode } from './projectRegen.js';
 export type {

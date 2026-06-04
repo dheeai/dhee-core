@@ -32,7 +32,7 @@ export default defineConfig({
   // desktop's electron-builder extraResources config from this
   // dist/bundles directory).
   async onSuccess() {
-    const { cpSync, existsSync, rmSync } = await import('node:fs');
+    const { cpSync, existsSync, mkdirSync, rmSync } = await import('node:fs');
     const dstSkill = 'dist/skill';
     if (existsSync(dstSkill)) rmSync(dstSkill, { recursive: true, force: true });
     cpSync('src/agent/pi/skill', dstSkill, { recursive: true });
@@ -48,6 +48,21 @@ export default defineConfig({
     if (existsSync(dstBundles)) rmSync(dstBundles, { recursive: true, force: true });
     for (const id of FIRST_PARTY_BUNDLES) {
       cpSync(`src/dag/bundles/${id}`, `${dstBundles}/${id}`, { recursive: true });
+    }
+
+    const FIRST_PARTY_RUNNERS = [
+      'openrouter-image-runner',
+    ];
+    const dstRunners = 'dist/runners';
+    if (existsSync(dstRunners)) rmSync(dstRunners, { recursive: true, force: true });
+    for (const id of FIRST_PARTY_RUNNERS) {
+      const srcRunner = `packages/${id}`;
+      if (!existsSync(srcRunner)) continue;
+      mkdirSync(`${dstRunners}/${id}`, { recursive: true });
+      cpSync(`${srcRunner}/runner.json`, `${dstRunners}/${id}/runner.json`);
+      if (existsSync(`${srcRunner}/dist`)) {
+        cpSync(`${srcRunner}/dist`, `${dstRunners}/${id}/dist`, { recursive: true });
+      }
     }
   },
 });
