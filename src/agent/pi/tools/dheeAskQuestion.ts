@@ -69,7 +69,7 @@ export function makeAskQuestionTool() {
     name: 'dhee_ask_question',
     label: 'Ask user question',
     description:
-      'Surface a clickable picker for the user — single-select (default) or multi-select. Always prefer this over asking the question in text when the answer is a discrete choice: the user clicks instead of typing. Pass an `id` you can match against in the user\'s reply, a short `label` for the card, and optional `description`. Multi-select renders a "Done" confirmation button; the user\'s reply joins selected ids with ", ". Use sparingly — open-ended creative input should still be free-form.',
+      'Surface a clickable picker for the user — single-select (default) or multi-select. Always prefer this over asking the question in text when the answer is a discrete choice: the user clicks instead of typing. Pass an `id` you can match against in the user\'s reply, a short `label` for the card, and optional `description`. Multi-select renders a "Done" confirmation button; the user\'s reply joins selected ids with ", ". Use sparingly — open-ended creative input should still be free-form. CRITICAL: calling this tool does NOT answer the question — it only posts the picker. After you call it, END YOUR TURN immediately: do not write more text, do not pick an option yourself, and do not take any action that assumes an answer. The user\'s click arrives as your next message; act only then.',
     parameters: Params,
     async execute(_id, params) {
       if (!params.question || !params.question.trim()) {
@@ -106,6 +106,13 @@ export function makeAskQuestionTool() {
         question: params.question.trim(),
         options: normalized,
         multiSelect: params.multiSelect === true,
+        // Directive read by the model from the tool result. The desktop
+        // ignores unknown fields (it reads kind/question/options/
+        // multiSelect only), but the model sees this and must STOP rather
+        // than answer its own question — the turn-continuation bug where
+        // it picked "skip" for the user instead of waiting.
+        _agentDirective:
+          'QUESTION POSTED to the user as a clickable picker. END YOUR TURN NOW. Do NOT answer this question yourself, do NOT call more tools, do NOT take any action that assumes a choice. Wait for the user — their selection arrives as your next message.',
       };
       return textResult(JSON.stringify(payload));
     },

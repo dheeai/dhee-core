@@ -125,6 +125,15 @@ dhee_ask_question({
 The user's reply lands as their next message with the picked labels
 joined by ", " — match against the `id` field you set.
 
+**STOP after you call it.** `dhee_ask_question` only POSTS the picker —
+it does NOT answer the question. The moment you call it, your turn is
+over: do not write another sentence, do not pick an option "for" the
+user, and do not start the action you were asking about. Wait for the
+user's click, which comes back as your next message — only then do you
+act. (A past bug had the agent call the tool and then immediately say
+"alright, skipping" or kick off the cascade itself, defeating the whole
+point of asking.)
+
 **DO use** when you're genuinely waiting for the user to pick:
 - "Klein or Qwen for shot 3?"
 - "Cinematic, anime, watercolor, or noir?"

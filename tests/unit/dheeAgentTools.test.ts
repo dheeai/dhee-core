@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  makeAskQuestionTool,
   makeCreateProjectTool,
   makeGetStatusTool,
   makeReadArtifactTool,
@@ -511,6 +512,78 @@ describe('dhee_regenerate_node', () => {
     // shot 3 cleared, shot 4 preserved.
     expect(after.walkState.nodes['shot_image:scene_1_shot_3']).toBeUndefined();
     expect(after.walkState.nodes['shot_image:scene_1_shot_4']).toBeDefined();
+  });
+});
+
+/* ─────────────── dhee_ask_question ─────────────── */
+
+describe('dhee_ask_question', () => {
+  const parse = (out: { content: ReadonlyArray<unknown> }) =>
+    JSON.parse((out.content[0] as { text: string }).text);
+
+  it('echoes a question_choices payload the desktop picker can parse', async () => {
+    const tool = makeAskQuestionTool();
+    const out = await tool.execute(
+      'q-1',
+      {
+        question: 'Add Chitra the leopard?',
+        options: [
+          { id: 'yes', label: 'Yes, add Chitra', description: 'Regenerate everything' },
+          { id: 'skip', label: 'Skip for now' },
+        ],
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const payload = parse(out);
+    // The exact shape the desktop's question_choices parser reads.
+    expect(payload.kind).toBe('question_choices');
+    expect(payload.question).toBe('Add Chitra the leopard?');
+    expect(payload.options).toEqual([
+      { id: 'yes', label: 'Yes, add Chitra', description: 'Regenerate everything' },
+      { id: 'skip', label: 'Skip for now' },
+    ]);
+    expect(payload.multiSelect).toBe(false);
+  });
+
+  it('carries a directive that tells the model to STOP and not answer its own question', async () => {
+    // Root cause of the field bug: the model called the tool then picked
+    // an option for the user ("skip for now") instead of waiting. The
+    // result must instruct it to end the turn.
+    const tool = makeAskQuestionTool();
+    const out = await tool.execute(
+      'q-2',
+      { question: 'A or B?', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const payload = parse(out);
+    expect(typeof payload._agentDirective).toBe('string');
+    expect(payload._agentDirective).toMatch(/end your turn/i);
+    expect(payload._agentDirective).toMatch(/do not|don't|wait/i);
+  });
+
+  it('rejects an empty question and empty options with isError', async () => {
+    const tool = makeAskQuestionTool();
+    const noQ = await tool.execute('q-3', { question: '   ', options: [{ id: 'a', label: 'A' }] }, undefined, undefined, ctx);
+    expect(noQ.isError).toBe(true);
+    const noOpts = await tool.execute('q-4', { question: 'pick', options: [] }, undefined, undefined, ctx);
+    expect(noOpts.isError).toBe(true);
+  });
+
+  it('rejects duplicate option ids so the picker echoes an unambiguous id', async () => {
+    const tool = makeAskQuestionTool();
+    const out = await tool.execute(
+      'q-5',
+      { question: 'pick', options: [{ id: 'x', label: 'One' }, { id: 'x', label: 'Two' }] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(out.isError).toBe(true);
+    expect((out.content[0] as { text: string }).text).toMatch(/duplicate/i);
   });
 });
 
