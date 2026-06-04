@@ -191,6 +191,65 @@ describe('initializeProject', () => {
     expect(project.description).toBe('A test thing');
   });
 
+  it('13. custom (non-preset) allowCustom values pass through verbatim', () => {
+    // The desktop "Other…" affordance (allowCustom inputs) supplies values
+    // outside the declared options: a free-form style phrase, an arbitrary
+    // duration, a non-listed resolution. applyBundleInputs must write them
+    // as-is (no option whitelist) — that's the contract the UI relies on.
+    const projectDir = tmpDir();
+    made.push(projectDir);
+    const customStyle =
+      'luminous storybook anime, Studio Colorido register, soft cel shading, painterly foliage';
+    const result = initializeProject({
+      projectDir,
+      name: 'X',
+      bundleId: 'narrative_prompt_relay',
+      inputs: {
+        story_input: 'a',
+        style: customStyle, // not one of the 5 preset options
+        targetDuration: 95, // not 30/60/120/180
+        resolution: 2160, // not 480/720/1080
+      },
+    });
+    expect(result.ok).toBe(true);
+    const project = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(project.style).toBe(customStyle);
+    expect(project.targetDuration).toBe(95);
+    expect(project.resolution).toBe(2160);
+  });
+
+  it('14. style_guide input is written verbatim to plans/world_style.md', () => {
+    // Tier 2: a provided art-direction guide lands at the world_style
+    // node's OUTPUT path. On the next walk, llm.generate's
+    // skip-if-output-exists (covered in llmGenerate.test.ts) returns it
+    // without calling the LLM → the user's guide IS the style bible,
+    // verbatim, and every downstream visual prompt reads it.
+    const projectDir = tmpDir();
+    made.push(projectDir);
+    const guide =
+      '# Aesthetic\nLuminous storybook anime, Studio Colorido register.\n\n## Palette\nWarm saffron-amber-emerald.';
+    const result = initializeProject({
+      projectDir,
+      name: 'X',
+      bundleId: 'narrative_prompt_relay',
+      inputs: { story_input: 'a', style_guide: guide },
+    });
+    expect(result.ok).toBe(true);
+    expect(readFileSync(join(projectDir, 'plans', 'world_style.md'), 'utf8')).toBe(guide);
+  });
+
+  it('15. style_guide omitted → plans/world_style.md is NOT pre-written (LLM generates it)', () => {
+    const projectDir = tmpDir();
+    made.push(projectDir);
+    initializeProject({
+      projectDir,
+      name: 'X',
+      bundleId: 'narrative_prompt_relay',
+      inputs: { story_input: 'a' },
+    });
+    expect(existsSync(join(projectDir, 'plans', 'world_style.md'))).toBe(false);
+  });
+
   it('12. createdAt is an ISO date string', () => {
     const projectDir = tmpDir();
     made.push(projectDir);

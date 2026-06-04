@@ -192,9 +192,11 @@ export interface BundleDependencies {
  *                  dot-path (e.g. 'targetDuration', 'goal.targetDuration').
  *
  * Presentation fields (`label`, `control`, `options`, `unit`,
- * `placeholder`, `multiline`) are consumed by the desktop's New
- * Project flow to render the right form control. They have no
- * runtime semantics — the walker ignores them.
+ * `placeholder`, `multiline`, `allowCustom`) are consumed by the
+ * desktop's New Project flow to render the right form control. They
+ * have no runtime semantics — the walker ignores them, and
+ * `applyBundleInputs` writes whatever value the form supplied (preset
+ * OR custom) straight to `project.<field>` with no option whitelist.
  */
 export interface BundleInputOption {
   value: string | number | boolean;
@@ -222,6 +224,17 @@ export type BundleInputDecl =
       label?: string;
       control?: BundleInputControl;
       options?: BundleInputOption[];
+      /**
+       * When true, the desktop renders an "Other…" affordance alongside
+       * the preset `options` (a free text box for `select`/`text`, a
+       * number box for `pills`/`number`) so the user can supply a value
+       * outside the presets. The custom value is written to
+       * `project.<field>` verbatim — e.g. a free-form style phrase that
+       * flows into `world_style` via `{{style}}`, an arbitrary duration
+       * in seconds, or a non-listed resolution. No effect without
+       * `options`/a select-or-pills control.
+       */
+      allowCustom?: boolean;
       unit?: string;
       placeholder?: string;
     };
