@@ -48,6 +48,7 @@ export type AnalyticsEventName =
   | 'core_task_failed'
   | 'error_occurred'
   | 'final_video_created'
+  | 'core_llm_usage'
   | (string & {});
 
 interface CommonProperties {

@@ -63,29 +63,71 @@ export function isUsageTelemetryEnabled(): boolean {
   return !truthy(process.env['DHEE_USAGE_TELEMETRY_DISABLED']);
 }
 
+/** A subscriber notified for every recorded usage record. */
+export type UsageListener = (record: LlmUsageRecord) => void;
+const usageListeners: UsageListener[] = [];
+
 /**
- * Append one usage record. Best-effort — never throws, so it can't break
- * a generation. No-op when disabled.
+ * Subscribe to every recorded usage record. Used to forward records to a
+ * downstream sink (e.g. the cloud-billed PostHog forwarder — see
+ * src/server/llmUsageAnalytics.ts). Returns an unsubscribe function.
+ *
+ * Listeners fire INDEPENDENTLY of the local-file write, so forwarding
+ * works even where the JSONL path isn't writable (e.g. a packaged
+ * desktop whose cwd is read-only).
+ */
+export function addUsageListener(fn: UsageListener): () => void {
+  usageListeners.push(fn);
+  return () => {
+    const i = usageListeners.indexOf(fn);
+    if (i >= 0) usageListeners.splice(i, 1);
+  };
+}
+
+/** Test helper: drop all listeners. */
+export function clearUsageListeners(): void {
+  usageListeners.length = 0;
+}
+
+function buildRecord(input: LlmUsageInput): LlmUsageRecord {
+  const prompt = Number.isFinite(input.promptTokens) ? input.promptTokens : 0;
+  const cached = Number.isFinite(input.cachedTokens) ? input.cachedTokens : 0;
+  return {
+    ts: input.ts ?? Date.now(),
+    lane: input.lane,
+    model: input.model,
+    ...(input.nodeId !== undefined ? { nodeId: input.nodeId } : {}),
+    ...(input.itemId !== undefined ? { itemId: input.itemId } : {}),
+    ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+    promptTokens: prompt,
+    cachedTokens: cached,
+    completionTokens: Number.isFinite(input.completionTokens) ? input.completionTokens : 0,
+    totalTokens: Number.isFinite(input.totalTokens) ? input.totalTokens : 0,
+    cachedRatio: prompt > 0 ? cached / prompt : 0,
+    ...(input.costUsd !== undefined ? { costUsd: input.costUsd } : {}),
+  };
+}
+
+/**
+ * Record one usage record: notify listeners, then append the local JSONL.
+ * Best-effort — never throws, so it can't break a generation. No-op when
+ * disabled (DHEE_USAGE_TELEMETRY_DISABLED).
  */
 export function recordLlmUsage(input: LlmUsageInput): void {
   if (!isUsageTelemetryEnabled()) return;
+  const rec = buildRecord(input);
+  // 1. Notify listeners first — independent of file IO so a downstream
+  //    forwarder (e.g. cloud analytics) still fires where the log path
+  //    isn't writable.
+  for (const fn of usageListeners) {
+    try {
+      fn(rec);
+    } catch {
+      // A listener must never break recording.
+    }
+  }
+  // 2. Append the local JSONL (best-effort).
   try {
-    const prompt = Number.isFinite(input.promptTokens) ? input.promptTokens : 0;
-    const cached = Number.isFinite(input.cachedTokens) ? input.cachedTokens : 0;
-    const rec: LlmUsageRecord = {
-      ts: input.ts ?? Date.now(),
-      lane: input.lane,
-      model: input.model,
-      ...(input.nodeId !== undefined ? { nodeId: input.nodeId } : {}),
-      ...(input.itemId !== undefined ? { itemId: input.itemId } : {}),
-      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
-      promptTokens: prompt,
-      cachedTokens: cached,
-      completionTokens: Number.isFinite(input.completionTokens) ? input.completionTokens : 0,
-      totalTokens: Number.isFinite(input.totalTokens) ? input.totalTokens : 0,
-      cachedRatio: prompt > 0 ? cached / prompt : 0,
-      ...(input.costUsd !== undefined ? { costUsd: input.costUsd } : {}),
-    };
     const path = usageTelemetryPath();
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, JSON.stringify(rec) + '\n');
