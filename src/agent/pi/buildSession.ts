@@ -36,6 +36,7 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import { getModel, type Model } from '@mariozechner/pi-ai';
 import { DHEE_TOOL_NAMES, registerDheeTools } from './tools/index.js';
+import { registerContextTrim } from './contextTrim.js';
 
 /** The skill name (from the YAML frontmatter `name:` field) we inject. */
 export const DHEE_SKILL_NAME = 'dhee';
@@ -166,9 +167,13 @@ export async function buildPiSessionConfig(
   // or pi silently blocks it (Landmine 1).
   const customToolNames = opts.customToolNames ?? [...DHEE_TOOL_NAMES];
   const baseExtensionFactories = opts.extensionFactories ?? [];
+  // `registerContextTrim` bounds re-sent chat history each turn (issue
+  // #102 — unbounded prompt growth). It's part of the production default
+  // stack alongside the dhee tools; the `includeDefaultTools: false`
+  // escape hatch (config-shape tests) skips both.
   const extensionFactories = opts.includeDefaultTools === false
     ? baseExtensionFactories
-    : [registerDheeTools, ...baseExtensionFactories];
+    : [registerDheeTools, registerContextTrim, ...baseExtensionFactories];
 
   // Load our packaged skill once and inject it via skillsOverride.
   // We disable default discovery (which would also scan cwd/.pi/skills
