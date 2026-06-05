@@ -1698,4 +1698,10 @@ export {
   endpointSlug,
 } from './workflowAliases.js';
 export type { WorkflowAliases } from './workflowAliases.js';
+export {
+  readBundleResolution,
+  writeBundleResolution,
+  isBundleResolved,
+} from './bundleResolution.js';
+export type { BundleResolution } from './bundleResolution.js';
 
