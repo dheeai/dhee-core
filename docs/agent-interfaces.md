@@ -1,204 +1,138 @@
 # Driving dhee-core from external agents
 
-If you're building an agent that needs to talk to dhee-core (Open Claw,
-a custom Claude Code plugin, a CI script, your own automation), pick
-the surface that matches your runtime and friction tolerance. Today
-there are three live interfaces, with a fourth (MCP) on the roadmap.
+If you're building an agent (Claude Code, a CI script, your own
+automation) that needs to drive dhee-core, pick the surface that matches
+your runtime. After the **bundle-architecture migration** there are two
+live interfaces; a third (MCP) is on the roadmap.
 
-| Interface | Best for | Ergonomics | Runtime requirements |
-|---|---|---|---|
-| [CLI scripts](#cli-scripts) | Shell scripts, CI, ad-hoc work, agents that already shell out | Lowest setup, text I/O | Repo + Node + pnpm + tsx |
-| [HTTP REST](#http-rest-api) | Cross-process, cross-language, hosted dhee-core, anything not running on the same Node | JSON in/out, stable schema | Just an HTTP client |
-| [Library import](#library-import) | Tightly coupled hosts (dhee-desktop is the prototype) | Typed, zero overhead, zero serialization | Node + npm install |
-| [MCP server](#mcp-future) — *roadmap* | Agent-first integrations (Claude Code, Cursor, future MCP-aware agents) | Plug-and-play, no bespoke client code | TBD; see `todos/mcp-server.md` |
+| Interface | Best for | Ergonomics | Runtime requirements | Status |
+|---|---|---|---|---|
+| [CLI (`pnpm dhee`)](#cli-pnpm-dhee) | Shell scripts, CI, agents that shell out (Claude Code) | Lowest setup, text I/O | Repo + Node + pnpm + tsx | **Live** |
+| [Library import](#library-import) | Node hosts that bundle dhee-core (dhee-desktop) | Typed, zero serialization | Node + install | **Live** |
+| [HTTP REST + WS](#http-rest--removed) | Cross-process / cross-language | JSON in/out | An HTTP client | **Removed** |
+| [MCP server](#mcp--roadmap) | Agent-first integrations | Plug-and-play | TBD | Roadmap |
 
-All four surfaces share the same in-process implementation under the
-hood (`src/server/runners/*.ts`). Choosing a different interface
-doesn't change *what* dhee-core does — only how you talk to it.
+Both live surfaces share the same in-process implementation: the bundle
+**walker** (`src/dag/walker.ts`) driven by `runProjectViaBundle`
+(`src/server/runners/`), project bootstrap via `initializeProject`
+(`src/dag/initializeProject.ts`), and the `dhee_*` pi-agent tools
+(`src/agent/pi/tools/*`). Choosing an interface changes *how* you talk to
+dhee-core, not *what* it does.
 
----
-
-## CLI scripts
-
-Defined in `package.json`. Each `pnpm <name>` invocation is a wrapper
-around one of the in-process runners; the script file is a thin CLI
-wrapper that delegates to `src/server/runners/*.ts`.
-
-```bash
-# Project lifecycle
-pnpm new <name> --style live --duration 60 --text "..."
-pnpm new <name> --style anime --duration 30 --input story.md
-pnpm reset <project> <stage> [--clean]
-pnpm status <project>
-pnpm inspect <project>                # show-project: full project.json snapshot
-pnpm nodes <project> [type] [status]  # list-items: filter the executor graph
-
-# Drive the pipeline
-pnpm run-to <project> [stage]         # run to completion, or pause at a stage / node id
-pnpm regen <project> <node>           # invalidate + re-run a specific node
-pnpm override <project> <alias> --from <file>   # paste user-edited content for a node
-pnpm stop <project>                   # set the stop sentinel + cancel any in-flight job
-
-# Quality / utilities
-pnpm audit-fidelity <project>         # VLM judge over generated images (long-running)
-pnpm calibrate-vlm
-pnpm backfill-schema <project>
-```
-
-**When to use:** simplest possible integration. If your agent is
-already happy shelling out and you have the dhee-core repo on the
-same machine, CLI is the lowest-friction option. Output is text
-(usually structured logs you can grep); exit code 0 = success.
-
-**When NOT to use:** you don't have the repo. The packaged dhee
-desktop binary doesn't include `scripts/`, so CLI scripts only work
-in the dev/repo context.
+> **History:** the pre-migration CLI exposed a `pnpm <verb>` script per
+> operation (`pnpm new`, `pnpm status`, `pnpm run-to`, …) wrapping a
+> legacy executor, plus an HTTP server via `pnpm start`. Both were removed
+> when the project moved to the bundle / DAG-walker model. `src/index.ts`
+> is now a library barrel, not a CLI dispatcher. The current CLI is a
+> single `pnpm dhee <verb>` entry point (`scripts/dhee-cli.ts`).
 
 ---
 
-## HTTP REST API
+## CLI (`pnpm dhee`)
 
-Registered by `registerAgentRoutes()` in `src/server/agentRoutes.ts`.
-All endpoints under the configured prefix (default `/api/v1`).
-
-The server is started by `pnpm start` (which runs `src/server/cli.ts`).
-Default port is read from env or defaults baked into `cli.ts`. Auth
-via `ApiKeyAuth` (`src/server/auth.ts`) when an API key is configured.
-
-### Read endpoints
-
-| Verb + path | What it returns |
-|---|---|
-| `GET /api/v1/projects/:name/status` | `StatusSummary` — counts, current phase, failed-node list |
-| `GET /api/v1/projects/:name/nodes/:alias` | Per-node detail (status, deps, error, output paths) |
-
-### Mutation endpoints
-
-| Verb + path | Body | What it does |
-|---|---|---|
-| `POST /api/v1/projects/:name/regen` | `{ aliases: string[], cascade?: boolean }` | Invalidate one or more nodes (and optionally everything downstream). Returns `{ changed, notFound }`. |
-| `POST /api/v1/projects/:name/override` | `{ alias: string, content?: string, fromPath?: string }` | Replace a node's content with user-provided text. |
-| `POST /api/v1/projects/:name/stop` | — | Write `.executor.stop` sentinel + cancel any in-flight job. Returns `{ status, sentinel, cancelledJobId? }`. |
-
-### Run jobs (async, polled)
-
-| Verb + path | Body | Behavior |
-|---|---|---|
-| `POST /api/v1/projects/:name/run-to` | `{ stage?, nodeId?, skipMedia? }` | Kicks off a run. Returns `{ jobId, status, target }` immediately. JobManager serializes per-project — duplicate calls return 409 with `existingJobId`. |
-| `GET /api/v1/projects/:name/run-to` | — | Latest job for the project. 404 if no runs yet. |
-| `GET /api/v1/projects/:name/run-to/:jobId` | — | Specific job by id. Includes `status`, `target`, timestamps. |
-
-### Streaming
-
-The HTTP API itself is request/response. For event streams (`tool_call`,
-`tool_result`, `media_generated`, `notification`, etc.) connect to the
-WebSocket endpoint registered by `WebSocketHandler` in
-`src/server/WebSocketHandler.ts`. Same wire shape as
-`dheeEventName` in `dhee-desktop/src/shared/dheeIpc.ts`.
-
-### Example: run a project to completion
+The lowest-friction surface for an agent on the same machine with the
+repo. `scripts/dhee-cli.ts` is a thin wrapper that calls
+`initializeProject`, `runProjectViaBundle`, and the `dhee_*` tools
+directly — so it can't drift from the desktop chat agent.
 
 ```bash
-# Kick off
-JOBID=$(curl -s -X POST -H 'Content-Type: application/json' \
-  -d '{}' http://localhost:8001/api/v1/projects/noir/run-to \
-  | jq -r .jobId)
+# Create (story via --story <file>, --text "...", or stdin). Lands in
+# ~/dhee-studios/<name> (override: $dhee_PROJECTS_DIR or --dir <abs>).
+pnpm dhee new <name> --story story.txt --style live --duration 60 \
+    [--aspect 16:9|9:16] [--resolution 720|1080] [--bundle <id>] [--style-guide <f>]
 
-# Poll
-while true; do
-  STATUS=$(curl -s "http://localhost:8001/api/v1/projects/noir/run-to/$JOBID" | jq -r .status)
-  echo "  $STATUS"
-  [[ "$STATUS" == "completed" || "$STATUS" == "failed" || "$STATUS" == "cancelled" ]] && break
-  sleep 2
-done
+# Inspect (read-only)
+pnpm dhee status  <project>                       # node status counts + failures
+pnpm dhee nodes   <project> [--status s] [--grep r]
+pnpm dhee inspect <project> <nodeId> [--item <itemId>]
+pnpm dhee bundles                                 # list available pipelines
+
+# Drive
+pnpm dhee run    <project> [--to <nodeId>] [--only id,id]
+pnpm dhee run-to <project> [<nodeId>]
+pnpm dhee stop   <project>                        # writes .dhee.stop; a running `run` halts
+
+# Edit
+pnpm dhee regen    <project> <nodeId> [--item <itemId>]   # invalidate + re-run (cascades)
+pnpm dhee override <project> <nodeId> --from <file> [--item ..] [--reason ..] [--confirm]
 ```
 
-For richer streaming, open a WebSocket alongside and listen for
-`tool_call` / `media_generated` / `notification` events. They fire as
-the run progresses.
+`<project>` is a name (resolved under `$dhee_PROJECTS_DIR`, else
+`~/dhee-studios/<name>`, else cwd / `<name>.dhee`) or an explicit path.
+`run` streams per-node progress to stdout; Ctrl-C or `pnpm dhee stop`
+aborts before the next node. Exit code 0 = success.
 
-**When to use:** any time the agent isn't on the same Node process as
-dhee-core. Cross-machine, cross-language, hosted dhee-core, batch
-automation that doesn't want to install dev deps.
+The `.claude/skills/dhee/SKILL.md` skill is the agent-facing companion to
+this CLI (decision tree, node ids, the edit→cascade contract).
+
+**When NOT to use:** you don't have the repo. The packaged desktop binary
+doesn't ship `scripts/`, so the CLI is dev/repo-context only.
 
 ---
 
 ## Library import
 
-If your agent IS in Node and you want zero overhead + full TypeScript
-types, link dhee-core as a dependency and import the runners
-directly:
+For a Node host that bundles dhee-core (dhee-desktop is the canonical
+consumer), import the primitives directly:
 
 ```ts
-import {
-  runExecutor,
-  type RunExecutorOpts,
-  type RunExecutorResult,
-} from 'dhee-core/server/runners';
+import { initializeProject } from 'dhee-core/dag/initializeProject'; // or deep path src/dag/...
+import { runProjectViaBundle } from 'dhee-core/runners';
 
-import {
-  resetProjectStage,
-  type ResetProjectStageOpts,
-  type ResetProjectStageResult,
-  ResetProjectError,
-} from 'dhee-core/server/runners/resetProjectStage';
+// 1. Create the project dir + project.json pinned to a bundle.
+const init = initializeProject({
+  projectDir,                       // an existing, empty dir
+  name: 'my_film',
+  bundleId: 'narrative_prompt_relay',
+  inputs: { story_input, style_guide, style: 'anime', aspect: '16:9', resolution: 720, targetDuration: 90 },
+});
 
-import {
-  createProjectInProcess,
-  resolveStyle,
-  CreateProjectError,
-} from 'dhee-core/server/runners/createProjectInProcess';
-
-import {
-  ConversationManager,
-} from 'dhee-core/server/manager';
+// 2. Walk the DAG (optionally stop at a node; pass a signal to cancel).
+const r = await runProjectViaBundle({ projectDir, stopAt: 'shot_image', log: console.log });
 ```
 
-Live entry points (the embed barrels — Fastify-free, safe to bundle
-into Electron / a worker / etc.):
+`runProjectViaBundle` is re-exported from the `dhee-core/runners` barrel
+(`src/server/runners/index.ts`). The `dhee_*` tool instances
+(`src/agent/pi/tools/index.ts`) wrap the read/edit operations (status,
+inspect, regen, override, …) and are safe to call directly —
+`tool.execute('id', params, signal?)` returns
+`{ content: [{ type:'text', text }], details, isError? }`.
 
-- `src/server/manager.ts` — `ConversationManager` + `loadDevEnv`
-- `src/server/runners/index.ts` — `runExecutor` + helpers
-- `src/server/runners/resetProjectStage.ts` — `resetProjectStage`
-- `src/server/runners/createProjectInProcess.ts` — `createProjectInProcess`
-- `src/agent/pi/index.ts` — pi-agent extension factory
+**Working examples:** `scripts/dhee-cli.ts` (the CLI itself) and
+`scripts/style-seep-test.ts` (a bespoke driver) both use exactly this
+pattern. dhee-desktop links dhee-core via `file:../dhee-core`.
 
-The dhee-desktop app is the canonical example consumer
-(`dhee-core: file:../dhee-core` in its package.json).
-
-**When to use:** Node-native agents that want maximum performance and
-typed APIs. Tightly coupled hosts where shipping dhee-core in the
-same bundle makes sense.
+**When to use:** Node-native hosts wanting typed APIs and zero
+serialization overhead.
 
 ---
 
-## MCP — *future*
+## HTTP REST — *removed*
 
-The roadmap is to expose the same operations as a Model Context
-Protocol server so any MCP-aware agent (Claude Code, Cursor, future
-agents) can drive dhee-core without writing client code.
-
-See `todos/mcp-server.md` for the scope, open questions, and
-estimated effort.
-
----
-
-## Which interface should pi-agent use?
-
-The pi-agent (the chat panel inside dhee-desktop) uses **library
-import** — it imports `runExecutor`, `resetProjectStage`,
-`createProjectInProcess` directly because it ships in the same Node
-process as the embedded ConversationManager. See
-`src/agent/pi/tools/*.ts`.
-
-External agents should not try to talk to the pi-agent. The pi-agent
-is a chat orchestration layer, not an integration boundary. Pick CLI,
-HTTP, or library based on your runtime.
+The pre-migration HTTP/WebSocket surface (`registerAgentRoutes`,
+`WebSocketHandler`, `ApiKeyAuth`, started via `pnpm start` →
+`src/server/cli.ts`) **no longer exists** — those modules and the `start`
+script were removed in the bundle migration. There is currently **no
+runnable HTTP server**. If you need a cross-process / cross-language
+surface today, drive the CLI as a subprocess. A REST/MCP server over the
+bundle runners is future work (see MCP below).
 
 ---
 
-## Tested coverage
+## MCP — *roadmap*
 
-For per-tool / per-runner test coverage, see
-`docs/pi-agent-bridge-coverage.md`. The HTTP routes have their own
-tests in `tests/server/`.
+Expose the same bundle operations as a Model Context Protocol server so any
+MCP-aware agent (Claude Code, Cursor) can drive dhee-core without bespoke
+client code. This would wrap the same `initializeProject` /
+`runProjectViaBundle` / `dhee_*` primitives the CLI and library use. Not
+yet built.
+
+---
+
+## Which interface does the desktop pi-agent use?
+
+**Library import.** The chat panel inside dhee-desktop ships in the same
+Node process and imports `runProjectViaBundle` + the `dhee_*` tools
+directly (see `src/agent/pi/tools/*` and the desktop's `dheeCoreManager`).
+External agents should not try to talk to the pi-agent — it's a chat
+orchestration layer, not an integration boundary. Pick the CLI or library.

@@ -29,7 +29,8 @@
       "path": "plans/world_style.md",
       "label": "Art direction (optional)",
       "placeholder": "Paste a full visual style guide — palette, light, linework, character locks, what to avoid. It becomes the project's style bible verbatim (no LLM rewrite). Leave blank to auto-generate from your story + style preset.",
-      "multiline": true
+      "multiline": true,
+      "required": false
     },
     {
       "id": "targetDuration",
