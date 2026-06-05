@@ -1722,4 +1722,21 @@ export type {
   RequiredCustomNode,
   RequiredModel,
 } from './schema.js';
+export {
+  installBundle,
+  validateBundleStructure,
+  findBundleRoot,
+  userBundlesDir,
+} from './installBundle.js';
+export type {
+  BundleInstallSource,
+  InstallResult,
+  InstallOpts,
+  BundleValidation,
+} from './installBundle.js';
+export {
+  validateApiWorkflow,
+  suggestParameterMappings,
+} from './importWorkflow.js';
+export type { ApiWorkflowValidation, ParameterMapping } from './importWorkflow.js';
 
