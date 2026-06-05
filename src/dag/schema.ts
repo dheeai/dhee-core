@@ -313,6 +313,59 @@ export interface DagBundle {
    * registry; the `from` / `source` fields here reference those.
    */
   display?: BundleDisplay;
+  /**
+   * Optional declared requirements for the bundle's ComfyUI workflows:
+   * the model files and custom-node packs they need, with human
+   * curation (download URLs, sizes, install hints) that can't be
+   * inferred from the workflow JSON alone. Drives the desktop Bundle
+   * Configurator's "Download ↗ / Install ↗" affordances — a bare
+   * missing-filename becomes "FLUX dev (24 GB) ↗".
+   *
+   * Optional: gap DETECTION (checkBundle) works without it; this only
+   * upgrades a detected gap into an actionable remediation hint. Can
+   * be auto-stubbed from the workflows via scripts/gen-bundle-
+   * requirements.ts, then curated.
+   */
+  requirements?: BundleRequirements;
+}
+
+/**
+ * Declared model + custom-node requirements for a bundle's workflows.
+ * See deriveBundleRequirements() for the auto-stub generator.
+ */
+export interface BundleRequirements {
+  /** Custom-node packs the workflows reference (non-core ComfyUI classes). */
+  customNodes?: RequiredCustomNode[];
+  /** Model files the workflows reference. */
+  models?: RequiredModel[];
+}
+
+export interface RequiredCustomNode {
+  /** ComfyUI node class_type (the key that must exist in /object_info). */
+  classType: string;
+  /** Human name of the node pack that provides this class. */
+  pack?: string;
+  /** Preferred install route. */
+  installVia?: 'manager' | 'git';
+  /** Git URL when installVia === 'git' (or for reference). */
+  gitUrl?: string;
+  /** Free-text hint shown to the user. */
+  note?: string;
+}
+
+export interface RequiredModel {
+  /** `<LoaderClass>.<field>` the model plugs into, e.g. "UNETLoader.unet_name". */
+  classField: string;
+  /** Canonical filename the bundle's workflow references. */
+  canonicalFilename: string;
+  /** Coarse model kind, inferred from the loader field (unet/vae/clip/lora/checkpoint/…). */
+  type?: string;
+  /** Where to download it (HuggingFace / source). */
+  downloadUrl?: string;
+  /** Approx download size in GB (for the user's "this'll take a while" expectation). */
+  sizeGb?: number;
+  /** When true, the workflow still runs without it (e.g. an optional upscaler). */
+  optional?: boolean;
 }
 
 /**

@@ -1667,3 +1667,76 @@ export type { InitializeProjectParams, InitializeProjectResult } from './initial
 export { listBundles } from './listBundles.js';
 export type { BundleSummary } from './listBundles.js';
 
+// Workflow fit-checking: does a ComfyUI endpoint have the models +
+// custom nodes a bundle's workflows need? Engine behind the desktop
+// Bundle Configurator (first-run / community install / BYO workflow).
+export {
+  checkWorkflow,
+  extractModelRefs,
+  extractNodeClasses,
+  findMissingNodeClasses,
+} from './workflowVerify.js';
+export type {
+  ComfyWorkflow,
+  ObjectInfo,
+  CheckOpts,
+  CheckResult,
+  WorkflowModelRef,
+  MissingNodeClass,
+} from './workflowVerify.js';
+export { checkBundle, listBundleWorkflows } from './checkBundle.js';
+export type {
+  CheckBundleOpts,
+  BundleFit,
+  BundleFitStatus,
+  BundleWorkflowFit,
+} from './checkBundle.js';
+export {
+  readAliases,
+  writeAliases,
+  applyAliases,
+  endpointSlug,
+} from './workflowAliases.js';
+export type { WorkflowAliases } from './workflowAliases.js';
+export {
+  readBundleResolution,
+  writeBundleResolution,
+  isBundleResolved,
+} from './bundleResolution.js';
+export type { BundleResolution } from './bundleResolution.js';
+export {
+  loadBundleRequirements,
+  deriveBundleRequirements,
+  enrichBundleFit,
+  CORE_COMFY_CLASSES,
+} from './bundleRequirements.js';
+export type {
+  DerivedRequirements,
+  EnrichedBundleFit,
+  EnrichedWorkflowFit,
+  EnrichedModelGap,
+  EnrichedNodeGap,
+} from './bundleRequirements.js';
+export type {
+  BundleRequirements,
+  RequiredCustomNode,
+  RequiredModel,
+} from './schema.js';
+export {
+  installBundle,
+  validateBundleStructure,
+  findBundleRoot,
+  userBundlesDir,
+} from './installBundle.js';
+export type {
+  BundleInstallSource,
+  InstallResult,
+  InstallOpts,
+  BundleValidation,
+} from './installBundle.js';
+export {
+  validateApiWorkflow,
+  suggestParameterMappings,
+} from './importWorkflow.js';
+export type { ApiWorkflowValidation, ParameterMapping } from './importWorkflow.js';
+

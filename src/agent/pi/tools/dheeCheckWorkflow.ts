@@ -114,6 +114,9 @@ export function makeCheckWorkflowTool() {
           return (await resp.json()) as Record<string, unknown>;
         },
         ...(existing.name_aliases ? { endpointAliases: existing.name_aliases } : {}),
+        ...(existing.class_swaps?.[params.workflowPath]
+          ? { classSwaps: existing.class_swaps[params.workflowPath] }
+          : {}),
       });
 
       // Render a concise summary in `text` and the full data in `details`.
@@ -176,11 +179,31 @@ export function makeCheckWorkflowTool() {
         }
         return lines;
       }
+      // Missing CUSTOM NODES (class_type not installed on this Comfy)
+      // are a separate failure mode from missing model files — a node
+      // pack the bundle author has that the user doesn't. ComfyUI has
+      // no "list packs" endpoint, so the fix is install-the-pack or a
+      // class_swap to an installed equivalent class.
+      const nodeLines =
+        result.missing_node_classes.length === 0
+          ? []
+          : [
+              '',
+              ...result.missing_node_classes.map(
+                (n) => `MISSING NODE: ${n.class_type} [${n.nodeId}] — node class not installed on this Comfy.`,
+              ),
+              '  Fix a missing node by either:',
+              '  - installing the custom-node pack that provides this class (ComfyUI-Manager / git), or',
+              '  - class_swap to an installed equivalent class (see available_by_class) via dhee_apply_workflow_aliases,',
+              '  - if neither: tell the user the node pack is missing + name the class.',
+            ];
+
       const summary = [
         `Workflow: ${params.workflowPath}`,
         `Endpoint: ${params.endpoint}`,
         `Refs: ${result.workflow_refs.length} model references in workflow`,
-        `Missing: ${result.missing_refs.length}`,
+        `Missing models: ${result.missing_refs.length}`,
+        `Missing custom nodes: ${result.missing_node_classes.length}`,
         ...(result.missing_refs.length === 0
           ? ['All referenced models are available on this Comfy.']
           : [
@@ -192,12 +215,14 @@ export function makeCheckWorkflowTool() {
               '  - ambiguous: ASK THE USER which to use',
               '  - no candidate at all anywhere: tell the user the model is missing + name it.',
             ]),
+        ...nodeLines,
       ].join('\n');
 
       return textResult(summary, {
         ok: result.ok,
         workflow_refs: result.workflow_refs,
         missing_refs: result.missing_refs,
+        missing_node_classes: result.missing_node_classes,
         available_by_class: result.available_by_class,
         existing_aliases: existing,
         workflowKey: params.workflowPath,
