@@ -37,6 +37,7 @@ import {
 import { getModel, type Model } from '@mariozechner/pi-ai';
 import { DHEE_TOOL_NAMES, registerDheeTools } from './tools/index.js';
 import { registerContextTrim } from './contextTrim.js';
+import { registerUsageTelemetry } from './usageTelemetryExtension.js';
 
 /** The skill name (from the YAML frontmatter `name:` field) we inject. */
 export const DHEE_SKILL_NAME = 'dhee';
@@ -173,7 +174,7 @@ export async function buildPiSessionConfig(
   // escape hatch (config-shape tests) skips both.
   const extensionFactories = opts.includeDefaultTools === false
     ? baseExtensionFactories
-    : [registerDheeTools, registerContextTrim, ...baseExtensionFactories];
+    : [registerDheeTools, registerContextTrim, registerUsageTelemetry, ...baseExtensionFactories];
 
   // Load our packaged skill once and inject it via skillsOverride.
   // We disable default discovery (which would also scan cwd/.pi/skills

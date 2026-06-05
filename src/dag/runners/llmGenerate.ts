@@ -40,6 +40,7 @@ import type { Runner, RunnerContext, RunnerResult, RunnerDescription } from '../
 import type { LLMPurpose, LLMTier } from '../../core/llm/purposes.js';
 import { LLMRouter, loadRoutingFromEnv, isRoutingEnabledFromEnv } from '../../core/llm/router.js';
 import { getLLMConfig } from '../../core/llm/config.js';
+import { recordLlmUsage } from '../../core/llm/usageTelemetry.js';
 
 // Pull the actual constructor from whichever export shape ajv ships.
 type AjvInstance = { compile: (schema: unknown) => (data: unknown) => boolean; errors?: Array<{ instancePath?: string; message?: string }> | null };
@@ -81,6 +82,16 @@ export interface LlmGenerateConfig {
 
 // ── DI: client factory ─────────────────────────────────────────────────
 
+/** Usage as the runner records it for telemetry (issue #102 fix #0). */
+export interface LlmGenerateUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost?: number;
+  cachedPromptTokens?: number;
+  cacheDiscount?: number;
+}
+
 /** Minimal client interface the runner needs. Allows stubbing in tests. */
 export interface LlmGenerateClient {
   generate(opts: {
@@ -89,7 +100,7 @@ export interface LlmGenerateClient {
     responseFormat?: { type: 'json_object' };
     temperature?: number;
     maxTokens?: number;
-  }): Promise<{ content?: string }>;
+  }): Promise<{ content?: string; usage?: LlmGenerateUsage }>;
   getModel(): string;
 }
 
@@ -136,7 +147,8 @@ function defaultClientFactory(tier: LLMTier, purpose?: LLMPurpose): LlmGenerateC
         ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
       });
       // LLMResponse.content is string | null; normalize to string | undefined.
-      return { content: resp.content ?? undefined };
+      // Pass usage through so the runner can record per-call telemetry.
+      return { content: resp.content ?? undefined, usage: resp.usage };
     },
     getModel: () => client.getModel(),
   };
@@ -540,6 +552,24 @@ export function createLlmGenerateRunner(opts?: {
           ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
           ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
         });
+        // Per-call usage telemetry (issue #102 fix #0). Recorded for EVERY
+        // real call — including parse/schema-retry attempts, which re-send
+        // the full prompt and cost real tokens. Tagged lane='walker' +
+        // the originating node/item so the chat-vs-walker spend split and
+        // the prefix-cache hit ratio are verifiable from the log.
+        if (resp.usage) {
+          recordLlmUsage({
+            lane: 'walker',
+            model: client.getModel(),
+            nodeId: ctx.node.id,
+            ...(ctx.itemId !== undefined ? { itemId: ctx.itemId } : {}),
+            promptTokens: resp.usage.promptTokens,
+            cachedTokens: resp.usage.cachedPromptTokens ?? 0,
+            completionTokens: resp.usage.completionTokens,
+            totalTokens: resp.usage.totalTokens,
+            ...(resp.usage.cost !== undefined ? { costUsd: resp.usage.cost } : {}),
+          });
+        }
         const got = resp.content ?? '';
         if (!got || got.trim() === '') {
           // An empty response is a transient model hiccup (rate-limit
