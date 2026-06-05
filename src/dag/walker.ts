@@ -1704,4 +1704,22 @@ export {
   isBundleResolved,
 } from './bundleResolution.js';
 export type { BundleResolution } from './bundleResolution.js';
+export {
+  loadBundleRequirements,
+  deriveBundleRequirements,
+  enrichBundleFit,
+  CORE_COMFY_CLASSES,
+} from './bundleRequirements.js';
+export type {
+  DerivedRequirements,
+  EnrichedBundleFit,
+  EnrichedWorkflowFit,
+  EnrichedModelGap,
+  EnrichedNodeGap,
+} from './bundleRequirements.js';
+export type {
+  BundleRequirements,
+  RequiredCustomNode,
+  RequiredModel,
+} from './schema.js';
 
