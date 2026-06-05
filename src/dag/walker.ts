@@ -34,6 +34,7 @@ import type { BundleInputDecl } from './schema.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
+import { depBelongsToChunk } from './chunkDeps.js';
 import { applyAspect, applyAspectToConfig } from './aspect.js';
 import { effectiveFrameCap, scaleBudgetForGpu } from './chunkBudget.js';
 import { REPO_ROOT } from '../agent/pi/paths.js';
@@ -1383,7 +1384,20 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             const abs = resolve(opts.projectDir, u.outputRel);
             if (existsSync(abs)) {
               pathsById[u.itemId] = abs;
-              recordDep(inp.from, u.itemId, (inp.usage as 'input' | 'context' | 'reference' | 'aggregate' | undefined));
+              // Chunk-aware dep narrowing: a chunked consumer (scene_clip
+              // with a shotRange) only depends on the shots inside its
+              // chunk, even though scope='all' exposes every shot's path.
+              // Recording ALL shots as deps makes cascade-invalidation
+              // re-roll sibling chunks on any shot edit (editing shot 3
+              // re-rendered the chunk holding shots 5-6). Narrow to the
+              // chunk's range so invalidation stays surgical; non-chunk
+              // consumers and non-shot deps are unaffected. The path map
+              // (pathsById) stays full — only the recorded dependency set
+              // narrows; the scene_clip runner builds its own per-chunk
+              // first-frame list regardless.
+              if (depBelongsToChunk(inst.shotRange, u.itemId)) {
+                recordDep(inp.from, u.itemId, (inp.usage as 'input' | 'context' | 'reference' | 'aggregate' | undefined));
+              }
             }
           }
           resolvedInputs[inp.from] = pathsById;
