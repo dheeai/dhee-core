@@ -40,6 +40,7 @@ import type { Runner, RunnerContext, RunnerResult, RunnerDescription } from '../
 import type { LLMPurpose, LLMTier } from '../../core/llm/purposes.js';
 import { LLMRouter, loadRoutingFromEnv, isRoutingEnabledFromEnv } from '../../core/llm/router.js';
 import { getLLMConfig } from '../../core/llm/config.js';
+import { recordLlmUsage } from '../../core/llm/usageTelemetry.js';
 
 // Pull the actual constructor from whichever export shape ajv ships.
 type AjvInstance = { compile: (schema: unknown) => (data: unknown) => boolean; errors?: Array<{ instancePath?: string; message?: string }> | null };
@@ -81,6 +82,16 @@ export interface LlmGenerateConfig {
 
 // ── DI: client factory ─────────────────────────────────────────────────
 
+/** Usage as the runner records it for telemetry (issue #102 fix #0). */
+export interface LlmGenerateUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost?: number;
+  cachedPromptTokens?: number;
+  cacheDiscount?: number;
+}
+
 /** Minimal client interface the runner needs. Allows stubbing in tests. */
 export interface LlmGenerateClient {
   generate(opts: {
@@ -89,7 +100,7 @@ export interface LlmGenerateClient {
     responseFormat?: { type: 'json_object' };
     temperature?: number;
     maxTokens?: number;
-  }): Promise<{ content?: string }>;
+  }): Promise<{ content?: string; usage?: LlmGenerateUsage }>;
   getModel(): string;
 }
 
@@ -136,7 +147,8 @@ function defaultClientFactory(tier: LLMTier, purpose?: LLMPurpose): LlmGenerateC
         ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
       });
       // LLMResponse.content is string | null; normalize to string | undefined.
-      return { content: resp.content ?? undefined };
+      // Pass usage through so the runner can record per-call telemetry.
+      return { content: resp.content ?? undefined, usage: resp.usage };
     },
     getModel: () => client.getModel(),
   };
@@ -204,6 +216,45 @@ function substituteTemplate(
     };
   }
   return { ok: true, rendered };
+}
+
+/**
+ * Cache-breakpoint marker. When a prompt template contains this token,
+ * the runner splits the RENDERED prompt into a stable `system` prefix
+ * (everything BEFORE the marker) and a per-item `user` suffix (everything
+ * AFTER it). The marker itself is stripped from what's sent to the model.
+ *
+ * Why: collection nodes (shot_image_prompt, shot_motion_directive,
+ * character_image, setting_image, scene_video_prompt, …) fan out into
+ * many successive LLM calls that share a large INVARIANT context — the
+ * full scenes_plan / characters_plan / settings_plan, the world style,
+ * the instructions and output schema — and differ only by a tiny per-item
+ * selector (`{{item_id}}`). By making that invariant block the leading
+ * `system` message, byte-identical across every item, the provider's
+ * automatic prefix caching (DeepSeek / OpenRouter) reuses it across items
+ * in a run, across runs, and across users hitting the same upstream. The
+ * per-item delta is the only part that changes the request. See issue #102.
+ *
+ * Authoring rule: put ALL invariant content BEFORE the marker and ONLY
+ * the per-item delta AFTER it. Templates without the marker are sent
+ * unchanged as a single user message (fully backward compatible).
+ */
+export const CACHE_BREAKPOINT_MARKER = '<<<DHEE_CACHE_BREAKPOINT>>>';
+
+/**
+ * Split a rendered prompt at the cache breakpoint. Returns null (→ send
+ * as a single user message) when the marker is absent or either side is
+ * empty — a split only helps when there's real content on both sides.
+ */
+export function splitOnCacheBreakpoint(
+  rendered: string,
+): { prefix: string; suffix: string } | null {
+  const idx = rendered.indexOf(CACHE_BREAKPOINT_MARKER);
+  if (idx === -1) return null;
+  const prefix = rendered.slice(0, idx).trimEnd();
+  const suffix = rendered.slice(idx + CACHE_BREAKPOINT_MARKER.length).trimStart();
+  if (!prefix || !suffix) return null;
+  return { prefix, suffix };
 }
 
 // ── JSON parsing & validation ──────────────────────────────────────────
@@ -466,16 +517,28 @@ export function createLlmGenerateRunner(opts?: {
     // it as a leading user message that frames the regen as a "fix the
     // previous output" task. Keeps the prompt template untouched.
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
-    if (pendingCritique) {
-      messages.push({
-        role: 'user',
-        content:
-          `CRITIQUE OF PREVIOUS OUTPUT:\n${pendingCritique}\n\n` +
-          `The previous attempt at this artifact had the issues described above. ` +
-          `Address them directly in your new response. Otherwise follow the task below as written.`,
-      });
+    const critiqueMessage = pendingCritique
+      ? `CRITIQUE OF PREVIOUS OUTPUT:\n${pendingCritique}\n\n` +
+        `The previous attempt at this artifact had the issues described above. ` +
+        `Address them directly in your new response. Otherwise follow the task below as written.`
+      : undefined;
+
+    // Cache-aware split: when the template declares a cache breakpoint,
+    // send the invariant prefix as a leading `system` message (byte-
+    // identical across every item in a collection → provider prefix-cache
+    // hit) and the per-item delta as the trailing `user` message. The
+    // `system` message always goes first so the cacheable prefix is
+    // stable even when a per-regen critique is interleaved. Templates with
+    // no marker fall back to a single user message (unchanged behavior).
+    const cacheSplit = splitOnCacheBreakpoint(sub.rendered);
+    if (cacheSplit) {
+      messages.push({ role: 'system', content: cacheSplit.prefix });
+      if (critiqueMessage) messages.push({ role: 'user', content: critiqueMessage });
+      messages.push({ role: 'user', content: cacheSplit.suffix });
+    } else {
+      if (critiqueMessage) messages.push({ role: 'user', content: critiqueMessage });
+      messages.push({ role: 'user', content: sub.rendered });
     }
-    messages.push({ role: 'user', content: sub.rendered });
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (ctx.signal?.aborted) {
@@ -489,6 +552,24 @@ export function createLlmGenerateRunner(opts?: {
           ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
           ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
         });
+        // Per-call usage telemetry (issue #102 fix #0). Recorded for EVERY
+        // real call — including parse/schema-retry attempts, which re-send
+        // the full prompt and cost real tokens. Tagged lane='walker' +
+        // the originating node/item so the chat-vs-walker spend split and
+        // the prefix-cache hit ratio are verifiable from the log.
+        if (resp.usage) {
+          recordLlmUsage({
+            lane: 'walker',
+            model: client.getModel(),
+            nodeId: ctx.node.id,
+            ...(ctx.itemId !== undefined ? { itemId: ctx.itemId } : {}),
+            promptTokens: resp.usage.promptTokens,
+            cachedTokens: resp.usage.cachedPromptTokens ?? 0,
+            completionTokens: resp.usage.completionTokens,
+            totalTokens: resp.usage.totalTokens,
+            ...(resp.usage.cost !== undefined ? { costUsd: resp.usage.cost } : {}),
+          });
+        }
         const got = resp.content ?? '';
         if (!got || got.trim() === '') {
           // An empty response is a transient model hiccup (rate-limit

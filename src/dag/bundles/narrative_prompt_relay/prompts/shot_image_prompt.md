@@ -3,8 +3,6 @@ You are writing a Flux Klein image-edit prompt for the FIRST FRAME of a single s
 Shot data:
 {{scenes_plan}}
 
-This call is for shot id: {{item_id}} — find it in the shots array above.
-
 World style:
 {{world_style}}
 
@@ -30,3 +28,6 @@ Output a JSON object:
 CRITICAL: the image model defaults to PHOTOREALISM and ignores mood/lighting cues alone. If the world style is illustrated / anime / painterly / hand-drawn, the imagePrompt MUST name that rendering medium explicitly in its FIRST clause — otherwise the render comes out as a photograph.
 
 Output ONLY the JSON.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+This call is for shot id: {{item_id}} — find it in the shots array above and write the first-frame prompt for ONLY that shot.

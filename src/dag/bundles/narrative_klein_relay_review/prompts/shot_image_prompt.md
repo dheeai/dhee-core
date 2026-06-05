@@ -3,8 +3,6 @@ You are writing a Flux Klein image-edit prompt for the FIRST FRAME of a single s
 Shot data:
 {{scenes_plan}}
 
-This call is for shot id: {{item_id}} — find it in the shots array above.
-
 World style:
 {{world_style}}
 
@@ -28,3 +26,6 @@ Output a JSON object:
 }
 
 Output ONLY the JSON.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+This call is for shot id: {{item_id}} — find it in the shots array above.

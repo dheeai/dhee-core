@@ -252,11 +252,19 @@ export class LLMClient {
     // Log request
     logger.logRequest(messages, tools, { temperature, baseUrl: this.baseUrl, model: this.model });
 
-    const request: OpenAI.ChatCompletionCreateParamsNonStreaming = {
+    // `usage: { include: true }` makes OpenRouter report `cost` and
+    // `prompt_tokens_details.cached_tokens` on non-streaming responses too
+    // (same as the streaming path). Harmless on other OpenAI-compatible
+    // endpoints (extra body fields are ignored). Needed so the walker's
+    // per-call usage telemetry (issue #102 fix #0) sees prefix-cache hits.
+    const request: OpenAI.ChatCompletionCreateParamsNonStreaming & {
+      usage?: { include: boolean };
+    } = {
       model: this.model,
       messages: this.convertMessages(messages),
       temperature,
       stream: false,
+      usage: { include: true },
     };
 
     if (maxTokens) request.max_tokens = maxTokens;
@@ -813,11 +821,23 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
         ? providerMessage.reasoning_details
         : undefined,
       usage: response.usage
-        ? {
-            promptTokens: response.usage.prompt_tokens,
-            completionTokens: response.usage.completion_tokens,
-            totalTokens: response.usage.total_tokens,
-          }
+        ? (() => {
+            const u = response.usage as typeof response.usage & {
+              cost?: number;
+              cache_discount?: number;
+              prompt_tokens_details?: { cached_tokens?: number };
+            };
+            return {
+              promptTokens: u.prompt_tokens,
+              completionTokens: u.completion_tokens,
+              totalTokens: u.total_tokens,
+              ...(typeof u.cost === 'number' ? { cost: u.cost } : {}),
+              ...(u.prompt_tokens_details?.cached_tokens !== undefined
+                ? { cachedPromptTokens: u.prompt_tokens_details.cached_tokens }
+                : {}),
+              ...(typeof u.cache_discount === 'number' ? { cacheDiscount: u.cache_discount } : {}),
+            };
+          })()
         : undefined,
     };
   }

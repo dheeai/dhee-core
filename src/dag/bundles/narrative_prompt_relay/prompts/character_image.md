@@ -3,8 +3,6 @@ You are writing a Flux Klein image-edit prompt to render a single character refe
 Character data:
 {{characters_plan}}
 
-For character id: {{item_id}}
-
 World style:
 {{world_style}}
 
@@ -19,3 +17,6 @@ Output a JSON object:
 CRITICAL: the image model defaults to PHOTOREALISM and ignores mood/lighting cues alone. If the world style is illustrated / anime / painterly / hand-drawn, the imagePrompt MUST name that rendering medium explicitly in its FIRST clause — otherwise the render comes out as a photograph.
 
 Output ONLY the JSON.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+For character id: {{item_id}} — find it in the character data above and write the reference-image prompt for ONLY that character.

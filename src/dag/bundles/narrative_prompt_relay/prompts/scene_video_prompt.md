@@ -2,10 +2,7 @@ You are writing the global director prompt for ONE specific scene of a
 relay video. The relay model (LTX Director) reads this once for that
 scene and uses per-shot prompts for local nuance.
 
-Write the brief for the scene whose id is {{item_id}}. Locate that scene
-in the scene data below and describe ONLY it — ignore every other scene.
-
-Scene data (all scenes; use only the one whose id is {{item_id}}):
+Scene data (all scenes; you will be told below which one to describe):
 {{scenes_plan}}
 
 Story essence:
@@ -34,3 +31,6 @@ keep everything to visual + ambient-sound description.
 
 This is a single paragraph of plain text, NOT json. Output ONLY the
 paragraph.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+Write the brief for the scene whose id is {{item_id}}. Locate that scene in the scene data above and describe ONLY it — ignore every other scene.

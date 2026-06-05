@@ -53,7 +53,8 @@
     "analytics:backfill:posthog": "tsx scripts/backfill-posthog-from-sqlite.ts",
     "analytics:dashboard:posthog": "tsx scripts/create-posthog-desktop-project-dashboard.ts",
     "drive": "tsx src/agent/pi/drive.ts",
-    "dhee": "NODE_OPTIONS='--max-old-space-size=8192' tsx scripts/dhee-cli.ts"
+    "dhee": "NODE_OPTIONS='--max-old-space-size=8192' tsx scripts/dhee-cli.ts",
+    "llm-usage": "tsx scripts/llm-usage-report.ts"
   },
   "keywords": [
     "cli",

@@ -31,6 +31,29 @@ export {
 export { loadDevEnv } from './server/loadDevEnv.js';
 export type { LoadDevEnvResult } from './server/loadDevEnv.js';
 
+// Per-call LLM usage telemetry (issue #102). Local JSONL sink + summary,
+// plus a cloud-billed-only PostHog forwarder the desktop opts into for
+// cloud accounts (never for local / BYO-key accounts).
+export {
+  recordLlmUsage,
+  readUsageRecords,
+  summarizeUsage,
+  usageTelemetryPath,
+  isUsageTelemetryEnabled,
+  addUsageListener,
+  type LlmUsageRecord,
+  type LlmUsageInput,
+  type UsageSummary,
+  type LaneSummary,
+  type LlmLane,
+} from './core/llm/usageTelemetry.js';
+export {
+  enableCloudUsageAnalytics,
+  forwardUsageToPostHog,
+  buildLlmUsageEvent,
+  LLM_USAGE_EVENT,
+} from './server/llmUsageAnalytics.js';
+
 // Phase 6.5: pi-agent in-process bridge for desktop chat. The desktop
 // builds an AgentSession per chat-session via buildPiSession and runs
 // each user message through runAgentTurn (shared with the `pnpm drive`
