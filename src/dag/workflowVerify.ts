@@ -45,6 +45,17 @@ export interface WorkflowModelRef {
   current_value: string;
 }
 
+export interface MissingNodeClass {
+  /** node id within the workflow. */
+  nodeId: string;
+  /**
+   * The class_type that is NOT installed on the target Comfy. If a
+   * class_swap was applied for this node, this is the swapped-to class
+   * (so "the thing you remapped to also isn't there" is visible).
+   */
+  class_type: string;
+}
+
 export interface CheckResult {
   ok: boolean;
   endpoint: string;
@@ -56,6 +67,16 @@ export interface CheckResult {
    * the work to be done.
    */
   missing_refs: WorkflowModelRef[];
+  /**
+   * Workflow nodes whose class_type is NOT among the target Comfy's
+   * installed node classes (the keys of /object_info). A missing
+   * custom-node pack (e.g. an LTX Director node) surfaces here —
+   * distinct from a missing model file (missing_refs). ComfyUI exposes
+   * no "list installed packs" endpoint, so node-class presence in
+   * /object_info IS the detection signal; the human-readable pack/
+   * install hint comes from a bundle's requirements manifest (later).
+   */
+  missing_node_classes: MissingNodeClass[];
   /**
    * Available model names per `<class>.<field>` on the target Comfy.
    * Includes EVERY class the user has (UNETLoader, UnetLoaderGGUF,
@@ -77,6 +98,13 @@ export interface CheckOpts {
    * available on Comfy are filtered OUT of missing_refs.
    */
   endpointAliases?: Record<string, string>;
+  /**
+   * Pre-resolved per-node class_type swaps for THIS workflow
+   * (nodeId → swapped class), from workflowAliases.class_swaps[wfKey].
+   * A node with a swap is checked against the swapped class, so a swap
+   * to an installed class clears it from missing_node_classes.
+   */
+  classSwaps?: Record<string, string>;
 }
 
 const MODEL_EXTS = [
@@ -111,6 +139,45 @@ export function extractModelRefs(workflow: ComfyWorkflow): WorkflowModelRef[] {
         inputField: field,
         current_value: value,
       });
+    }
+  }
+  return out;
+}
+
+/**
+ * Every (nodeId, class_type) in the workflow. Pure — no availability
+ * judgment. Nodes without a usable string class_type are skipped.
+ */
+export function extractNodeClasses(
+  workflow: ComfyWorkflow,
+): { nodeId: string; class_type: string }[] {
+  const out: { nodeId: string; class_type: string }[] = [];
+  for (const [nodeId, node] of Object.entries(workflow)) {
+    if (!node || typeof node !== 'object') continue;
+    if (typeof node.class_type !== 'string' || node.class_type.length === 0) continue;
+    out.push({ nodeId, class_type: node.class_type });
+  }
+  return out;
+}
+
+/**
+ * Which of the workflow's node classes are NOT installed on the
+ * target Comfy. `installedClasses` is the key set of /object_info.
+ * Pure. classSwaps (nodeId → swapped class, already scoped to this
+ * workflow) is applied first, so a swap to an installed class clears
+ * the gap; a swap to a still-missing class is reported as the
+ * swapped-to class.
+ */
+export function findMissingNodeClasses(
+  workflow: ComfyWorkflow,
+  installedClasses: Set<string>,
+  classSwaps: Record<string, string> = {},
+): MissingNodeClass[] {
+  const out: MissingNodeClass[] = [];
+  for (const { nodeId, class_type } of extractNodeClasses(workflow)) {
+    const effective = classSwaps[nodeId] ?? class_type;
+    if (!installedClasses.has(effective)) {
+      out.push({ nodeId, class_type: effective });
     }
   }
   return out;
@@ -154,6 +221,7 @@ export async function checkWorkflow(opts: CheckOpts): Promise<CheckResult> {
       endpoint,
       workflow_refs: extractModelRefs(workflow),
       missing_refs: [],
+      missing_node_classes: [],
       available_by_class: {},
       error: (err as Error).message,
     };
@@ -171,11 +239,22 @@ export async function checkWorkflow(opts: CheckOpts): Promise<CheckResult> {
     missing_refs.push(ref);
   }
 
+  // /object_info's top-level keys ARE the installed node classes; a
+  // class_type that isn't a key is a missing custom node. Same
+  // round-trip, so node detection costs nothing extra.
+  const installedClasses = new Set(Object.keys(info));
+  const missing_node_classes = findMissingNodeClasses(
+    workflow,
+    installedClasses,
+    opts.classSwaps ?? {},
+  );
+
   return {
-    ok: missing_refs.length === 0,
+    ok: missing_refs.length === 0 && missing_node_classes.length === 0,
     endpoint,
     workflow_refs,
     missing_refs,
+    missing_node_classes,
     available_by_class,
   };
 }

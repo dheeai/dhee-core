@@ -1667,3 +1667,35 @@ export type { InitializeProjectParams, InitializeProjectResult } from './initial
 export { listBundles } from './listBundles.js';
 export type { BundleSummary } from './listBundles.js';
 
+// Workflow fit-checking: does a ComfyUI endpoint have the models +
+// custom nodes a bundle's workflows need? Engine behind the desktop
+// Bundle Configurator (first-run / community install / BYO workflow).
+export {
+  checkWorkflow,
+  extractModelRefs,
+  extractNodeClasses,
+  findMissingNodeClasses,
+} from './workflowVerify.js';
+export type {
+  ComfyWorkflow,
+  ObjectInfo,
+  CheckOpts,
+  CheckResult,
+  WorkflowModelRef,
+  MissingNodeClass,
+} from './workflowVerify.js';
+export { checkBundle, listBundleWorkflows } from './checkBundle.js';
+export type {
+  CheckBundleOpts,
+  BundleFit,
+  BundleFitStatus,
+  BundleWorkflowFit,
+} from './checkBundle.js';
+export {
+  readAliases,
+  writeAliases,
+  applyAliases,
+  endpointSlug,
+} from './workflowAliases.js';
+export type { WorkflowAliases } from './workflowAliases.js';
+

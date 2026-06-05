@@ -21,6 +21,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   extractModelRefs,
+  extractNodeClasses,
+  findMissingNodeClasses,
   checkWorkflow,
   type ComfyWorkflow,
   type ObjectInfo,
@@ -148,5 +150,122 @@ describe('checkWorkflow', () => {
     expect(r.error).toMatch(/ECONNREFUSED/);
     expect(r.workflow_refs).toHaveLength(1);
     expect(r.available_by_class).toEqual({});
+    expect(r.missing_node_classes).toEqual([]);
+  });
+});
+
+/* ─────────────── custom-node detection ─────────────── */
+
+describe('extractNodeClasses', () => {
+  it('returns every (nodeId, class_type) in the workflow', () => {
+    const got = extractNodeClasses(wf({
+      UNET: { class_type: 'UNETLoader', inputs: { unet_name: 'q.safetensors' } },
+      DIR: { class_type: 'LTXVDirector', inputs: {} },
+    }));
+    expect(got).toEqual([
+      { nodeId: 'UNET', class_type: 'UNETLoader' },
+      { nodeId: 'DIR', class_type: 'LTXVDirector' },
+    ]);
+  });
+
+  it('skips nodes without a usable string class_type', () => {
+    const got = extractNodeClasses({
+      ok: { class_type: 'KSampler', inputs: {} },
+      bad: { class_type: '' as unknown as string, inputs: {} },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      nul: null as any,
+    } as ComfyWorkflow);
+    expect(got).toEqual([{ nodeId: 'ok', class_type: 'KSampler' }]);
+  });
+});
+
+describe('findMissingNodeClasses', () => {
+  const workflow = wf({
+    K: { class_type: 'KSampler', inputs: {} },
+    DIR: { class_type: 'LTXVDirector', inputs: {} },
+  });
+
+  it('flags class_types that are not in the installed set', () => {
+    const missing = findMissingNodeClasses(workflow, new Set(['KSampler']));
+    expect(missing).toEqual([{ nodeId: 'DIR', class_type: 'LTXVDirector' }]);
+  });
+
+  it('reports nothing when every class is installed', () => {
+    expect(
+      findMissingNodeClasses(workflow, new Set(['KSampler', 'LTXVDirector'])),
+    ).toEqual([]);
+  });
+
+  it('class_swap to an INSTALLED class clears the gap', () => {
+    const missing = findMissingNodeClasses(
+      workflow,
+      new Set(['KSampler', 'LTXVDirectorGGUF']),
+      { DIR: 'LTXVDirectorGGUF' },
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('class_swap to a STILL-missing class reports the swapped-to class', () => {
+    const missing = findMissingNodeClasses(
+      workflow,
+      new Set(['KSampler']),
+      { DIR: 'AlsoNotInstalled' },
+    );
+    expect(missing).toEqual([{ nodeId: 'DIR', class_type: 'AlsoNotInstalled' }]);
+  });
+});
+
+describe('checkWorkflow — custom nodes', () => {
+  const fetch = (info: ObjectInfo) => vi.fn(async () => info);
+
+  it('flags a custom node whose class is absent from /object_info keys', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({
+        UNET: { class_type: 'UNETLoader', inputs: { unet_name: 'q.safetensors' } },
+        DIR: { class_type: 'LTXVDirector', inputs: {} },
+      }),
+      endpoint: 'http://comfy/',
+      // UNETLoader present (with the model), but LTXVDirector pack is NOT installed.
+      fetchObjectInfo: fetch(objectInfo({ UNETLoader: { unet_name: ['q.safetensors'] } })),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.missing_refs).toEqual([]); // model is present
+    expect(r.missing_node_classes).toEqual([{ nodeId: 'DIR', class_type: 'LTXVDirector' }]);
+  });
+
+  it('does not flag a custom node that IS installed', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({ DIR: { class_type: 'LTXVDirector', inputs: {} } }),
+      endpoint: 'http://comfy/',
+      fetchObjectInfo: fetch(objectInfo({ LTXVDirector: {} })),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.missing_node_classes).toEqual([]);
+  });
+
+  it('classSwaps (from saved aliases) clears a missing-node gap', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({ DIR: { class_type: 'LTXVDirector', inputs: {} } }),
+      endpoint: 'http://comfy/',
+      classSwaps: { DIR: 'LTXVDirectorGGUF' },
+      fetchObjectInfo: fetch(objectInfo({ LTXVDirectorGGUF: {} })),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.missing_node_classes).toEqual([]);
+  });
+
+  it('reports a missing MODEL and a missing NODE independently', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({
+        UNET: { class_type: 'UNETLoader', inputs: { unet_name: 'bundle.safetensors' } },
+        DIR: { class_type: 'LTXVDirector', inputs: {} },
+      }),
+      endpoint: 'http://comfy/',
+      // UNETLoader installed but has a DIFFERENT model; LTXVDirector not installed.
+      fetchObjectInfo: fetch(objectInfo({ UNETLoader: { unet_name: ['something_else.safetensors'] } })),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.missing_refs.map((x) => x.current_value)).toEqual(['bundle.safetensors']);
+    expect(r.missing_node_classes).toEqual([{ nodeId: 'DIR', class_type: 'LTXVDirector' }]);
   });
 });
