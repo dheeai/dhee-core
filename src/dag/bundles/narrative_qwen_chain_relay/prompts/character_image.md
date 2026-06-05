@@ -3,8 +3,6 @@ You are writing a Flux Klein image-edit prompt to render a single character refe
 Character data:
 {{characters_plan}}
 
-For character id: {{item_id}}
-
 World style:
 {{world_style}}
 
@@ -17,3 +15,6 @@ Output a JSON object:
 }
 
 Output ONLY the JSON.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+For character id: {{item_id}}

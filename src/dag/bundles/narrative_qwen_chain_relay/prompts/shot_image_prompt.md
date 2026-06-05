@@ -5,11 +5,6 @@ You are writing a CHAIN-EDIT instruction for Qwen Image Edit 2511 with the Multi
 Shot data:
 {{scenes_plan}}
 
-This call is for shot id: **{{item_id}}** — find it in the `shots` array above.
-
-Prior shot prompts (the deltaText + view tokens for shots that already have first-frames generated). Pick the `chosenBaseShotNumber` from THIS list — most recent first, by shotNumber DESC. Empty array means this is shot 1 of the scene:
-{{shot_image_prompt}}
-
 World style:
 {{world_style}}
 
@@ -67,3 +62,9 @@ Inherit from world_style for color palette, lighting quality, mood. If the chose
 ## Output
 
 ONLY the JSON object. No preamble.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+This call is for shot id: **{{item_id}}** — find it in the `shots` array above.
+
+Prior shot prompts (the deltaText + view tokens for shots that already have first-frames generated). Pick the `chosenBaseShotNumber` from THIS list — most recent first, by shotNumber DESC. Empty array means this is shot 1 of the scene:
+{{shot_image_prompt}}

@@ -3,8 +3,6 @@ You are writing a Flux Klein image-edit prompt for a single setting reference im
 Setting data:
 {{settings_plan}}
 
-For setting id: {{item_id}}
-
 World style:
 {{world_style}}
 
@@ -17,3 +15,6 @@ Output a JSON object:
 }
 
 Output ONLY the JSON.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+For setting id: {{item_id}}

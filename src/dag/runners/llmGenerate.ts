@@ -206,6 +206,45 @@ function substituteTemplate(
   return { ok: true, rendered };
 }
 
+/**
+ * Cache-breakpoint marker. When a prompt template contains this token,
+ * the runner splits the RENDERED prompt into a stable `system` prefix
+ * (everything BEFORE the marker) and a per-item `user` suffix (everything
+ * AFTER it). The marker itself is stripped from what's sent to the model.
+ *
+ * Why: collection nodes (shot_image_prompt, shot_motion_directive,
+ * character_image, setting_image, scene_video_prompt, …) fan out into
+ * many successive LLM calls that share a large INVARIANT context — the
+ * full scenes_plan / characters_plan / settings_plan, the world style,
+ * the instructions and output schema — and differ only by a tiny per-item
+ * selector (`{{item_id}}`). By making that invariant block the leading
+ * `system` message, byte-identical across every item, the provider's
+ * automatic prefix caching (DeepSeek / OpenRouter) reuses it across items
+ * in a run, across runs, and across users hitting the same upstream. The
+ * per-item delta is the only part that changes the request. See issue #102.
+ *
+ * Authoring rule: put ALL invariant content BEFORE the marker and ONLY
+ * the per-item delta AFTER it. Templates without the marker are sent
+ * unchanged as a single user message (fully backward compatible).
+ */
+export const CACHE_BREAKPOINT_MARKER = '<<<DHEE_CACHE_BREAKPOINT>>>';
+
+/**
+ * Split a rendered prompt at the cache breakpoint. Returns null (→ send
+ * as a single user message) when the marker is absent or either side is
+ * empty — a split only helps when there's real content on both sides.
+ */
+export function splitOnCacheBreakpoint(
+  rendered: string,
+): { prefix: string; suffix: string } | null {
+  const idx = rendered.indexOf(CACHE_BREAKPOINT_MARKER);
+  if (idx === -1) return null;
+  const prefix = rendered.slice(0, idx).trimEnd();
+  const suffix = rendered.slice(idx + CACHE_BREAKPOINT_MARKER.length).trimStart();
+  if (!prefix || !suffix) return null;
+  return { prefix, suffix };
+}
+
 // ── JSON parsing & validation ──────────────────────────────────────────
 
 function tryParseJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -466,16 +505,28 @@ export function createLlmGenerateRunner(opts?: {
     // it as a leading user message that frames the regen as a "fix the
     // previous output" task. Keeps the prompt template untouched.
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
-    if (pendingCritique) {
-      messages.push({
-        role: 'user',
-        content:
-          `CRITIQUE OF PREVIOUS OUTPUT:\n${pendingCritique}\n\n` +
-          `The previous attempt at this artifact had the issues described above. ` +
-          `Address them directly in your new response. Otherwise follow the task below as written.`,
-      });
+    const critiqueMessage = pendingCritique
+      ? `CRITIQUE OF PREVIOUS OUTPUT:\n${pendingCritique}\n\n` +
+        `The previous attempt at this artifact had the issues described above. ` +
+        `Address them directly in your new response. Otherwise follow the task below as written.`
+      : undefined;
+
+    // Cache-aware split: when the template declares a cache breakpoint,
+    // send the invariant prefix as a leading `system` message (byte-
+    // identical across every item in a collection → provider prefix-cache
+    // hit) and the per-item delta as the trailing `user` message. The
+    // `system` message always goes first so the cacheable prefix is
+    // stable even when a per-regen critique is interleaved. Templates with
+    // no marker fall back to a single user message (unchanged behavior).
+    const cacheSplit = splitOnCacheBreakpoint(sub.rendered);
+    if (cacheSplit) {
+      messages.push({ role: 'system', content: cacheSplit.prefix });
+      if (critiqueMessage) messages.push({ role: 'user', content: critiqueMessage });
+      messages.push({ role: 'user', content: cacheSplit.suffix });
+    } else {
+      if (critiqueMessage) messages.push({ role: 'user', content: critiqueMessage });
+      messages.push({ role: 'user', content: sub.rendered });
     }
-    messages.push({ role: 'user', content: sub.rendered });
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (ctx.signal?.aborted) {

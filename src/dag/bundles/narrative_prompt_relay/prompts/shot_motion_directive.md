@@ -5,8 +5,6 @@ the first frame and the last frame.
 Shot data:
 {{scenes_plan}}
 
-This call is for shot id: {{item_id}} — find it in the shots array above.
-
 World style:
 {{world_style}}
 
@@ -20,3 +18,6 @@ Output a JSON object:
 }
 
 Output ONLY the JSON.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+This call is for shot id: {{item_id}} — find it in the shots array above and write the motion directive for ONLY that shot.

@@ -3,11 +3,6 @@ You are writing a Flux Klein image-edit prompt for the LAST FRAME of a single sh
 Shot data:
 {{scenes_plan}}
 
-This call is for shot id: {{item_id}} — find it in the shots array above.
-
-First frame imagePrompt (already generated, for continuity):
-{{shot_image_prompt}}
-
 World style:
 {{world_style}}
 
@@ -32,3 +27,9 @@ Output a JSON object with the same shape as shot_image_prompt:
 }
 
 Output ONLY the JSON.
+
+<<<DHEE_CACHE_BREAKPOINT>>>
+This call is for shot id: {{item_id}} — find it in the shots array above.
+
+First frame imagePrompt (already generated, for continuity):
+{{shot_image_prompt}}
