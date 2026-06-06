@@ -12,13 +12,22 @@ Central registry of per-project opt-in flags. Each flag lives under
 }
 ```
 
-When a new project is created via `dhee_new` (the
-`createProjectInProcess` runner), every flag in this registry is
-seeded with its default value so the user can see what's available
-without reading code. Existing projects (created before a flag
-landed) don't get the field; the interpretation logic always
-defaults to OFF on missing fields, so legacy projects keep their
-historical behavior.
+When a new project is created via `dhee_new` (the `initializeProject`
+function in `src/dag/initializeProject.ts`), every flag in this
+registry is seeded with its default value under `features` so the
+user can see what's available without reading code. Existing projects
+(created before a flag landed) don't get the field; the
+interpretation logic always defaults to OFF on missing fields, so
+legacy projects keep their historical behavior.
+
+> **Note (bundle migration):** the legacy executor's feature-flag
+> plumbing — `src/core/project/projectTypes.ts`, the
+> `createProjectInProcess` seed, and `isSkipHoldingBeatLFEnabled` —
+> was removed. The surviving reader for the bundle architecture is
+> `src/dag/projectFeatures.ts`, seeded by `initializeProject.ts`. The
+> `skipHoldingBeatLF` entry below is retained for historical reference
+> only; its consuming code (`ExecutorAgent`, `shotImagePipeline.ts`)
+> no longer exists.
 
 ## How to toggle a flag
 
@@ -46,17 +55,66 @@ historical behavior.
    naturally for the default.
 3. **Add to the registry in this doc** before merging.
 4. **Add the field to `ProjectFeatures` in
-   `src/core/project/projectTypes.ts`** with a JSDoc explaining
-   what it does, when it landed, and where it's read.
-5. **Add a default-value seed in
-   `src/server/runners/createProjectInProcess.ts`** so new projects
-   show the flag.
-6. **Read the flag via a helper** (e.g. `isXxxEnabled(project)`)
-   that returns `false` on undefined / wrong-type. Don't sprinkle
-   `project.features?.xxx === true` checks throughout the codebase
-   — a helper centralizes the strict-equality rule.
+   `src/dag/projectFeatures.ts`** with a JSDoc explaining what it
+   does, when it landed, and where it's read.
+5. **Add a default-value seed in `src/dag/initializeProject.ts`**
+   (the `project.features` object) so new projects show the flag.
+6. **Read the flag via a helper** (e.g. `isXxxEnabled(project)`) in
+   `src/dag/projectFeatures.ts` that returns `false` on undefined /
+   wrong-type. Don't sprinkle `project.features?.xxx === true` checks
+   throughout the codebase — a helper centralizes the strict-equality
+   rule.
 
 ## Registry
+
+### `gateAfterCollections`
+
+**Default: `true` (opt-out — the exception to the default-OFF rule above)**
+
+This flag intentionally breaks the "default OFF" convention: it ships
+**ON** so every project pauses for review after each collection by
+default. The reader (`isGateAfterCollectionsEnabled`) returns `false`
+ONLY for an explicit `false`; missing field / missing `features` /
+non-boolean all resolve to ON. To run straight through, set
+`"gateAfterCollections": false`.
+
+Stop-after-each-collection gate. When on, a bundle walk halts as
+soon as a `collection` node (other than the bundle goal) finishes a
+pass in which at least one of its instances actually ran (i.e. the
+runner was invoked, not a cache-skip). Downstream nodes stay pending
+in walkState, so the next walk — the desktop **Resume** button,
+another `dhee_run_bundle`, the CLI — cache-skips the now-complete
+collection (which therefore does no new work and does not re-gate)
+and proceeds to the next collection.
+
+Net effect: **one collection step per run**, so the user can inspect
+each fan-out batch (shot images, scene clips, …) before continuing.
+A collection whose instances were all cache-skipped never gates, so a
+resumed walk always makes forward progress.
+
+The desktop exposes this as a toggle in the project header status row
+(next to the oversight toggle); flipping it read-modify-writes
+`features.gateAfterCollections` in the active project's
+`project.json`. The toggle is disabled while a run is in flight — the
+flag is read once at walk start, so mid-run changes wouldn't apply to
+the current walk anyway.
+
+**Read by:**
+- `runProjectViaBundle` (`src/server/runners/runProjectViaBundle.ts`)
+  via `isGateAfterCollectionsEnabled` (in
+  `src/dag/projectFeatures.ts`); forwarded to the walker's
+  `gateAfterCollections` option. The walker
+  (`src/dag/walker.ts`) implements the halt + reports
+  `WalkResult.gatedAfter`.
+
+**When to turn ON:**
+- Staged review of a long pipeline — you want to eyeball the shot
+  images before any video renders, then the clips before assembly.
+
+**When to keep OFF:**
+- Normal unattended runs to completion.
+
+Landed on the `feat/gate-after-collection-nodes` branch 2026-06-06.
 
 ### `skipHoldingBeatLF`
 
