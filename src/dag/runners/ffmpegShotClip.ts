@@ -33,6 +33,7 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { copyFileSync } from 'node:fs';
+import { ffmpegBin } from './ffmpegBin.js';
 
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
@@ -76,7 +77,7 @@ function paletteForStyle(style: string): PaletteEntry {
 
 function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
   return new Promise((resolveDone) => {
-    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     proc.stderr?.on('data', (d) => { stderr += d.toString(); });
     proc.on('close', (code) => resolveDone({ ok: code === 0, stderr }));

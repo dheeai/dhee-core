@@ -26,6 +26,7 @@ import { existsSync, mkdirSync, copyFileSync, writeFileSync, unlinkSync, readFil
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import { ffmpegBin, ffprobeBin } from './ffmpegBin.js';
 import { resolveWatermarkPath, buildWatermarkOverlayFilter } from '../../core/timeline/watermark.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 
@@ -46,7 +47,7 @@ let drawtextAvailable: boolean | null = null;
 function hasDrawtextFilter(): Promise<boolean> {
   if (drawtextAvailable !== null) return Promise.resolve(drawtextAvailable);
   return new Promise((resolve) => {
-    const proc = spawn('ffmpeg', ['-hide_banner', '-filters'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(ffmpegBin(), ['-hide_banner', '-filters'], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     proc.stdout?.on('data', (d) => { out += d.toString(); });
     proc.on('close', () => {
@@ -59,7 +60,7 @@ function hasDrawtextFilter(): Promise<boolean> {
 
 function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
   return new Promise((resolve) => {
-    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     proc.stderr?.on('data', (d) => { stderr += d.toString(); });
     proc.on('close', (code) => resolve({ ok: code === 0, stderr }));
@@ -69,7 +70,7 @@ function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
 
 function probeHeight(inputPath: string): Promise<number | null> {
   return new Promise((resolve) => {
-    const proc = spawn('ffprobe', [
+    const proc = spawn(ffprobeBin(), [
       '-v', 'error',
       '-select_streams', 'v:0',
       '-show_entries', 'stream=height',
