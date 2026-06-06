@@ -123,6 +123,18 @@ function looksLikeModelFilename(s: string): boolean {
   return MODEL_EXTS.some((ext) => lower.endsWith(ext));
 }
 
+/**
+ * A model-file input field: `<thing>_name`, optionally suffixed with an
+ * index (`clip_name1`, `clip_name2` on DualCLIPLoader; `clip_name1..3`
+ * on TripleCLIPLoader; a stray `_name_1` form too). The plain
+ * `endsWith('_name')` test missed the numbered variants, so the gemma
+ * text-encoder behind DualCLIPLoader.clip_name1 was never extracted →
+ * never checked → never flagged missing (run then failed at load time).
+ * Non-model `*_name` values (e.g. display_name) are still dropped by the
+ * filename-extension guard below.
+ */
+const MODEL_NAME_FIELD = /_name_?\d*$/;
+
 export function extractModelRefs(workflow: ComfyWorkflow): WorkflowModelRef[] {
   const out: WorkflowModelRef[] = [];
   for (const [nodeId, node] of Object.entries(workflow)) {
@@ -130,7 +142,7 @@ export function extractModelRefs(workflow: ComfyWorkflow): WorkflowModelRef[] {
     const inputs = node.inputs;
     if (!inputs || typeof inputs !== 'object') continue;
     for (const [field, value] of Object.entries(inputs)) {
-      if (!field.endsWith('_name')) continue;
+      if (!MODEL_NAME_FIELD.test(field)) continue;
       if (typeof value !== 'string') continue;
       if (!looksLikeModelFilename(value)) continue;
       out.push({
