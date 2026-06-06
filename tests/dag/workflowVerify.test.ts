@@ -62,6 +62,26 @@ describe('extractModelRefs', () => {
     ]);
   });
 
+  it('extracts numbered clip_name fields (DualCLIPLoader clip_name1/clip_name2)', () => {
+    // Regression: clip_name1 doesn't end with "_name", so the old
+    // endsWith('_name') filter dropped the gemma text encoder entirely.
+    const refs = extractModelRefs(wf({
+      CLIP: {
+        class_type: 'DualCLIPLoader',
+        inputs: {
+          clip_name1: 'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors',
+          clip_name2: 'ltx-2.3_text_projection_bf16.safetensors',
+          type: 'ltxv',
+          device: 'default',
+        },
+      },
+    }));
+    expect(refs.map((r) => r.inputField).sort()).toEqual(['clip_name1', 'clip_name2']);
+    expect(refs.map((r) => r.current_value)).toContain(
+      'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors',
+    );
+  });
+
   it('extracts chained loras + multi-kind loaders', () => {
     const refs = extractModelRefs(wf({
       A: { class_type: 'LoraLoaderModelOnly', inputs: { lora_name: 'a.safetensors' } },
@@ -203,6 +223,33 @@ describe('checkWorkflow', () => {
     expect(r.ok).toBe(false);
     expect(r.missing_refs).toHaveLength(1);
     expect(r.missing_refs[0]!.current_value).toBe('bundle_canonical.safetensors');
+  });
+
+  it('flags a missing numbered-clip model (gemma behind DualCLIPLoader.clip_name1)', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({
+        CLIP: {
+          class_type: 'DualCLIPLoader',
+          inputs: {
+            clip_name1: 'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors',
+            clip_name2: 'ltx-2.3_text_projection_bf16.safetensors',
+            type: 'ltxv',
+          },
+        },
+      }),
+      endpoint: 'http://comfy/',
+      fetchObjectInfo: fetch(objectInfo({
+        DualCLIPLoader: {
+          clip_name1: ['some_other_clip.safetensors'],
+          clip_name2: ['ltx-2.3_text_projection_bf16.safetensors'],
+        },
+      })),
+    });
+    expect(r.ok).toBe(false);
+    // gemma (clip_name1) is missing; the projection (clip_name2) is present.
+    expect(r.missing_refs.map((x) => x.current_value)).toEqual([
+      'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors',
+    ]);
   });
 
   it('exposes available_by_class so the agent sees every class (including GGUF / NF4 variants)', async () => {
