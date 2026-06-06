@@ -89,6 +89,97 @@ describe('extractModelRefs', () => {
   });
 });
 
+/**
+ * Build /object_info in the COMBO encoding ComfyUI ~0.24+ emits:
+ * `field: ["COMBO", { multiselect: false, options: [...] }]`.
+ * `section` lets a field live under `optional` instead of `required`.
+ */
+function objectInfoCombo(
+  byClass: Record<string, Record<string, string[]>>,
+  section: 'required' | 'optional' = 'required',
+): ObjectInfo {
+  const obj: Record<string, unknown> = {};
+  for (const [cls, fields] of Object.entries(byClass)) {
+    const sect: Record<string, unknown> = {};
+    for (const [field, names] of Object.entries(fields)) {
+      sect[field] = ['COMBO', { multiselect: false, options: names }];
+    }
+    obj[cls] = { input: { [section]: sect } };
+  }
+  return obj as ObjectInfo;
+}
+
+describe('flattenAvailable via checkWorkflow — /object_info encodings', () => {
+  const fetch = (info: ObjectInfo) => vi.fn(async () => info);
+
+  // Regression: the LTX latent-upscaler false positive. Comfy 0.24
+  // returns model dropdowns as ["COMBO", {options:[...]}]; the old
+  // parser only understood the legacy [[...],{}] shape, so it dropped
+  // the available list and flagged the (present) model as missing.
+  it('reads model options from the COMBO encoding (present → not missing)', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({
+        UP: {
+          class_type: 'UpscaleModelLoader',
+          inputs: { model_name: 'ltx-2.3-spatial-upscaler-x2-1.1.safetensors' },
+        },
+      }),
+      endpoint: 'http://comfy/',
+      fetchObjectInfo: fetch(
+        objectInfoCombo({
+          UpscaleModelLoader: { model_name: ['ltx-2.3-spatial-upscaler-x2-1.1.safetensors'] },
+        }),
+      ),
+    });
+    expect(r.available_by_class['UpscaleModelLoader.model_name']).toEqual([
+      'ltx-2.3-spatial-upscaler-x2-1.1.safetensors',
+    ]);
+    expect(r.missing_refs).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it('COMBO with empty options → the referenced model is genuinely missing', async () => {
+    // The real LatentUpscaleModelLoader case: node installed, but its
+    // folder (latent_upscale_models) is empty → options: [].
+    const r = await checkWorkflow({
+      workflow: wf({
+        LU: {
+          class_type: 'LatentUpscaleModelLoader',
+          inputs: { model_name: 'ltx-2.3-spatial-upscaler-x2-1.1.safetensors' },
+        },
+      }),
+      endpoint: 'http://comfy/',
+      fetchObjectInfo: fetch(objectInfoCombo({ LatentUpscaleModelLoader: { model_name: [] } })),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.missing_refs.map((x) => x.current_value)).toEqual([
+      'ltx-2.3-spatial-upscaler-x2-1.1.safetensors',
+    ]);
+  });
+
+  it('finds model options declared under input.optional too', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({ UNET: { class_type: 'UNETLoader', inputs: { unet_name: 'q.safetensors' } } }),
+      endpoint: 'http://comfy/',
+      fetchObjectInfo: fetch(
+        objectInfoCombo({ UNETLoader: { unet_name: ['q.safetensors'] } }, 'optional'),
+      ),
+    });
+    expect(r.available_by_class['UNETLoader.unet_name']).toEqual(['q.safetensors']);
+    expect(r.ok).toBe(true);
+  });
+
+  it('still reads the legacy [[...],{}] encoding (core nodes)', async () => {
+    const r = await checkWorkflow({
+      workflow: wf({ C: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'c.safetensors' } } }),
+      endpoint: 'http://comfy/',
+      fetchObjectInfo: fetch(objectInfo({ CheckpointLoaderSimple: { ckpt_name: ['c.safetensors'] } })),
+    });
+    expect(r.available_by_class['CheckpointLoaderSimple.ckpt_name']).toEqual(['c.safetensors']);
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe('checkWorkflow', () => {
   const fetch = (info: ObjectInfo) => vi.fn(async () => info);
 
