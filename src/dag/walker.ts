@@ -133,6 +133,22 @@ export interface WalkerOptions {
    */
   stopAt?: string;
   /**
+   * Stop-after-each-collection gate. When true, the walker halts as
+   * soon as a `collection` node (other than the bundle goal) finishes
+   * a pass in which at least one of its instances actually ran (i.e.
+   * the runner was invoked, not a cache-skip). Downstream nodes stay
+   * pending in walkState, so the next walk (the desktop "Resume"
+   * button, `dhee_run_bundle` again, etc.) cache-skips the now-complete
+   * collection — which therefore does NO new work and does NOT re-gate
+   * — and proceeds to the next collection. Net effect: one collection
+   * step per run, letting the user inspect each fan-out batch before
+   * continuing. A collection whose instances were all cache-skipped
+   * never gates (no real work → no progress stall on resume). Sourced
+   * from `project.features.gateAfterCollections`; see
+   * src/dag/projectFeatures.ts and docs/feature-flags.md.
+   */
+  gateAfterCollections?: boolean;
+  /**
    * When set, walker runs only these node ids and their transitive
    * dependents. Everything not in the cascade is skipped (state
    * preserved as-is). Used by `dhee_run_to scope=last_invalidated`
@@ -806,6 +822,13 @@ interface WalkResult {
   goal?: { outputRel: string; outputAbs: string };
   error?: string;
   instances: NodeInstance[];
+  /**
+   * Set to the collection node id the walk halted after when the
+   * `gateAfterCollections` gate fired. Distinguishes an intentional
+   * mid-graph pause (ok:true, no goal, resume to continue) from a
+   * stopAt / run-to-completion result. Absent on all other outcomes.
+   */
+  gatedAfter?: string;
 }
 
 /**
@@ -850,6 +873,12 @@ async function walkBundleWithReviewLoop(
   const projectJsonPath = resolve(opts.projectDir, 'project.json');
 
   const result = await walkBundleOnce(opts);
+
+  // A gateAfterCollections pause is an intentional early stop — never
+  // re-walk it through the review loop (the graph hasn't reached the
+  // judge nodes that would seed critiques, and re-walking would defeat
+  // the gate). Resume drives the next pass.
+  if (result.gatedAfter) return result;
 
   // Semantic: `reviewLoopMax` = TOTAL max walks per dispatch
   // (including the initial). max=1 → no re-walks. max=3 → up to 3
@@ -1136,6 +1165,11 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
 
   // Run in topo order.
   let stopAtReached = false;
+  // Set to a collection node id when the gateAfterCollections gate
+  // fires after that node — the loop stops (like stopAt) and the
+  // return reports it so callers can message "paused, resume to
+  // continue" instead of a misleading completion.
+  let gatedAfter: string | undefined;
   // BUG-023: track which nodes had their runner actually invoked in
   // The pre-cascade walker tracked `reRunInThisWalk` to force
   // downstream cache-bypass for any node whose upstream had been
@@ -1182,6 +1216,13 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     }
 
     const insts = instancesById.get(node.id) ?? [];
+
+    // gateAfterCollections: did any instance of THIS node actually run
+    // its runner this pass (vs. a cache-skip)? Only a node that did
+    // real work should gate — otherwise a resumed walk (which cache-
+    // skips the now-complete collection) would re-gate on it forever
+    // and never advance to the next node.
+    let nodeDidRealWork = false;
 
     // Pre-cascade walker had a cascadeSet bypass here that skipped
     // dispatch for nodes outside runOnly's reach while still hydrating
@@ -1502,6 +1543,11 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         }
       }
 
+      // The runner is about to be invoked for real (this instance was
+      // not cache-skipped above) — mark the node as having done work
+      // this pass so the gateAfterCollections check below can fire.
+      nodeDidRealWork = true;
+
       let result: RunnerResult;
       try {
         result = await runner.run(ctx);
@@ -1613,6 +1659,22 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       log(`✓ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} → ${result.outputPath}`);
     }
 
+    // Stop-after-each-collection gate. Fires once this collection node
+    // has fully completed a pass that did real work (some instance ran).
+    // Never gate after the goal node — completing the goal IS the run
+    // finishing, not a mid-graph pause. stopAtReached breaks the loop at
+    // the top of the next iteration, exactly like stopAt.
+    if (
+      opts.gateAfterCollections &&
+      node.kind === 'collection' &&
+      node.id !== opts.bundle.goal &&
+      nodeDidRealWork
+    ) {
+      gatedAfter = node.id;
+      stopAtReached = true;
+      log(`walker: gate-after-collections — collection '${node.id}' complete, halting (resume to continue).`);
+    }
+
     if (opts.stopAt && node.id === opts.stopAt) {
       stopAtReached = true;
       log(`walker: reached stopAt='${opts.stopAt}', halting.`);
@@ -1636,6 +1698,12 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       goal: { outputRel: goalInst.outputRel!, outputAbs: goalInst.outputAbs },
       instances: allInstances,
     };
+  }
+  // Gated mid-graph by gateAfterCollections — ok, but no goal yet.
+  // Report which collection we halted after so callers can say
+  // "paused, resume to continue" rather than treating it as done.
+  if (gatedAfter) {
+    return { ok: true, gatedAfter, instances: allInstances };
   }
   // If stopAt was used or runOnly was set, the goal isn't expected to
   // have completed — return ok without a goal payload.

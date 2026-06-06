@@ -78,6 +78,14 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     bundleSource: `built-in:${bundleId}`,
     ...(description ? { description } : {}),
     createdAt: new Date().toISOString(),
+    // Per-project feature flags (docs/feature-flags.md). Seeded with
+    // their defaults so new projects show what's available.
+    // gateAfterCollections defaults ON (opt-out) — the reader
+    // (src/dag/projectFeatures.ts) treats missing as ON too, so the
+    // seed just makes the default visible/editable.
+    features: {
+      gateAfterCollections: true,
+    },
   };
 
   if (bundle.inputs && bundle.inputs.length > 0) {

@@ -184,10 +184,47 @@ export function findMissingNodeClasses(
 }
 
 /**
+ * Pull the string option list out of a single /object_info input spec,
+ * tolerating BOTH ComfyUI dropdown encodings:
+ *
+ *   - Legacy:  `[ ["a.safetensors", ...], {meta} ]` — element 0 IS the
+ *     options array. (Still emitted by core nodes like
+ *     CheckpointLoaderSimple as of Comfy 0.24.)
+ *   - Combo (Comfy ~0.24+):  `[ "COMBO", { options: [...], multiselect } ]`
+ *     — element 0 is the type tag string; the options live under
+ *     element 1's `options`. (Emitted by UpscaleModelLoader,
+ *     LatentUpscaleModelLoader, and most custom nodes.)
+ *
+ * Returns the string options, or [] for non-combo / non-string fields
+ * (INT/FLOAT/wire inputs), which the caller drops. Missing this second
+ * shape made EVERY combo-format model field look "missing" even when
+ * Comfy had the file — the LTX latent-upscaler false positive.
+ */
+function comboOptions(fieldSpec: unknown[]): string[] {
+  const first = fieldSpec[0];
+  // Legacy: options array sits at element 0.
+  if (Array.isArray(first)) {
+    return first.filter((x): x is string => typeof x === 'string');
+  }
+  // Combo: ["COMBO" | <type>, { options: [...] }].
+  if (typeof first === 'string' && fieldSpec.length > 1) {
+    const meta = fieldSpec[1];
+    if (meta && typeof meta === 'object') {
+      const opts = (meta as Record<string, unknown>)['options'];
+      if (Array.isArray(opts)) {
+        return opts.filter((x): x is string => typeof x === 'string');
+      }
+    }
+  }
+  return [];
+}
+
+/**
  * Walk /object_info and flatten to `<class>.<field>` → [names]. Only
- * fields with array-of-strings values survive; nodes whose input
- * options are dropdowns of non-string values (e.g. integers) are
- * skipped.
+ * fields that resolve to a non-empty array of string options survive;
+ * nodes whose input options are dropdowns of non-string values (e.g.
+ * integers) or non-combo inputs are skipped. Handles both the legacy
+ * and combo dropdown encodings — see comboOptions.
  */
 function flattenAvailable(info: ObjectInfo): Record<string, string[]> {
   const out: Record<string, string[]> = {};
@@ -195,15 +232,19 @@ function flattenAvailable(info: ObjectInfo): Record<string, string[]> {
     if (!cls || typeof cls !== 'object') continue;
     const input = (cls as Record<string, unknown>)['input'];
     if (!input || typeof input !== 'object') continue;
-    const required = (input as Record<string, unknown>)['required'];
-    if (!required || typeof required !== 'object') continue;
-    for (const [fieldName, fieldSpec] of Object.entries(required)) {
-      if (!Array.isArray(fieldSpec) || fieldSpec.length === 0) continue;
-      const list = fieldSpec[0];
-      if (!Array.isArray(list)) continue;
-      const names = list.filter((x): x is string => typeof x === 'string');
-      if (names.length === 0) continue;
-      out[`${className}.${fieldName}`] = names;
+    // Scan required AND optional — some custom nodes declare their
+    // model dropdown under `optional`. Adding optional only widens the
+    // available set, so it can never turn a present model into a
+    // false "missing" (the matching is by exact class.field + name).
+    for (const section of ['required', 'optional'] as const) {
+      const fields = (input as Record<string, unknown>)[section];
+      if (!fields || typeof fields !== 'object') continue;
+      for (const [fieldName, fieldSpec] of Object.entries(fields)) {
+        if (!Array.isArray(fieldSpec) || fieldSpec.length === 0) continue;
+        const names = comboOptions(fieldSpec);
+        if (names.length === 0) continue;
+        out[`${className}.${fieldName}`] = names;
+      }
     }
   }
   return out;

@@ -20,6 +20,7 @@ import {
   BundleSourceError,
 } from '../../dag/bundleSource.js';
 import { walkBundle, loadBundle } from '../../dag/walker.js';
+import { isGateAfterCollectionsEnabled } from '../../dag/projectFeatures.js';
 import type { DagBundle, NodeDef } from '../../dag/schema.js';
 import type { GenericProjectFile } from './runProjectViaBundle-stubs.js';
 import type { AssetEvent } from './runProjectViaBundle-stubs.js';
@@ -42,6 +43,12 @@ export interface RunProjectViaBundleOpts {
    * event-sourced graph for fork-aware projections.
    */
   branchId?: string;
+  /**
+   * Force the stop-after-each-collection gate on, regardless of the
+   * project.json flag. Optional caller override — the normal source is
+   * `project.features.gateAfterCollections`, read below. ORed with it.
+   */
+  gateAfterCollections?: boolean;
   /** Cooperative abort signal — passed to every runner via ctx.signal. */
   signal?: AbortSignal;
   /** Log sink. Defaults to console. */
@@ -62,6 +69,12 @@ export interface RunProjectViaBundleResult {
   /** Absolute path to the final video produced by the bundle's goal node. */
   finalVideoAbs?: string;
   error?: string;
+  /**
+   * Set when the walk paused on the stop-after-each-collection gate
+   * instead of reaching the goal. The value is the collection node id
+   * it halted after. ok stays true; resume (re-run) to continue.
+   */
+  gatedAfter?: string;
 }
 
 export async function runProjectViaBundle(
@@ -130,6 +143,12 @@ export async function runProjectViaBundle(
   // walker may still run if the bundle has no scene-keyed collections.
   const sceneIds = discoverSceneIdsFromProject(project, bundle);
 
+  // Stop-after-each-collection gate: project.json opt-in (or a caller
+  // override). When on, the walker halts after each collection node so
+  // the user can inspect that fan-out batch before resuming.
+  const gateAfterCollections =
+    opts.gateAfterCollections === true || isGateAfterCollectionsEnabled(project);
+
   // 6. Walk the bundle.
   // The ProjectionEngine writes the event log + the back-compat
   // walkState snapshot under the hood. Opening it is cheap (just
@@ -146,12 +165,20 @@ export async function runProjectViaBundle(
     ...(opts.stopAt ? { stopAt: opts.stopAt } : {}),
     ...(opts.runOnly !== undefined ? { runOnly: opts.runOnly } : {}),
     ...(opts.signal ? { signal: opts.signal } : {}),
+    ...(gateAfterCollections ? { gateAfterCollections: true } : {}),
     cli: { sceneIds },
     log,
   });
 
   if (!walkResult.ok) {
     return { ok: false, error: walkResult.error ?? 'bundle walk failed' };
+  }
+  if (walkResult.gatedAfter) {
+    log(
+      `runProjectViaBundle: paused after collection '${walkResult.gatedAfter}' ` +
+        `(stop-after-each-collection is on). Resume to continue.`,
+    );
+    return { ok: true, gatedAfter: walkResult.gatedAfter };
   }
   return {
     ok: true,

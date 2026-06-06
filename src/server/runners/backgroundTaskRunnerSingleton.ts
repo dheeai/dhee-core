@@ -53,6 +53,15 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
     log: (m) => ctx.hooks.onNotification({ level: 'info', message: m }),
   });
   if (!result.ok) throw new Error(result.error ?? 'bundle run failed');
+  if (result.gatedAfter) {
+    ctx.hooks.onNotification({
+      level: 'info',
+      message:
+        `⏸ Paused after collection node '${result.gatedAfter}' — ` +
+        `stop-after-each-collection is on. Resume to continue.`,
+    });
+    return;
+  }
   if (result.finalVideoAbs) {
     ctx.hooks.onNotification({
       level: 'info',
