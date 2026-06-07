@@ -78,6 +78,18 @@ export interface LlmGenerateConfig {
   maxTokens?: number;
   /** Sampling temperature. Default 0.7. */
   temperature?: number;
+  /**
+   * When true, deterministically (re)assign scene + shot ids on the
+   * parsed JSON output BEFORE schema validation. Use on scene/shot
+   * breakdown nodes whose schema requires `scene_N_shot_M` shot ids:
+   * the id is a pure function of (scene number, shot order within the
+   * scene), so the LLM should not be the source of truth for it — weak
+   * models drift on the exact string (global counters, sub-shot letters
+   * like "shot_15a") and then fail validation in a retry loop forever.
+   * We reconstruct the canonical ids here so the contract is satisfied
+   * by construction. No-op for output with no top-level `shots` array.
+   */
+  normalizeShotIds?: boolean;
 }
 
 // ── DI: client factory ─────────────────────────────────────────────────
@@ -296,6 +308,58 @@ function validateAgainstSchema(value: unknown, schemaPath: string): { ok: true }
   return { ok: false, error: `Schema validation failed: ${errs}` };
 }
 
+/**
+ * Deterministically (re)assign scene + shot ids for scene/shot
+ * breakdown output, in place. The canonical shot id is
+ * `scene_<sceneNum>_shot_<shotNumberWithinScene>` — a pure function of
+ * data we already control — so the LLM is relieved of formatting it and
+ * can no longer fail the id schema (weak models drift: global shot
+ * counters, "shot_15a" sub-shot letters). Idempotent. No-op unless
+ * `value` is an object with a top-level `shots` array.
+ *
+ * Scene membership per shot is read from the integer `scene` field (the
+ * signal weak models DO get right), falling back to the `scene_N_`
+ * prefix of any id the model emitted, then to carry-forward of the
+ * previous shot's scene. `shotNumber` is (re)assigned purely by order
+ * within each scene, so a mangled model value can't leak into the id.
+ * Scene ids are renumbered `scene_1..N` by array order to match.
+ */
+export function normalizeSceneShotIds(value: unknown): void {
+  if (!value || typeof value !== 'object') return;
+  const obj = value as { scenes?: unknown; shots?: unknown };
+  if (!Array.isArray(obj.shots)) return;
+
+  // Scenes: canonical ids by array order (scene_1, scene_2, …).
+  if (Array.isArray(obj.scenes)) {
+    obj.scenes.forEach((sc, i) => {
+      if (sc && typeof sc === 'object') {
+        (sc as { id?: string }).id = `scene_${i + 1}`;
+      }
+    });
+  }
+
+  // Shots: per-scene order counter → shotNumber → id.
+  const perScene = new Map<number, number>();
+  let lastScene = 1;
+  for (const raw of obj.shots) {
+    if (!raw || typeof raw !== 'object') continue;
+    const shot = raw as { id?: string; scene?: number; shotNumber?: number };
+    let sceneNum: number;
+    if (typeof shot.scene === 'number' && Number.isInteger(shot.scene) && shot.scene > 0) {
+      sceneNum = shot.scene;
+    } else {
+      const m = String(shot.id ?? '').match(/^scene_(\d+)_shot_/);
+      sceneNum = m ? parseInt(m[1]!, 10) : lastScene;
+    }
+    lastScene = sceneNum;
+    const next = (perScene.get(sceneNum) ?? 0) + 1;
+    perScene.set(sceneNum, next);
+    shot.scene = sceneNum;
+    shot.shotNumber = next;
+    shot.id = `scene_${sceneNum}_shot_${next}`;
+  }
+}
+
 // ── The runner factory ─────────────────────────────────────────────────
 
 export function createLlmGenerateRunner(opts?: {
@@ -323,6 +387,7 @@ export function createLlmGenerateRunner(opts?: {
         forceRerun:     { type: 'boolean' },
         maxTokens:      { type: 'integer', minimum: 1 },
         temperature:    { type: 'number' },
+        normalizeShotIds: { type: 'boolean' },
       },
     },
   });
@@ -601,6 +666,11 @@ export function createLlmGenerateRunner(opts?: {
             }
             break;
           }
+          // Construct canonical scene/shot ids BEFORE validating, so the
+          // schema's id contract is satisfied by construction rather than
+          // by the model getting the string right. The strict schema then
+          // doubles as a post-condition check on our own normalization.
+          if (cfg.normalizeShotIds) normalizeSceneShotIds(parsed.value);
           if (schemaAbs) {
             const v = validateAgainstSchema(parsed.value, schemaAbs);
             if (!v.ok) {

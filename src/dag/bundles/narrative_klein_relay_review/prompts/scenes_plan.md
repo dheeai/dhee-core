@@ -54,7 +54,6 @@ fan-out per shot without re-traversing the scenes):
   ],
   "shots": [
     {
-      "id": "scene_1_shot_1",
       "scene": 1,
       "shotNumber": 1,
       "duration": integer seconds,
@@ -84,5 +83,8 @@ extreme_wide, wide, medium, medium_close_up, close_up, extreme_close_up,
 over_the_shoulder, two_shot, point_of_view, insert, cutaway, tracking,
 dutch. Don't use the same framing two shots in a row when avoidable.
 
-Hard rules: sum of all shot durations == {{targetDuration}}. shot.id
-format is exactly "scene_N_shot_M". Output ONLY the JSON.
+Hard rules: sum of all shot durations == {{targetDuration}}. Set
+`scene` to the scene number this shot belongs to and number shots
+within each scene from 1 in `shotNumber` — do NOT emit a shot `id`;
+the system constructs it from `scene` + `shotNumber`. Output ONLY the
+JSON.

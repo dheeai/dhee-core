@@ -407,6 +407,7 @@
         "config": {
           "promptTemplate": "prompts/scenes_plan.md",
           "outputSchema": "schemas/scenes_plan.schema.json",
+          "normalizeShotIds": true,
           "tier": "heavy",
           "outputFormat": "json",
           "maxTokens": 16000

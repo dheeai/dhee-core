@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createLlmGenerateRunner } from '../../../src/dag/runners/llmGenerate.js';
+import { createLlmGenerateRunner, normalizeSceneShotIds } from '../../../src/dag/runners/llmGenerate.js';
 import type { RunnerContext, NodeDef } from '../../../src/dag/schema.js';
 
 // ── Stub LLM client ────────────────────────────────────────────────────
@@ -293,6 +293,136 @@ describe('llm.generate runner', () => {
       }));
 
       expect(result.ok).toBe(true);
+    });
+  });
+
+  // normalizeShotIds — construct canonical scene/shot ids instead of
+  // trusting the LLM to format them. Motivated by a real failure: a
+  // weak model (deepseek-v4-flash) emitted correct `scene`/`shotNumber`
+  // fields but ids with a global counter + sub-shot letters
+  // ("scene_2_shot_15a"), failing the strict id pattern in an endless
+  // retry loop.
+  describe('normalizeShotIds', () => {
+    const SCENES_PLAN_SCHEMA = {
+      type: 'object',
+      required: ['scenes', 'shots'],
+      properties: {
+        scenes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id'],
+            properties: { id: { type: 'string', pattern: '^scene_[0-9]+$' } },
+          },
+        },
+        shots: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id', 'duration', 'description'],
+            properties: {
+              id: { type: 'string', pattern: '^scene_[0-9]+_shot_[0-9]+$' },
+              scene: { type: 'integer' },
+              shotNumber: { type: 'integer' },
+              duration: { type: 'integer' },
+              description: { type: 'string' },
+            },
+          },
+        },
+      },
+    };
+
+    // The exact drift that motivated this: `scene` is right, but the id
+    // uses a global counter and a sub-shot letter on the last shot.
+    const DRIFTED_OUTPUT = JSON.stringify({
+      scenes: [
+        { id: 'scene_1', title: 'a' },
+        { id: 'scene_2', title: 'b' },
+      ],
+      shots: [
+        { id: 'scene_1_shot_1', scene: 1, shotNumber: 1, duration: 3, description: 'x' },
+        { id: 'scene_1_shot_2', scene: 1, shotNumber: 2, duration: 3, description: 'x' },
+        { id: 'scene_2_shot_3', scene: 2, shotNumber: 1, duration: 3, description: 'x' },
+        { id: 'scene_2_shot_15a', scene: 2, shotNumber: 2, duration: 3, description: 'x' },
+      ],
+    });
+
+    it('pure fn: rebuilds canonical scene_N_shot_M ids from scene + order', () => {
+      const v = JSON.parse(DRIFTED_OUTPUT);
+      normalizeSceneShotIds(v);
+      expect(v.shots.map((s: { id: string }) => s.id)).toEqual([
+        'scene_1_shot_1',
+        'scene_1_shot_2',
+        'scene_2_shot_1',
+        'scene_2_shot_2',
+      ]);
+      // shotNumber reset per scene by order; scene membership preserved.
+      expect(v.shots.map((s: { shotNumber: number }) => s.shotNumber)).toEqual([1, 2, 1, 2]);
+      expect(v.scenes.map((s: { id: string }) => s.id)).toEqual(['scene_1', 'scene_2']);
+    });
+
+    it('pure fn: no-op when there is no top-level shots array', () => {
+      const v = { foo: 'bar' };
+      normalizeSceneShotIds(v);
+      expect(v).toEqual({ foo: 'bar' });
+    });
+
+    it('pure fn: derives scene from a drifted id prefix when scene field is absent', () => {
+      const v = {
+        shots: [
+          { id: 'scene_3_shot_99', duration: 3, description: 'x' },
+          { id: 'scene_3_shot_zzz', duration: 3, description: 'x' },
+        ],
+      };
+      normalizeSceneShotIds(v);
+      expect(v.shots.map((s: { id: string }) => s.id)).toEqual(['scene_3_shot_1', 'scene_3_shot_2']);
+    });
+
+    it('runner: drifted ids pass the strict schema when the flag is on', async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), 'go');
+      writeFileSync(join(bundleDir, 'schemas/scenes.schema.json'), JSON.stringify(SCENES_PLAN_SCHEMA));
+      const client = makeStubClient({ respond: async () => ({ content: DRIFTED_OUTPUT }) });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+
+      const result = await runner.run(makeCtx({
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'plans/scenes_plan.json',
+          tier: 'heavy',
+          outputFormat: 'json',
+          outputSchema: 'schemas/scenes.schema.json',
+          normalizeShotIds: true,
+        },
+      }));
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const written = JSON.parse(readFileSync(join(projectDir, result.outputPath), 'utf-8'));
+        expect(written.shots.map((s: { id: string }) => s.id)).toEqual([
+          'scene_1_shot_1', 'scene_1_shot_2', 'scene_2_shot_1', 'scene_2_shot_2',
+        ]);
+      }
+    });
+
+    it('runner: WITHOUT the flag, the same drifted ids fail the strict schema', async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), 'go');
+      writeFileSync(join(bundleDir, 'schemas/scenes.schema.json'), JSON.stringify(SCENES_PLAN_SCHEMA));
+      const client = makeStubClient({ respond: async () => ({ content: DRIFTED_OUTPUT }) });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+
+      const result = await runner.run(makeCtx({
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'plans/scenes_plan.json',
+          tier: 'heavy',
+          outputFormat: 'json',
+          outputSchema: 'schemas/scenes.schema.json',
+          maxRetries: 0,
+        },
+      }));
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(/pattern|schema/i);
     });
   });
 
