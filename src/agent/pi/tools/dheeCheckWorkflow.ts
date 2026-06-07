@@ -33,7 +33,7 @@ const Params = Type.Object({
       "Path to the workflow JSON, either absolute OR relative to the bundle dir. The check tool resolves it from projectDir's bundleSource if not absolute.",
   }),
   endpoint: Type.String({
-    description: 'HTTP URL of the target ComfyUI (e.g. https://comfyui.share.zrok.io). The /object_info endpoint is appended for the query.',
+    description: "HTTP URL of the target ComfyUI (e.g. http://127.0.0.1:8188). Use the project's configured ComfyUI endpoint, NOT this example. The /object_info endpoint is appended for the query.",
   }),
 });
 
