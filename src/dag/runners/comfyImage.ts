@@ -454,11 +454,8 @@ export function createComfyImageRunner(opts?: {
     // so the mismatch reappeared on every render. Bundle JSON on disk
     // stays untouched; the substitution lives in the alias store.
     try {
-      const { readAliases, applyAliases } = await import('../workflowAliases.js');
-      const { resolve: pathResolve } = await import('node:path');
-      const aliasesDir =
-        process.env['DHEE_WORKFLOW_ALIASES_DIR'] ??
-        pathResolve(process.env['HOME'] ?? '', '.dhee', 'workflow-aliases');
+      const { readAliases, applyAliases, defaultAliasesDir } = await import('../workflowAliases.js');
+      const aliasesDir = defaultAliasesDir();
       const aliasEndpoint = baseUrl ?? process.env['COMFYUI_BASE_URL'] ?? 'unknown';
       const aliases = readAliases(aliasesDir, aliasEndpoint);
       if (

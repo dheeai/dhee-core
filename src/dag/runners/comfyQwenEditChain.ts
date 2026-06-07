@@ -134,9 +134,8 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   //    a per-endpoint mapping. Reading + applying here keeps the
   //    bundle's canonical workflow untouched.
   try {
-    const { readAliases, applyAliases } = await import('../workflowAliases.js');
-    const aliasesDir = process.env['DHEE_WORKFLOW_ALIASES_DIR']
-      || resolve(process.env['HOME'] ?? '', '.dhee', 'workflow-aliases');
+    const { readAliases, applyAliases, defaultAliasesDir } = await import('../workflowAliases.js');
+    const aliasesDir = defaultAliasesDir();
     const aliases = readAliases(aliasesDir, baseUrl ?? 'unknown');
     if ((aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0)
         || (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0)) {
