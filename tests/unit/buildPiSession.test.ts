@@ -122,6 +122,33 @@ describe('buildPiSessionConfig', () => {
     expect(key).toBe('desktop-jwt');
   });
 
+  it('honors an OpenRouter model id pi-ai does not know (e.g. inclusionai/ring-2.6-1t) instead of silently falling back to pi\'s default OpenAI model', async () => {
+    // Regression: a valid OpenRouter slug that is absent from pi-ai's
+    // curated MODELS table → getModel() returns undefined. The old code
+    // left config.model UNSET, so pi-coding-agent fell back to its
+    // built-in default model (gpt-5.x on api.openai.com). Paired with a
+    // non-OpenAI runtime key (an OpenRouter sk-or-… key) every turn 401'd
+    // ("Incorrect API key provided"), silently killing the agent — which
+    // is what made the desktop "Resume" button appear to do nothing.
+    const cfg = await buildPiSessionConfig({
+      sessionManager: SessionManager.inMemory(process.cwd()),
+      modelProvider: 'openrouter',
+      modelId: 'inclusionai/ring-2.6-1t',
+      apiKey: 'sk-or-v1-test-key',
+      modelBaseUrl: 'https://openrouter.ai/api/v1',
+    });
+    // The config must target the caller's endpoint + model id — never
+    // be undefined (which is the silent-fallback-to-OpenAI trap).
+    expect(cfg.model).toBeDefined();
+    expect((cfg.model as { id: string }).id).toBe('inclusionai/ring-2.6-1t');
+    expect((cfg.model as { provider: string }).provider).toBe('openrouter');
+    expect((cfg.model as { baseUrl: string }).baseUrl).toBe(
+      'https://openrouter.ai/api/v1',
+    );
+    const key = await (cfg.authStorage as unknown as { getApiKey: (p: string) => Promise<string | undefined> }).getApiKey('openrouter');
+    expect(key).toBe('sk-or-v1-test-key');
+  });
+
   it('Phase 6.5b: partial overrides (e.g. modelProvider without apiKey) do NOT activate the explicit-model path — falls back to auto-discovery', async () => {
     const cfg = await buildPiSessionConfig({
       sessionManager: SessionManager.inMemory(process.cwd()),
