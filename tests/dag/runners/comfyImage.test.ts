@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createComfyImageRunner, type ComfyImageClient } from '../../../src/dag/runners/comfyImage.js';
+import { writeAliases } from '../../../src/dag/workflowAliases.js';
 import type { RunnerContext, NodeDef } from '../../../src/dag/schema.js';
 
 // ── Stub client ────────────────────────────────────────────────────────
@@ -444,6 +445,65 @@ describe('comfy.image runner', () => {
       expect((wf['81'] as { inputs: { image: string } }).inputs.image).toBe('up_base.png');
       expect((wf['82'] as { inputs: { image: string } }).inputs.image).toBe('up_ref1.png');
       expect((wf['83'] as { inputs: { image: string } }).inputs.image).toBe('up_ref2.png');
+    });
+  });
+
+  describe('workflow aliases — model substitution', () => {
+    it('applies a persisted name_alias to model *_name fields before queueing', async () => {
+      // Regression: image nodes used to ignore the alias store entirely
+      // (only ltx_director / qwen_edit_chain applied it), so a user's
+      // "use a model I have" pick in the BundleConfigurator never reached
+      // comfy.image — the flux-2 mismatch reappeared on every render.
+      const aliasesDir = mkdtempSync(join(tmpdir(), 'comfy-aliases-'));
+      const savedAliasDir = process.env['DHEE_WORKFLOW_ALIASES_DIR'];
+      process.env['DHEE_WORKFLOW_ALIASES_DIR'] = aliasesDir;
+      try {
+        // Workflow references the bundle's canonical checkpoint name on a
+        // loader node that NO parameter mapping touches — so only the
+        // alias can change it.
+        const workflow = {
+          '10': { class_type: 'UNETLoader', inputs: { unet_name: 'flux-2.safetensors', weight_dtype: 'default' } },
+          '91': { class_type: 'CLIPTextEncode', inputs: { text: 'placeholder' } },
+          '94': { class_type: 'SaveImage', inputs: { filename_prefix: 'out' } },
+        };
+        writeFileSync(join(bundleDir, 'workflows/klein.json'), JSON.stringify(workflow));
+
+        // User's box only has the klein-quantized variant. Persisted the
+        // same way the configurator / agent tool do — keyed by the
+        // endpoint the runner will resolve to.
+        writeAliases(aliasesDir, process.env['ENDPOINT_test_endpoint']!, {
+          name_aliases: { 'flux-2.safetensors': 'flux-2-klein-full.safetensors' },
+        });
+
+        const behavior: StubBehavior = { queueOutputs: [{ filename: 'out.png' }] };
+        const client = makeStubClient(behavior);
+        const runner = createComfyImageRunner({ clientFactory: () => client });
+
+        const result = await runner.run(makeCtx({
+          config: {
+            workflowPath: 'workflows/klein.json',
+            parameterMappings: [
+              { input: 'prompt', nodeId: '91', field: 'text' },
+              { input: 'filenamePrefix', nodeId: '94', field: 'filename_prefix' },
+            ],
+            endpoint: 'test.endpoint',
+            prompt: 'a dragon',
+            outputPath: 'out.png',
+          },
+        }));
+
+        expect(result.ok).toBe(true);
+        const wf = behavior.calls!.queued[0]!;
+        // The model name posted to Comfy is the user's local file, not the
+        // bundle's canonical name.
+        expect((wf['10'] as { inputs: { unet_name: string } }).inputs.unet_name).toBe(
+          'flux-2-klein-full.safetensors',
+        );
+      } finally {
+        if (savedAliasDir === undefined) delete process.env['DHEE_WORKFLOW_ALIASES_DIR'];
+        else process.env['DHEE_WORKFLOW_ALIASES_DIR'] = savedAliasDir;
+        rmSync(aliasesDir, { recursive: true, force: true });
+      }
     });
   });
 

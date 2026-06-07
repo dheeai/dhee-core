@@ -126,13 +126,28 @@ export interface BuildPiSessionOptions {
   modelBaseUrl?: string;
 }
 
-function buildDheeCloudModel(baseUrl: string): Model<'openai-completions'> {
+/**
+ * Build a generic OpenAI-compatible Model for an endpoint that pi-ai's
+ * curated MODELS table doesn't know — niche OpenRouter slugs
+ * (`inclusionai/ring-2.6-1t`), local servers, custom proxies. Without
+ * this, `getModel()` returns undefined for such ids and the caller would
+ * leave `config.model` unset, which makes pi-coding-agent silently fall
+ * back to its built-in default model (gpt-5.x on api.openai.com). Paired
+ * with a non-OpenAI key (an OpenRouter `sk-or-…` key) that 401s on every
+ * turn and silently kills the agent — the "Resume does nothing" bug.
+ */
+function buildOpenAICompatModel(opts: {
+  id: string;
+  name: string;
+  provider: string;
+  baseUrl: string;
+}): Model<'openai-completions'> {
   return {
-    id: '',
-    name: 'Dhee Cloud',
+    id: opts.id,
+    name: opts.name,
     api: 'openai-completions',
-    provider: DHEE_CLOUD_PI_MODEL_PROVIDER,
-    baseUrl,
+    provider: opts.provider,
+    baseUrl: opts.baseUrl,
     reasoning: false,
     input: ['text'],
     cost: {
@@ -152,6 +167,16 @@ function buildDheeCloudModel(baseUrl: string): Model<'openai-completions'> {
       thinkingFormat: 'openai',
     },
   };
+}
+
+function buildDheeCloudModel(baseUrl: string): Model<'openai-completions'> {
+  // Blank protocol model id so the Dhee Cloud proxy owns real model selection.
+  return buildOpenAICompatModel({
+    id: '',
+    name: 'Dhee Cloud',
+    provider: DHEE_CLOUD_PI_MODEL_PROVIDER,
+    baseUrl,
+  });
 }
 
 /**
@@ -234,9 +259,25 @@ export async function buildPiSessionConfig(
     // the desktop can pass user-string provider/model ids without
     // dragging pi-ai's type union through every consumer.
     const model = getModel(opts.modelProvider as never, opts.modelId as never);
-    config.model = model && modelBaseUrl
-      ? { ...model, baseUrl: modelBaseUrl }
-      : model;
+    if (model) {
+      config.model = modelBaseUrl ? { ...model, baseUrl: modelBaseUrl } : model;
+    } else if (modelBaseUrl) {
+      // pi-ai's curated table doesn't know this model id (a niche
+      // OpenRouter slug, a local-server model, etc.). DON'T leave
+      // config.model unset — pi-coding-agent would then fall back to its
+      // built-in default model (gpt-5.x / api.openai.com), and the
+      // caller's non-OpenAI key 401s on every turn, silently killing the
+      // agent (the desktop "Resume does nothing" bug). The caller gave us
+      // an explicit endpoint, so honor it + the requested id directly.
+      config.model = buildOpenAICompatModel({
+        id: opts.modelId,
+        name: opts.modelId,
+        provider: opts.modelProvider,
+        baseUrl: modelBaseUrl,
+      });
+    }
+    // else: unknown id AND no endpoint to target — fall through to pi's
+    // auto-discovery (config.model stays unset), the prior behavior.
   }
 
   return config;

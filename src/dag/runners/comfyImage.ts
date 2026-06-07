@@ -417,7 +417,7 @@ export function createComfyImageRunner(opts?: {
     if (!existsSync(workflowAbs)) {
       return { ok: false, error: `comfy.image: workflow not found at ${workflowAbs}` };
     }
-    const workflow = JSON.parse(readFileSync(workflowAbs, 'utf-8')) as Record<
+    let workflow = JSON.parse(readFileSync(workflowAbs, 'utf-8')) as Record<
       string,
       { inputs: Record<string, unknown>; class_type?: string }
     >;
@@ -440,6 +440,39 @@ export function createComfyImageRunner(opts?: {
       }
       baseUrl = resolved;
       ctx.log(`comfy.image: routing to endpoint '${cfg.endpoint}' → ${resolved}`);
+    }
+
+    // ── Apply per-endpoint workflow aliases ──
+    // The bundle's canonical workflow may reference model files under
+    // names the user's local Comfy doesn't have (e.g. a `flux-2-*`
+    // checkpoint vs the user's klein-quantized variant). The
+    // BundleConfigurator's "use a model I have" picker and the agent's
+    // dhee_apply_workflow_aliases tool persist a per-box rename map; we
+    // apply it here in-memory so IMAGE nodes honor the user's choice.
+    // Without this, image-model substitutions were silently ignored —
+    // only the ltx_director / qwen_edit_chain runners applied aliases —
+    // so the mismatch reappeared on every render. Bundle JSON on disk
+    // stays untouched; the substitution lives in the alias store.
+    try {
+      const { readAliases, applyAliases } = await import('../workflowAliases.js');
+      const { resolve: pathResolve } = await import('node:path');
+      const aliasesDir =
+        process.env['DHEE_WORKFLOW_ALIASES_DIR'] ??
+        pathResolve(process.env['HOME'] ?? '', '.dhee', 'workflow-aliases');
+      const aliasEndpoint = baseUrl ?? process.env['COMFYUI_BASE_URL'] ?? 'unknown';
+      const aliases = readAliases(aliasesDir, aliasEndpoint);
+      if (
+        (aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0) ||
+        (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0)
+      ) {
+        const workflowKey = cfg.workflowPath.split('/').slice(-2).join('/');
+        workflow = applyAliases(workflow as never, { workflowKey, aliases }) as never;
+        ctx.log(
+          `comfy.image: applied aliases for endpoint=${aliasEndpoint} workflow=${workflowKey}`,
+        );
+      }
+    } catch (e) {
+      ctx.log(`comfy.image: alias load skipped (${(e as Error).message})`);
     }
 
     // ── Build the client ──

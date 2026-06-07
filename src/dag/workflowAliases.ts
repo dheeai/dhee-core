@@ -28,7 +28,7 @@
  * agent's tool surface relies on.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ComfyWorkflow } from './workflowVerify.js';
 
@@ -52,19 +52,86 @@ export function endpointSlug(endpoint: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
+/**
+ * A local ComfyUI's URL is unstable: a zrok/ngrok tunnel rotates, a LAN
+ * box gets a new DHCP IP, localhost vs 127.0.0.1, a Tailscale name vs a
+ * raw IP. Keying the alias store by the raw URL slug means every such
+ * change silently ORPHANS the user's model substitutions — they'd have
+ * to re-pick "use a model I have" after every URL change (the exact
+ * complaint that motivated this). So collapse every NON-cloud endpoint
+ * to one stable key, `self.local` — the user's own box, regardless of
+ * how it's currently addressed. Cloud endpoints stay keyed per-host:
+ * distinct cloud accounts/boxes (cloud.comfy.org, the Dhee Cloud
+ * `/comfy/api` proxy) have distinct model libraries that must not share
+ * a namespace.
+ */
+function isCloudEndpoint(endpoint: string): boolean {
+  return /cloud\.comfy\.org/i.test(endpoint) || /\/comfy\/api(?:\/|$)/i.test(endpoint);
+}
+
+/**
+ * Stable per-box alias key. Cloud stays per-host; every local box (any
+ * non-cloud URL) maps to the canonical `self.local`. Read and write go
+ * through here, so they can never drift apart.
+ */
+export function aliasEndpointKey(endpoint: string): string {
+  return isCloudEndpoint(endpoint) ? endpoint : 'self.local';
+}
+
 function aliasesPath(aliasesDir: string, endpoint: string): { dir: string; file: string } {
-  const dir = join(aliasesDir, endpointSlug(endpoint));
+  const dir = join(aliasesDir, endpointSlug(aliasEndpointKey(endpoint)));
   return { dir, file: join(dir, 'aliases.json') };
 }
 
-export function readAliases(aliasesDir: string, endpoint: string): WorkflowAliases {
-  const { file } = aliasesPath(aliasesDir, endpoint);
+function readAliasesFile(file: string): WorkflowAliases {
   if (!existsSync(file)) return {};
   try {
     return JSON.parse(readFileSync(file, 'utf8')) as WorkflowAliases;
   } catch {
     return {};
   }
+}
+
+/** Merge `over` onto `base` (`over` wins). name_aliases shallow; class_swaps two-level. */
+function mergeAliases(base: WorkflowAliases, over: WorkflowAliases): WorkflowAliases {
+  const out: WorkflowAliases = {};
+  if (base.name_aliases || over.name_aliases) {
+    out.name_aliases = { ...(base.name_aliases ?? {}), ...(over.name_aliases ?? {}) };
+  }
+  if (base.class_swaps || over.class_swaps) {
+    const cs: Record<string, Record<string, string>> = { ...(base.class_swaps ?? {}) };
+    for (const [wfKey, perNode] of Object.entries(over.class_swaps ?? {})) {
+      cs[wfKey] = { ...(cs[wfKey] ?? {}), ...perNode };
+    }
+    out.class_swaps = cs;
+  }
+  return out;
+}
+
+export function readAliases(aliasesDir: string, endpoint: string): WorkflowAliases {
+  const key = aliasEndpointKey(endpoint);
+  const slug = endpointSlug(key);
+  const primary = readAliasesFile(join(aliasesDir, slug, 'aliases.json'));
+  if (key !== 'self.local') return primary;
+
+  // Legacy fold-in: substitutions made BEFORE stable keying live under
+  // per-URL slug dirs (e.g. a zrok tunnel, an old LAN IP). They all
+  // describe the same physical local box, so merge them under self.local
+  // — otherwise the keying upgrade (or any past URL change) would orphan
+  // every pick the user already made. self_local (the current key) wins
+  // on conflicts; cloud dirs are never folded in (distinct boxes).
+  let merged = primary;
+  try {
+    for (const entry of readdirSync(aliasesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === slug) continue;
+      if (/cloud_comfy_org/i.test(entry.name)) continue;
+      const legacy = readAliasesFile(join(aliasesDir, entry.name, 'aliases.json'));
+      merged = mergeAliases(legacy, merged); // primary overrides legacy
+    }
+  } catch {
+    // aliasesDir may not exist yet — nothing to fold in.
+  }
+  return merged;
 }
 
 /**
