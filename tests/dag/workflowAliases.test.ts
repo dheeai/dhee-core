@@ -19,9 +19,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import {
   endpointSlug,
   aliasEndpointKey,
+  defaultAliasesDir,
   readAliases,
   writeAliases,
   applyAliases,
@@ -52,6 +54,30 @@ describe('endpointSlug', () => {
     expect(endpointSlug('https://comfyui.share.zrok.io')).toBe('comfyui_share_zrok_io');
     expect(endpointSlug('http://192.168.68.103:8188')).toBe('192_168_68_103_8188');
     expect(endpointSlug('http://localhost:8188/')).toBe('localhost_8188');
+  });
+});
+
+describe('defaultAliasesDir (cross-platform home resolution)', () => {
+  const saved = process.env['DHEE_WORKFLOW_ALIASES_DIR'];
+  afterEach(() => {
+    if (saved === undefined) delete process.env['DHEE_WORKFLOW_ALIASES_DIR'];
+    else process.env['DHEE_WORKFLOW_ALIASES_DIR'] = saved;
+  });
+
+  it('honors DHEE_WORKFLOW_ALIASES_DIR when set', () => {
+    process.env['DHEE_WORKFLOW_ALIASES_DIR'] = '/tmp/custom-aliases';
+    expect(defaultAliasesDir()).toBe('/tmp/custom-aliases');
+  });
+
+  it('falls back to <homedir>/.dhee/workflow-aliases — an ABSOLUTE path under home, never cwd-relative', () => {
+    delete process.env['DHEE_WORKFLOW_ALIASES_DIR'];
+    const dir = defaultAliasesDir();
+    expect(dir).toBe(join(homedir(), '.dhee', 'workflow-aliases'));
+    // Regression: the old `process.env.HOME ?? ''` fallback produced a
+    // cwd-relative path on Windows (HOME unset). The dir must be absolute and
+    // rooted at the real home dir, not the process cwd.
+    expect(dir.startsWith(homedir())).toBe(true);
+    expect(dir.startsWith(process.cwd())).toBe(homedir().startsWith(process.cwd()));
   });
 });
 

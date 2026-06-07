@@ -30,7 +30,27 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import type { ComfyWorkflow } from './workflowVerify.js';
+
+/**
+ * Resolve the per-user workflow-aliases root, consistently across platforms.
+ *
+ * `DHEE_WORKFLOW_ALIASES_DIR` wins when set (the desktop exports it so the
+ * runner reads exactly where the UI wrote). Otherwise fall back to
+ * `<home>/.dhee/workflow-aliases` using `os.homedir()` — NOT
+ * `process.env.HOME`, which is UNSET on Windows (Windows uses USERPROFILE).
+ * The old `process.env['HOME'] ?? ''` fallback resolved to a cwd-relative
+ * `.dhee/workflow-aliases` on Windows, so the desktop saved aliases to
+ * `C:\Users\<user>\.dhee\workflow-aliases` (via app.getPath('home')) while the
+ * runner looked somewhere else and found nothing — model substitutions were
+ * silently ignored on Windows. Centralizing here keeps every runner in sync.
+ */
+export function defaultAliasesDir(): string {
+  const env = process.env['DHEE_WORKFLOW_ALIASES_DIR'];
+  if (typeof env === 'string' && env.trim().length > 0) return env.trim();
+  return join(homedir(), '.dhee', 'workflow-aliases');
+}
 
 export interface WorkflowAliases {
   /** Global per-endpoint name→name remappings. */

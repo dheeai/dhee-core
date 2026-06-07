@@ -272,11 +272,8 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   // named LoRAs / UNETs (e.g. VBVR vs transition base LoRA), and the
   // agent's dhee_apply_workflow_aliases tool persists the chosen map.
   try {
-    const { readAliases, applyAliases } = await import('../workflowAliases.js');
-    const { resolve: pathResolve } = await import('node:path');
-    const aliasesDir =
-      process.env['DHEE_WORKFLOW_ALIASES_DIR'] ??
-      pathResolve(process.env['HOME'] ?? '', '.dhee', 'workflow-aliases');
+    const { readAliases, applyAliases, defaultAliasesDir } = await import('../workflowAliases.js');
+    const aliasesDir = defaultAliasesDir();
     const aliases = readAliases(aliasesDir, endpointBaseUrl ?? 'unknown');
     if (
       (aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0) ||
