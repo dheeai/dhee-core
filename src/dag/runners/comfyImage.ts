@@ -552,6 +552,36 @@ export function createComfyImageRunner(opts?: {
       }
     }
 
+    // ── Guard: reference-conditioned workflow with ZERO images ──
+    // A klein-style workflow declares a `base_image` mapping (its first
+    // LoadImage node is REQUIRED — the whole graph chains reference
+    // latents off it). If a shot prompt has generationMode 'image_edit'
+    // but an empty references[] (e.g. the LLM cited a character that was
+    // never generated, or named no reference at all), nothing resolves
+    // and nothing uploads. Submitting anyway leaves every LoadImage node
+    // pointing at its on-disk placeholder filename (ref_image_1.png …),
+    // which Comfy rejects ("not in list") — the run then stalls instead
+    // of failing cleanly. Catch it here with an actionable message rather
+    // than queueing a doomed workflow.
+    const requiresBaseImage = mappings.some((m) => m.input === 'base_image');
+    const nothingUploaded =
+      !baseUploaded && refUploaded.length === 0 && !fl2vFirstUploaded && !fl2vLastUploaded;
+    if (requiresBaseImage && nothingUploaded) {
+      const who = ctx.itemId ? ` for item '${ctx.itemId}'` : '';
+      return {
+        ok: false,
+        error:
+          `comfy.image: workflow '${cfg.workflowPath}' is reference-conditioned ` +
+          `(its parameter mappings declare a required base_image input), but no reference ` +
+          `images were resolved${who}. A shot prompt with generationMode 'image_edit' must ` +
+          `list at least one entry in references[] whose id matches a generated character or ` +
+          `setting image — none did. Fix the shot prompt: add a reference (e.g. the scene's ` +
+          `setting), or set generationMode to 'text_to_image' and route this node to a ` +
+          `text-to-image workflow. (Queueing as-is would leave the LoadImage nodes pointing ` +
+          `at placeholder filenames that don't exist on the Comfy server.)`,
+      };
+    }
+
     // ── Apply mappings ──
     // Build the value source from cfg fields + uploaded names + defaults.
     const valueMap: Record<string, unknown> = {

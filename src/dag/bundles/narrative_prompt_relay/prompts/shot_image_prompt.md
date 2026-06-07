@@ -25,6 +25,22 @@ Output a JSON object:
   "references": [array of {id: <character or setting id>, type: 'character' | 'setting'} in priority order — max 4 total. The first entry is the BASE; characters and settings stack on top.]
 }
 
+CRITICAL — references must NOT be empty for image_edit. The image-edit
+workflow is reference-conditioned: it CANNOT render without at least one
+reference image, so every image_edit shot MUST list ≥1 entry in
+references[]. Rules:
+  - Only use ids that appear in the Available character references /
+    Available setting references above. NEVER invent an id, and NEVER
+    cite a character who is not in the available list (if the shot
+    features someone not listed, drop them from references and rely on
+    the imagePrompt text for that figure).
+  - If no listed character is in frame, still include the shot's SETTING
+    as the base reference — the setting is always available and anchors
+    the era/palette.
+  - Only if NO character AND NO setting reference applies at all, set
+    "generationMode": "text_to_image" and leave references as []. Do not
+    emit image_edit with an empty references array.
+
 CRITICAL: the image model defaults to PHOTOREALISM and ignores mood/lighting cues alone. If the world style is illustrated / anime / painterly / hand-drawn, the imagePrompt MUST name that rendering medium explicitly in its FIRST clause — otherwise the render comes out as a photograph.
 
 Output ONLY the JSON.
