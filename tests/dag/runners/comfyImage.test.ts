@@ -448,6 +448,68 @@ describe('comfy.image runner', () => {
     });
   });
 
+  describe('failure mode — reference workflow with zero resolved references', () => {
+    it('fails clearly (not a silent doomed queue) when a base_image-requiring workflow gets no images', async () => {
+      // Regression: a shot prompt with generationMode 'image_edit' but an
+      // empty references[] (e.g. the LLM cited a character that was never
+      // generated) resolved to ZERO reference images. The runner then
+      // skipped the base_image / reference_image_* mappings, leaving the
+      // klein LoadImage nodes pointing at their on-disk placeholder
+      // filenames (ref_image_1.png …). Comfy rejects those ("not in list")
+      // and the run stalls. The runner must catch this and fail fast with
+      // an actionable message instead of submitting the doomed workflow.
+      const behavior: StubBehavior = {};
+      const client = makeStubClient(behavior);
+      const runner = createComfyImageRunner({ clientFactory: () => client });
+
+      const result = await runner.run(makeCtx({
+        config: {
+          workflowPath: 'workflows/klein.json',
+          // DEFAULT_MAPPINGS declares a base_image input → the workflow is
+          // reference-conditioned and needs at least one image.
+          parameterMappings: DEFAULT_MAPPINGS,
+          endpoint: 'test.endpoint',
+          prompt: 'a close-up of a character we never generated',
+          // No baseImage, no referenceImages.
+          outputPath: 'out.png',
+        },
+      }));
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toMatch(/reference/i);
+        expect(result.error).toMatch(/image_edit|text_to_image/i);
+        // Must NOT have queued a doomed workflow.
+        expect(behavior.calls!.queued.length).toBe(0);
+      }
+    });
+
+    it('still runs a non-reference (text-to-image) workflow with no images', async () => {
+      // A workflow whose mappings do NOT declare base_image / reference_*
+      // (pure text-to-image, like zimage_tti) must be unaffected by the
+      // guard and run normally with no images supplied.
+      const ttiMappings = [
+        { input: 'prompt',         nodeId: '91',    field: 'text'            },
+        { input: 'seed',           nodeId: '92:73', field: 'noise_seed'      },
+        { input: 'filenamePrefix', nodeId: '94',    field: 'filename_prefix' },
+      ];
+      const client = makeStubClient({ queueOutputs: [{ filename: 'tti_out.png' }] });
+      const runner = createComfyImageRunner({ clientFactory: () => client });
+
+      const result = await runner.run(makeCtx({
+        config: {
+          workflowPath: 'workflows/klein.json',
+          parameterMappings: ttiMappings,
+          endpoint: 'test.endpoint',
+          prompt: 'a sunset over the desert',
+          outputPath: 'out.png',
+        },
+      }));
+
+      expect(result.ok).toBe(true);
+    });
+  });
+
   describe('workflow aliases — model substitution', () => {
     it('applies a persisted name_alias to model *_name fields before queueing', async () => {
       // Regression: image nodes used to ignore the alias store entirely
