@@ -19,6 +19,7 @@
   "nodes": [
     {
       "id": "plot",
+      "displayName": "Plot",
       "kind": "stage",
       "inputs": [],
       "outputs": { "format": "md", "pattern": "plans/plot.md" },
@@ -30,6 +31,7 @@
     },
     {
       "id": "scenes_plan",
+      "displayName": "Scene Breakdown",
       "kind": "stage",
       "inputs": [{ "from": "plot", "usage": "context" }],
       "outputs": { "format": "json", "pattern": "plans/scenes_plan.json" },
@@ -45,6 +47,7 @@
     },
     {
       "id": "shot_breakdown",
+      "displayName": "Shot Breakdown",
       "kind": "stage",
       "inputs": [
         { "from": "plot", "usage": "context" },
@@ -63,6 +66,7 @@
     },
     {
       "id": "shot_1_video",
+      "displayName": "Shot 1",
       "kind": "stage",
       "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
       "outputs": { "format": "video", "pattern": "videos/shot_1.mp4" },
@@ -74,6 +78,7 @@
     },
     {
       "id": "shot_2_video",
+      "displayName": "Shot 2",
       "kind": "stage",
       "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
       "outputs": { "format": "video", "pattern": "videos/shot_2.mp4" },
@@ -85,6 +90,7 @@
     },
     {
       "id": "shot_3_video",
+      "displayName": "Shot 3",
       "kind": "stage",
       "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
       "outputs": { "format": "video", "pattern": "videos/shot_3.mp4" },
@@ -96,6 +102,7 @@
     },
     {
       "id": "final_video",
+      "displayName": "Final Cut",
       "kind": "stage",
       "inputs": [
         { "from": "shot_1_video", "usage": "input" },

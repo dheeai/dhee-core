@@ -45,6 +45,7 @@
   "nodes": [
     {
       "id": "plot",
+      "displayName": "Plot",
       "kind": "stage",
       "inputs": [],
       "outputs": {
@@ -63,6 +64,7 @@
     },
     {
       "id": "story",
+      "displayName": "Story",
       "kind": "stage",
       "inputs": [
         {
@@ -86,6 +88,7 @@
     },
     {
       "id": "story_essence",
+      "displayName": "Essence",
       "kind": "stage",
       "inputs": [
         {
@@ -110,6 +113,7 @@
     },
     {
       "id": "world_style",
+      "displayName": "World & Style",
       "kind": "stage",
       "inputs": [
         {
@@ -137,6 +141,7 @@
     },
     {
       "id": "characters_plan",
+      "displayName": "Cast Breakdown",
       "kind": "stage",
       "inputs": [
         {
@@ -165,6 +170,7 @@
     },
     {
       "id": "character_image_prompt",
+      "displayName": "Character Prompts",
       "kind": "collection",
       "itemSource": "characters_plan",
       "inputs": [
@@ -196,6 +202,7 @@
     },
     {
       "id": "character_image",
+      "displayName": "Characters",
       "kind": "collection",
       "itemSource": "character_image_prompt",
       "inputs": [
@@ -223,6 +230,7 @@
     },
     {
       "id": "settings_plan",
+      "displayName": "Location Breakdown",
       "kind": "stage",
       "inputs": [
         {
@@ -251,6 +259,7 @@
     },
     {
       "id": "setting_image_prompt",
+      "displayName": "Setting Prompts",
       "kind": "collection",
       "itemSource": "settings_plan",
       "inputs": [
@@ -282,6 +291,7 @@
     },
     {
       "id": "setting_image",
+      "displayName": "Settings",
       "kind": "collection",
       "itemSource": "setting_image_prompt",
       "inputs": [
@@ -309,6 +319,7 @@
     },
     {
       "id": "scenes_plan",
+      "displayName": "Scene Breakdown",
       "kind": "stage",
       "inputs": [
         {
@@ -339,6 +350,7 @@
     },
     {
       "id": "shot_image_prompt",
+      "displayName": "Shot Prompts",
       "kind": "collection",
       "itemSource": "scenes_plan",
       "inputs": [
@@ -385,6 +397,7 @@
     },
     {
       "id": "shot_image",
+      "displayName": "Shots",
       "kind": "collection",
       "itemSource": "shot_image_prompt",
       "inputs": [
@@ -428,6 +441,7 @@
     },
     {
       "id": "shot_motion_directive",
+      "displayName": "Motion Directives",
       "kind": "collection",
       "itemSource": "scenes_plan",
       "inputs": [
@@ -459,6 +473,7 @@
     },
     {
       "id": "scene_video_prompt",
+      "displayName": "Clip Prompts",
       "kind": "stage",
       "inputs": [
         {
@@ -490,6 +505,7 @@
     },
     {
       "id": "scene_clip",
+      "displayName": "Clips",
       "kind": "collection",
       "itemSource": "scenes_plan",
       "chunkBy": {
@@ -535,6 +551,7 @@
     },
     {
       "id": "final_video",
+      "displayName": "Final Cut",
       "kind": "stage",
       "inputs": [
         {
