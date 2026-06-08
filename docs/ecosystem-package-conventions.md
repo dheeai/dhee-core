@@ -123,6 +123,39 @@ bundle fails before any work runs.
 
 ---
 
+## Bundle → runner dependencies & install hints
+
+A bundle declares the runners it needs in `bundle.json`
+`dependencies.runners` (tool id → semver range), validated against the
+registry before the walk. Those are *tool ids*, not packages — so there
+are two complementary ways to make sure a needed runner is actually
+present, and to tell the user how to get it:
+
+1. **npm-native (for bundle packages).** A `dhee-bundle-*` package lists
+   the runner package in its `package.json` `dependencies` /
+   `peerDependencies` (e.g. `"dhee-runner-runway": "^1"`). Then
+   `npm i <bundle-pkg>` installs the runner package too, and discovery
+   registers it — no extra step. (Same shape as an `eslint-config-*`
+   depending on an `eslint-plugin-*`.)
+
+2. **Declared install hint (for built-in / local bundles).** Add
+   `dependencies.runnerPackages` to `bundle.json` mapping a tool id to its
+   npm package:
+
+   ```jsonc
+   "dependencies": {
+     "runners":        { "runway.gen3": ">=1.0.0" },
+     "runnerPackages": { "runway.gen3": "dhee-runner-runway@^1.2.0" }
+   }
+   ```
+
+   `checkBundleRunners(bundle, registry)` (`src/dag/ecosystem.ts`) returns
+   every required runner that isn't registered, each with a ready
+   `install` command — the declared package, or, if undeclared, a
+   `dhee-runner-<namespace>` convention guess. A discovery / "configure
+   this bundle" UI surfaces `npm i <package>` so the user can install the
+   missing runner before running.
+
 ## Trust
 
 Installing a `dhee-runner-*` package means **running its code in your
@@ -134,12 +167,23 @@ supplying keys.
 
 ## Status
 
-**Convention / forward-looking.** The integration points already exist —
-`RunnerRegistry.register` and the bundle-source parser/resolver
-(`src/dag/bundleSource.ts`) — and the current loaders are: built-in
-runners (`src/dag/runners/index.ts`), custom runners discovered from
-`~/.kshana/runners/` (`runner.json`), and project/installed bundles
-(`installBundle.ts`). The **npm auto-discovery loader** (scan node_modules
-→ register) is not implemented yet. This document fixes the naming + entry
-points so the ecosystem and the loader can be built against a stable
-contract.
+**Implemented** in `src/dag/ecosystem.ts`:
+
+- `findEcosystemPackages()` — scan node_modules (cwd up; `DHEE_NODE_MODULES_DIRS`
+  override) for name-matching + keyword-guarded packages.
+- `discoverNpmRunners(reg)` — import each `dhee.runners` entry and register
+  the runners; idempotent (skips already-registered tools), best-effort
+  (one bad package never poisons the rest). Wired into `runProjectViaBundle`
+  via `ensureNpmRunnersLoaded()` (once per process) so npm runners are
+  available before the bundle's runner dependencies are validated.
+- `findNpmBundles()` + the `npm:<pkg>[#<id>]` bundle-source scheme
+  (`bundleSource.ts`) + `listBundles()` enumeration — `dhee-bundle-*`
+  packages resolve and show up in the picker (lower precedence than user /
+  built-in, so a same-id fork still wins).
+- `checkBundleRunners()` — missing-runner detection with `npm i` install
+  hints (see above).
+
+Alongside the pre-existing loaders: built-in runners
+(`src/dag/runners/index.ts`), custom runners from `~/.kshana/runners/`
+(`runner.json`, `discovery.ts`), and project/installed bundles
+(`installBundle.ts`).
