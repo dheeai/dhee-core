@@ -188,6 +188,11 @@ export interface ApplyAliasesOpts {
   /** Stable identifier for this workflow (used to look up class_swaps). */
   workflowKey: string;
   aliases: WorkflowAliases;
+  /**
+   * Called for each class_swap actually applied (old class → new class).
+   * Lets callers log + validate the swaps (see applyEndpointAliases).
+   */
+  onClassSwap?: (nodeId: string, from: string, to: string) => void;
 }
 
 const MODEL_EXTS = ['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.gguf', '.onnx', '.sft'];
@@ -220,7 +225,10 @@ export function applyAliases(
 
     // class_type swap, scoped to this workflowKey + this nodeId.
     const newClass = classSwapsForThisWorkflow[nodeId];
-    if (newClass) node.class_type = newClass;
+    if (newClass && newClass !== node.class_type) {
+      opts.onClassSwap?.(nodeId, node.class_type ?? '(unknown)', newClass);
+      node.class_type = newClass;
+    }
 
     // Name substitutions on *_name string inputs that look like model
     // filenames. Strictly limited to that field-name pattern + string
@@ -239,4 +247,144 @@ export function applyAliases(
   }
 
   return out;
+}
+
+// ── class_swap validation + the shared apply-aliases-for-a-runner helper ──
+
+export interface ClassSwapProblem {
+  nodeId: string;
+  from: string;
+  to: string;
+  issue: 'class-not-on-endpoint' | 'missing-required-inputs';
+  /** For 'missing-required-inputs': which required inputs the node lacks. */
+  missing?: string[];
+}
+
+/**
+ * Validate every applied class_swap against the endpoint's node signatures
+ * (ComfyUI /object_info). Catches the failure mode where a swap rewrites a
+ * node to a class whose REQUIRED inputs the node doesn't provide (e.g.
+ * LoraLoaderModelOnly → "Load Lora", which needs `clip`) — which ComfyUI
+ * would otherwise reject deep in prompt validation with a cryptic 400.
+ * Pure.
+ */
+export function validateClassSwaps(
+  workflow: ComfyWorkflow,
+  swaps: Array<{ nodeId: string; from: string; to: string }>,
+  objectInfo: Record<string, unknown>,
+): ClassSwapProblem[] {
+  const problems: ClassSwapProblem[] = [];
+  for (const sw of swaps) {
+    const node = workflow[sw.nodeId];
+    if (!node) continue;
+    const classInfo = objectInfo[sw.to] as { input?: { required?: Record<string, unknown> } } | undefined;
+    if (!classInfo) {
+      problems.push({ nodeId: sw.nodeId, from: sw.from, to: sw.to, issue: 'class-not-on-endpoint' });
+      continue;
+    }
+    const required = Object.keys(classInfo.input?.required ?? {});
+    const provided = new Set(Object.keys(node.inputs ?? {}));
+    const missing = required.filter((r) => !provided.has(r));
+    if (missing.length > 0) {
+      problems.push({ nodeId: sw.nodeId, from: sw.from, to: sw.to, issue: 'missing-required-inputs', missing });
+    }
+  }
+  return problems;
+}
+
+export interface ApplyEndpointAliasesOpts {
+  workflow: ComfyWorkflow;
+  workflowKey: string;
+  aliasesDir: string;
+  /** Resolved endpoint URL (for readAliases keying + /object_info validation). */
+  endpointUrl?: string;
+  log?: (msg: string) => void;
+  /** Injectable for tests; defaults to fetching `<endpoint>/object_info`. */
+  fetchObjectInfo?: (endpointUrl: string) => Promise<Record<string, unknown>>;
+}
+
+export interface ApplyEndpointAliasesResult {
+  workflow: ComfyWorkflow;
+  /**
+   * Set when an applied class_swap is invalid — the caller should FAIL the
+   * run with this message instead of submitting a workflow ComfyUI rejects.
+   */
+  error?: string;
+}
+
+async function defaultFetchObjectInfo(endpointUrl: string): Promise<Record<string, unknown>> {
+  const resp = await fetch(`${endpointUrl.replace(/\/$/, '')}/object_info`);
+  if (!resp.ok) throw new Error(`/object_info returned ${resp.status}`);
+  return (await resp.json()) as Record<string, unknown>;
+}
+
+/**
+ * Read + apply the per-endpoint aliases for one runner call, LOGGING each
+ * class_swap (so a stale/bad swap is visible) and VALIDATING that each swap
+ * leaves the node satisfying its new class's required inputs. Returns the
+ * rewritten workflow; sets `error` when a swap is invalid so the runner can
+ * fail fast with an actionable message. Loading/applying is best-effort
+ * (a malformed/unreadable store never blocks the run); only an invalid
+ * class_swap produces an `error`.
+ */
+export async function applyEndpointAliases(
+  opts: ApplyEndpointAliasesOpts,
+): Promise<ApplyEndpointAliasesResult> {
+  const log = opts.log ?? (() => {});
+  let aliases: WorkflowAliases;
+  try {
+    aliases = readAliases(opts.aliasesDir, opts.endpointUrl ?? 'unknown');
+  } catch (e) {
+    log(`alias load skipped (${(e as Error).message})`);
+    return { workflow: opts.workflow };
+  }
+  const hasAny =
+    (aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0) ||
+    (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0);
+  if (!hasAny) return { workflow: opts.workflow };
+
+  const swaps: Array<{ nodeId: string; from: string; to: string }> = [];
+  let rewritten: ComfyWorkflow;
+  try {
+    rewritten = applyAliases(opts.workflow, {
+      workflowKey: opts.workflowKey,
+      aliases,
+      onClassSwap: (nodeId, from, to) => {
+        swaps.push({ nodeId, from, to });
+        log(`alias class_swap: node ${nodeId} '${from}' → '${to}' (workflow=${opts.workflowKey})`);
+      },
+    });
+  } catch (e) {
+    log(`alias apply skipped (${(e as Error).message})`);
+    return { workflow: opts.workflow };
+  }
+  log(`applied aliases for endpoint=${opts.endpointUrl ?? 'unknown'} workflow=${opts.workflowKey}`);
+
+  if (swaps.length === 0 || !opts.endpointUrl) return { workflow: rewritten };
+
+  // Validate the class_swaps against the endpoint's actual node signatures.
+  const fetcher = opts.fetchObjectInfo ?? defaultFetchObjectInfo;
+  let objectInfo: Record<string, unknown> | undefined;
+  try {
+    objectInfo = await fetcher(opts.endpointUrl);
+  } catch (e) {
+    log(`class_swap validation skipped (could not fetch /object_info: ${(e as Error).message})`);
+    return { workflow: rewritten };
+  }
+  const problems = validateClassSwaps(rewritten, swaps, objectInfo);
+  if (problems.length === 0) return { workflow: rewritten };
+
+  const lines = problems.map((p) =>
+    p.issue === 'class-not-on-endpoint'
+      ? `  - node ${p.nodeId}: class_swap '${p.from}' → '${p.to}', but '${p.to}' is NOT installed on this ComfyUI`
+      : `  - node ${p.nodeId}: class_swap '${p.from}' → '${p.to}' leaves required input(s) unsatisfied: ${p.missing!.join(', ')}`,
+  );
+  return {
+    workflow: rewritten,
+    error:
+      `invalid class_swap alias for endpoint ${opts.endpointUrl} (workflow=${opts.workflowKey}):\n` +
+      lines.join('\n') +
+      `\nThis comes from a persisted alias in the workflow-alias store ` +
+      `(~/.dhee/workflow-aliases/<endpoint-slug>/aliases.json). Remove or fix that class_swap.`,
+  };
 }
