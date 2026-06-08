@@ -182,8 +182,8 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
       if (opts.nodeIds.includes(key)) notFound.push(key);
       continue;
     }
-    // Delete the on-disk artifact too — some runners (comfy.image,
-    // comfy.qwen_edit_chain, comfy.ltx_director) have their own
+    // Delete the on-disk artifact too — some runners (comfy.klein,
+    // comfy.tti, comfy.fl2v, comfy.qwen_edit_chain, comfy.ltx_director) have their own
     // "skip if output file exists" cache that runs independently of
     // walkState. If we only clear walkState, those runners see the
     // stale file and return `{skipped: true}` — turning the

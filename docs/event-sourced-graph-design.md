@@ -88,7 +88,7 @@ interface NodeCompletedPayload {
     bytes: number;
   };
   generation?: {              // present for model/GPU runners
-    tool: string;             // runner tool, e.g. 'comfy.image'
+    tool: string;             // runner tool, e.g. 'comfy.klein'
     toolVersion: string;
     inputsHash: string;       // hash of resolved inputs (① cache key)
     seed?: number|string;     // pinned seed → reproducibility

@@ -2,12 +2,13 @@
   "id": "narrative_klein_relay_review",
   "version": "0.1.0",
   "engineCompat": ">=0.1.0",
-  "description": "Klein-based variant of narrative_qwen_chain_review. Same review loop and LTX relay video synthesis, but shot images come from Klein (comfy.image with the klein workflow) instead of the Qwen Edit chain. Each shot image is judged by a VLM (xiaomi/mimo-v2.5 by default); on fail, the walker re-runs shot_image_prompt with the judge's critique applied. Up to 3 total attempts per shot.",
+  "description": "Klein-based variant of narrative_qwen_chain_review. Same review loop and LTX relay video synthesis, but shot images come from Klein (comfy.klein) instead of the Qwen Edit chain. Each shot image is judged by a VLM (xiaomi/mimo-v2.5 by default); on fail, the walker re-runs shot_image_prompt with the judge's critique applied. Up to 3 total attempts per shot.",
   "reviewLoopMax": 1,
   "dependencies": {
     "runners": {
       "llm.generate": ">=0.1.0",
-      "comfy.image": ">=0.1.0",
+      "comfy.klein": ">=0.1.0",
+      "comfy.tti": ">=0.1.0",
       "comfy.ltx_director": ">=0.1.0",
       "ffmpeg.concat": ">=0.1.0",
       "vlm.judge": ">=0.1.0"
@@ -211,7 +212,7 @@
         "pattern": "assets/images/characters/{{item_id}}.png"
       },
       "runner": {
-        "tool": "comfy.image",
+        "tool": "comfy.tti",
         "config": {
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
@@ -297,7 +298,7 @@
         "pattern": "assets/images/settings/{{item_id}}.png"
       },
       "runner": {
-        "tool": "comfy.image",
+        "tool": "comfy.tti",
         "config": {
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
@@ -410,7 +411,7 @@
         "pattern": "assets/images/shots/{{item_id}}_first.png"
       },
       "runner": {
-        "tool": "comfy.image",
+        "tool": "comfy.klein",
         "config": {
           "workflowPath": "workflows/klein.json",
           "manifestPath": "workflows/klein.manifest.json",

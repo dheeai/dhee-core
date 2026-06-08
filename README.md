@@ -64,12 +64,16 @@ A runner is what actually executes a node. Each is a dot-namespaced tool registe
 | Tool | What it does |
 |------|--------------|
 | `llm.generate` | LLM text generation (story, scenes, prompts) |
-| `comfy.image` | Image generation via ComfyUI (local or Cloud) |
+| `comfy.tti` | Text-to-image via ComfyUI (character / setting references) |
+| `comfy.klein` | Flux 2 Klein reference-edit: base + up to 3 optional references (absent ones pruned from the graph) |
+| `comfy.fl2v` | First-frame/last-frame → video via ComfyUI |
 | `comfy.qwen_edit_chain` | Iterative image editing (Qwen-Edit chain) |
 | `comfy.ltx_director` | LTX-2 director-relay video synthesis |
 | `ffmpeg.shot_clip` | Per-shot clip assembly |
 | `ffmpeg.concat` | Final concat with xfade transitions |
 | `vlm.judge` | VLM fidelity judge (keyframe-vs-prompt scoring) |
+
+Each `comfy.*` tool is a runner NAMED for the workflow family it drives (it may know that workflow's shape, like `comfy.ltx_director`); they share one workflow-agnostic core, `comfyExecutor`, for endpoint resolution, upload, queue/download, model aliases, and caching. That core is internal plumbing — only the dot-namespaced tools above are registered as runners and targetable by a bundle node.
 
 Built-in runners register at import time. Custom runners are discovered at startup from `~/.kshana/runners/` and ship a `runner.json` manifest (tool id, version, engine-compat range, required credentials). A bundle that depends on a runner whose credentials are unset fails validation *before* any work runs, naming the missing variable.
 

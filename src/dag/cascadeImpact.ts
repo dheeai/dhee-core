@@ -40,7 +40,7 @@ export interface CascadeImpactOpts {
 
 export interface AffectedNode {
   nodeId: string;
-  /** The runner tool that produces this node (e.g. 'llm.generate', 'comfy.image'). */
+  /** The runner tool that produces this node (e.g. 'llm.generate', 'comfy.klein'). */
   runner: string;
   /** The output kind so callers can filter by 'image'/'video'/etc. */
   format: 'md' | 'json' | 'image' | 'video' | 'audio' | 'text';
