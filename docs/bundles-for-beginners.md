@@ -12,10 +12,26 @@ No prior knowledge of the old executor required.
 ## 1. The one-sentence pitch
 
 > A **bundle** is a recipe-as-a-file that tells the engine how to turn
-> a story (or any input) into a finished video — by declaring **what
-> depends on what**, not by writing code.
+> an input (a story, a song, a brief, a transcript — anything) into a
+> finished output of **any kind** — by declaring **what depends on
+> what**, not by writing code.
 
-Everything else in this document is unpacking that sentence.
+**The engine doesn't know or care what you're making.** It just walks a
+dependency graph and runs nodes. *What* comes out is decided by the
+nodes you wire and the runners they call — not by the engine. So the
+same walker that renders a cinematic short also produces:
+
+- 🎬 **Music videos** — beat-synced shots cut to an audio track.
+- 📖 **Anime storybooks** — illustrated pages + narration, *no video at all*.
+- 🎙️ **Audio podcasts** — script → multi-voice TTS → mixed episode, *zero images*.
+- 🖼️ Poster series, localized ad sets, comics, slideshows, image datasets…
+- …or **something completely different** you invent.
+
+A node's `outputs.format` can be `image | video | audio | text | json |
+md`, and a runner exists (or can be added) for each. Want a different
+*kind* of output? Change the terminal nodes and the runners they call —
+the graph model and the walker stay exactly the same. Everything else in
+this document is unpacking that.
 
 ---
 
@@ -27,9 +43,10 @@ New way (mental model): "D needs C. C needs B. B needs A. Figure it
 out."
 
 You don't write the order. You declare each piece's dependencies. The
-engine walks **backward** from your goal (usually `final_video`) and
-runs whatever is needed, in whatever order is valid, in parallel
-wherever possible.
+engine walks **backward** from your goal node — whatever you named it
+(`final_video`, `episode_audio`, `storybook_pdf`, …) — and runs
+whatever is needed, in whatever order is valid, in parallel wherever
+possible.
 
 Why it matters: adding a new capability (audio, subtitles, pose
 control, a new model) is no longer "rewrite the pipeline." It is
