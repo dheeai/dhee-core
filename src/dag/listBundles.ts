@@ -15,6 +15,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { getBundleSearchRoots } from './bundleSource.js';
+import { findNpmBundles } from './ecosystem.js';
 import type { BundleInputDecl, DagBundle } from './schema.js';
 
 export interface BundleSummary {
@@ -69,6 +70,15 @@ export function listBundles(): BundleSummary[] {
       seen.add(summary.id);
       out.push(summary);
     }
+  }
+  // npm bundle packages (dhee-bundle-*) — lower precedence than the dir
+  // roots above, so a user fork / built-in with the same id still wins.
+  for (const b of findNpmBundles()) {
+    if (seen.has(b.id)) continue;
+    const summary = readBundleSummary(join(b.dir, 'bundle.json'));
+    if (!summary || seen.has(summary.id)) continue;
+    seen.add(summary.id);
+    out.push(summary);
   }
   out.sort((a, b) => a.id.localeCompare(b.id));
   return out;

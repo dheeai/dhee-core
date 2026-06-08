@@ -34,11 +34,13 @@ import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { REPO_ROOT } from '../agent/pi/paths.js';
+import { resolveNpmBundleDir } from './ecosystem.js';
 
 export type BundleSource =
   | { scheme: 'built-in'; id: string }
   | { scheme: 'user'; id: string }
-  | { scheme: 'registry'; id: string; version: string };
+  | { scheme: 'registry'; id: string; version: string }
+  | { scheme: 'npm'; pkg: string; bundleId?: string };
 
 export class BundleSourceError extends Error {
   constructor(message: string) {
@@ -47,7 +49,7 @@ export class BundleSourceError extends Error {
   }
 }
 
-const VALID_SCHEMES = ['built-in', 'user', 'registry'] as const;
+const VALID_SCHEMES = ['built-in', 'user', 'registry', 'npm'] as const;
 
 /**
  * Parse a `bundleSource` URI string into a structured BundleSource.
@@ -95,6 +97,19 @@ export function parseBundleSource(uri: string): BundleSource {
     }
     return { scheme: 'registry', id, version };
   }
+  if (scheme === 'npm') {
+    // `npm:<pkg>` or `npm:<pkg>#<bundleId>`; pkg may be scoped (@scope/name).
+    if (!rest) {
+      throw new BundleSourceError(
+        `npm: requires a package (e.g. 'npm:dhee-bundle-foo' or 'npm:@scope/dhee-bundle#id'), got empty string.`,
+      );
+    }
+    const hashIdx = rest.indexOf('#');
+    const pkg = hashIdx >= 0 ? rest.slice(0, hashIdx) : rest;
+    const bundleId = hashIdx >= 0 ? rest.slice(hashIdx + 1) : undefined;
+    if (!pkg) throw new BundleSourceError(`npm: package is empty in '${uri}'.`);
+    return { scheme: 'npm', pkg, ...(bundleId ? { bundleId } : {}) };
+  }
   throw new BundleSourceError(
     `Unknown scheme '${scheme}' in URI '${uri}'. ` +
       `Expected one of: ${VALID_SCHEMES.join(', ')}. ` +
@@ -140,8 +155,17 @@ export function resolveBundleDir(source: BundleSource): string {
   if (source.scheme === 'registry') {
     throw new BundleSourceError(
       `registry: scheme is not yet implemented. ` +
-        `It is reserved for a future bundle registry feature; for now use built-in: or user:.`,
+        `It is reserved for a future bundle registry feature; for now use built-in:, user:, or npm:.`,
     );
+  }
+
+  // npm:<pkg>[#<id>] — resolve through installed dhee-bundle-* packages.
+  if (source.scheme === 'npm') {
+    try {
+      return resolveNpmBundleDir(source.pkg, source.bundleId);
+    } catch (err) {
+      throw new BundleSourceError((err as Error).message);
+    }
   }
 
   const roots = getBundleSearchRoots();

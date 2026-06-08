@@ -19,6 +19,7 @@ import {
   resolveBundleDir,
   BundleSourceError,
 } from '../../dag/bundleSource.js';
+import { ensureNpmRunnersLoaded } from '../../dag/ecosystem.js';
 import { walkBundle, loadBundle } from '../../dag/walker.js';
 import { isGateAfterCollectionsEnabled } from '../../dag/projectFeatures.js';
 import type { DagBundle, NodeDef } from '../../dag/schema.js';
@@ -81,6 +82,12 @@ export async function runProjectViaBundle(
   opts: RunProjectViaBundleOpts,
 ): Promise<RunProjectViaBundleResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
+
+  // 0. Register any npm-published runners (dhee-runner-*) before we
+  // validate the bundle's runner dependencies. Best-effort + once-per-
+  // process (see ecosystem.ts); a missing/broken package never blocks the
+  // run — it just won't be available, and the dependency check will name it.
+  await ensureNpmRunnersLoaded();
 
   // 1. Read project.json → bundleSource.
   const projectJsonPath = join(opts.projectDir, 'project.json');

@@ -178,6 +178,24 @@ export interface BundleDependencies {
    * version must satisfy the declared range.
    */
   runners?: Record<string, string>;
+  /**
+   * Optional install hint: maps a required runner TOOL id (a key in
+   * `runners`) to the npm PACKAGE that provides it, optionally pinned
+   * (`"dhee-runner-runway"` or `"dhee-runner-runway@^1.2.0"`). Lets the
+   * requirements check tell the user exactly what to install for a
+   * missing runner (`npm i <package>`) instead of just naming the tool.
+   *
+   * Two ways to satisfy a missing runner (complementary):
+   *   1. Ship the bundle as an npm package and list the runner package
+   *      in its package.json `dependencies` / `peerDependencies` — then
+   *      `npm i <bundle-pkg>` pulls the runner and discovery registers it.
+   *   2. Declare it here so checkBundleRunners() can surface the install
+   *      command during bundle discovery (works for built-in / local
+   *      bundles that aren't themselves npm packages).
+   * When a tool is missing and unmapped, the checker falls back to the
+   * `dhee-runner-<namespace>` naming convention as a best-effort guess.
+   */
+  runnerPackages?: Record<string, string>;
 }
 
 /**
