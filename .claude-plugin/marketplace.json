@@ -1,0 +1,13 @@
+{
+  "name": "dhee",
+  "owner": { "name": "dheeai" },
+  "description": "dhee-core authoring skills — install to get the bundle-authoring and runner-authoring guides in any Claude Code session.",
+  "plugins": [
+    {
+      "name": "dhee-skills",
+      "source": "./plugins/dhee-skills",
+      "description": "Bundle-authoring + runner-authoring skills for dhee-core.",
+      "version": "0.1.0"
+    }
+  ]
+}

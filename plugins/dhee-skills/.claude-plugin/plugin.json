@@ -1,0 +1,9 @@
+{
+  "name": "dhee-skills",
+  "description": "Authoring skills for dhee-core — write bundles (pipelines) and runners (node executors).",
+  "version": "0.1.0",
+  "author": { "name": "dheeai" },
+  "homepage": "https://github.com/dheeai/dhee-core",
+  "repository": "https://github.com/dheeai/dhee-core",
+  "keywords": ["dhee", "bundle", "runner", "authoring"]
+}

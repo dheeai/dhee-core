@@ -320,6 +320,15 @@ are real (non-empty, correct format). Then widen to `run` (to the goal).
   reserved tags (`shot.first_frame`, `character.image`, …) when your node
   produces a known artifact type, or a custom `<domain>.<artifact>` tag.
 
+## Publishing your bundle
+
+To share a bundle beyond this repo, publish it as an npm package named
+**`dhee-bundle-<name>`** (or `@scope/dhee-bundle-<name>`), with
+`keywords: ["dhee-bundle"]` and a `dhee.bundles` entry point — dhee-core
+discovers it ESLint-plugin-style and a project references it via
+`npm:dhee-bundle-<name>`. Full convention:
+`docs/ecosystem-package-conventions.md`.
+
 ## Reference files
 - Schema: `src/dag/schema.ts`
 - Concepts: `docs/bundles-for-beginners.md`
