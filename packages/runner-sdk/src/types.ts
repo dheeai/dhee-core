@@ -168,6 +168,14 @@ export interface NodeDef {
    * heuristics in the desktop (best-effort; not guaranteed).
    */
   displayCapability?: string;
+
+  /**
+   * Human-facing label for this stage, shown in the desktop's Production
+   * View (layer bar, section headers, stage rail) and run cockpit. Lets a
+   * bundle present "Shots" / "Shot Prompts" / "Final Cut" instead of the
+   * raw node id. Falls back to a humanized node id when omitted.
+   */
+  displayName?: string;
 }
 
 export interface BundleDependencies {
