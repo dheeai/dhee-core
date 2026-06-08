@@ -22,7 +22,7 @@
  * Degenerate case (1 input + no watermark) is still a copy. Single
  * input + watermark re-encodes once through the overlay filter.
  */
-import { existsSync, mkdirSync, copyFileSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, unlinkSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -115,27 +115,53 @@ function parseSrt(srtText: string): SrtCue[] {
   return cues;
 }
 
-function escapeForDrawtext(s: string): string {
-  // ffmpeg drawtext text=... needs colons, single quotes, backslashes, and
-  // percent escaped. Order matters: backslash first.
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/:/g, '\\:')
-    .replace(/%/g, '\\%');
+/**
+ * Resolve a TrueType/OpenType font for burned-in captions. drawtext
+ * REQUIRES a font: the static ffmpeg builds we ship (@ffmpeg-installer)
+ * have NO default font, so omitting `fontfile` fails at runtime with
+ * "No font filename provided". Honor DHEE_SUBTITLE_FONT, else probe common
+ * macOS / Linux system fonts. Returns null when none is available, so the
+ * caller can degrade (render WITHOUT captions) instead of failing the whole
+ * final video.
+ */
+const SUBTITLE_FONT_CANDIDATES = [
+  '/System/Library/Fonts/Supplemental/Arial.ttf',
+  '/System/Library/Fonts/Helvetica.ttc',
+  '/Library/Fonts/Arial.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+  '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/TTF/DejaVuSans.ttf',
+];
+export function resolveSubtitleFont(): string | null {
+  const env = process.env['DHEE_SUBTITLE_FONT']?.trim();
+  if (env && existsSync(env)) return env;
+  for (const p of SUBTITLE_FONT_CANDIDATES) if (existsSync(p)) return p;
+  return null;
 }
 
-function buildDrawtextChain(cues: SrtCue[], inLabel: string, outLabel: string): string {
-  // One drawtext per cue, chained with commas. Each cue is gated by
-  // `enable='between(t,start,end)'` so only the active cue draws. We use
-  // a fixed font size (24), bottom-centered with a translucent box.
-  // Font: 'Helvetica' is a system font on macOS; ffmpeg falls back to a
-  // default if unavailable. To be portable across OSes we omit fontfile
-  // and rely on the default font (which works without a Linux fontconfig).
-  const drawSpecs = cues.map((c) => {
-    const text = escapeForDrawtext(c.text);
+/**
+ * Build the per-cue drawtext chain. Cue text is passed via `textfile=`
+ * (NOT inline `text='...'`) so arbitrary subtitle content — colons, single
+ * quotes, commas, parentheses, percent — can never break the filtergraph
+ * parse. (The previous inline approach mis-escaped a `'` inside the
+ * single-quoted text, truncating the filter and crashing the re-encode.)
+ * Each cue is gated by `enable='between(t,start,end)'`; one temp file per
+ * cue is written under `tmpDir`.
+ */
+export function buildDrawtextChain(
+  cues: SrtCue[],
+  inLabel: string,
+  outLabel: string,
+  fontFile: string,
+  tmpDir: string,
+): string {
+  const drawSpecs = cues.map((c, i) => {
+    const tf = join(tmpDir, `cue_${i}.txt`);
+    writeFileSync(tf, c.text, 'utf-8');
     return [
-      `drawtext=text='${text}'`,
+      `drawtext=fontfile='${fontFile}'`,
+      `textfile='${tf}'`,
       `enable='between(t,${c.start.toFixed(3)},${c.end.toFixed(3)})'`,
       `x=(w-text_w)/2`,
       `y=h-(text_h*2)-20`,
@@ -169,10 +195,23 @@ async function reencodePass(
   // Build filter chain. Start from 0:v. If captions are requested, draw
   // them in via the drawtext chain to produce [withsubs]. Then either
   // overlay the watermark from input 1 onto that, or pass through.
+  // Captions need a font; degrade gracefully (render WITHOUT captions)
+  // rather than fail the whole final video when none is available.
+  const subtitleFont = cues.length > 0 ? resolveSubtitleFont() : null;
+  const burnSubs = cues.length > 0 && subtitleFont !== null;
+  if (cues.length > 0 && !burnSubs) {
+    ctx.log(
+      `ffmpeg.concat: WARNING — no usable caption font found (set DHEE_SUBTITLE_FONT); ` +
+        `rendering final video WITHOUT burned-in captions`,
+    );
+  }
+
   const chains: string[] = [];
   let lastLabel = '0:v';
-  if (cues.length > 0) {
-    chains.push(buildDrawtextChain(cues, lastLabel, 'withsubs'));
+  let subsTmpDir: string | null = null;
+  if (burnSubs) {
+    subsTmpDir = mkdtempSync(join(tmpdir(), 'dhee-subs-'));
+    chains.push(buildDrawtextChain(cues, lastLabel, 'withsubs', subtitleFont, subsTmpDir));
     lastLabel = 'withsubs';
   }
   if (watermarkPath) {
@@ -181,7 +220,7 @@ async function reencodePass(
   }
 
   const tag: string[] = [];
-  if (subtitlesPath) tag.push('subtitles');
+  if (burnSubs) tag.push('subtitles');
   if (watermarkPath) tag.push('watermark');
   ctx.log(`ffmpeg.concat: re-encode pass (${tag.join('+') || 'copy'}, output ${height}p) → ${outputPath}`);
 
@@ -200,7 +239,12 @@ async function reencodePass(
     outputPath,
   );
 
-  const result = await runFFmpeg(args);
+  let result: { ok: boolean; stderr: string };
+  try {
+    result = await runFFmpeg(args);
+  } finally {
+    if (subsTmpDir) rmSync(subsTmpDir, { recursive: true, force: true });
+  }
   return result.ok ? { ok: true } : { ok: false, stderr: result.stderr };
 }
 
