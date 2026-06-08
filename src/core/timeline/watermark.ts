@@ -45,15 +45,23 @@ export function resolveWatermarkPath(cwd: string = process.cwd()): string | null
   return null;
 }
 
+/** Default watermark opacity — slightly translucent so it reads as a mark, not a banner. */
+export const DEFAULT_WATERMARK_OPACITY = 0.8;
+
 export function buildWatermarkOverlayFilter(
   inputLabel: string,
   watermarkInputIdx: number,
   outputLabel: string,
   outputHeight: number = 720,
+  opacity: number = DEFAULT_WATERMARK_OPACITY,
 ): string {
   const watermarkHeightPx = Math.max(16, Math.round(outputHeight * 0.0903));
+  const clamped = Math.min(1, Math.max(0, opacity));
+  // Scale the watermark's alpha channel to apply opacity. Skip the mixer
+  // at full opacity so the filtergraph stays minimal.
+  const alpha = clamped < 1 ? `colorchannelmixer=aa=${clamped},` : '';
   return (
-    `[${watermarkInputIdx}:v]format=rgba,` +
+    `[${watermarkInputIdx}:v]format=rgba,${alpha}` +
       `scale=-1:${watermarkHeightPx}:flags=lanczos[wm];` +
     `[${inputLabel}][wm]overlay=x=W-w-24:y=H-h-24:format=auto[${outputLabel}]`
   );

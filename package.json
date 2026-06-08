@@ -29,6 +29,7 @@
     "dist",
     "prompts",
     "workflows",
+    "assets",
     "README.md"
   ],
   "bin": {
