@@ -14,49 +14,13 @@
  * unknown tool name" failure mode.
  */
 import semver from 'semver';
-import type { DagBundle, Runner } from '../schema.js';
+import type { DagBundle, Runner, RunnerManifest } from '../schema.js';
 
-export type { Runner } from '../schema.js';
-
-/**
- * Public runner manifest — what each runner package declares about
- * itself. Built-in runners pass a manifest object at register-time;
- * custom runners ship a `runner.json` with this same shape.
- *
- * This type is part of the public runner SDK surface — third-party
- * runner authors build against it. Breaking changes here are breaking
- * changes to that SDK and require an engine major-version bump.
- */
-export interface RunnerManifest {
-  /** Unique tool id, dot-namespaced (e.g. 'llm.generate', 'runway.gen3'). */
-  tool: string;
-  /** Semver version of the runner. */
-  version: string;
-  /**
-   * Range of engine versions this runner is compatible with (semver
-   * range). The engine compares its own version against this on
-   * register; mismatched runners log a warning but are still loaded
-   * (last-wins consistency).
-   */
-  engineCompat: string;
-  /**
-   * Env var names this runner needs to function (e.g. ['RUNWAY_API_KEY']).
-   * Validated by `validateBundle` against `process.env` — bundles that
-   * depend on a runner with unset credentials fail validation BEFORE
-   * walking, with the missing var named.
-   */
-  credentials: string[];
-  /** Optional human-friendly name for UIs / logs. */
-  displayName?: string;
-  /** Optional human-friendly one-liner description. */
-  description?: string;
-  /**
-   * For custom-runner packages discovered from disk: the entry file
-   * (relative to the package dir). Defaults to 'index.mjs' if absent.
-   * Built-in runners don't use this — they register directly.
-   */
-  entry?: string;
-}
+// `RunnerManifest` (with `permissions`) is now canonically defined in
+// @dhee/runner-sdk and re-exported via ../schema.js. Re-export here too so
+// the long-standing `import { RunnerManifest } from './registry.js'` surface
+// keeps working.
+export type { Runner, RunnerManifest } from '../schema.js';
 
 export type ValidationResult =
   | { ok: true }

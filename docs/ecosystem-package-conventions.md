@@ -47,9 +47,9 @@ name it for its primary artifact and declare both entry points (below).
   "name": "dhee-runner-runway",
   "version": "1.2.0",
   "keywords": ["dhee-runner"],          // REQUIRED guard — see below
-  "peerDependencies": { "dhee-core": ">=0.1.0" },
+  "dependencies": { "@dhee/runner-sdk": "^0.1.0" },  // the contract runners build on
   "dhee": {                               // declares what this package exports
-    "runners": "./dist/runners.js",       // module exporting runners (see below)
+    "runners": "./dist/index.js",         // module exporting `runners` (see below)
     "bundles": "./bundles"                // dir OR module exporting bundles
   }
 }
@@ -59,23 +59,33 @@ name it for its primary artifact and declare both entry points (below).
   matches on the name pattern AND requires the keyword, so an unrelated
   `dhee-runner-utils` helper lib isn't auto-loaded. (ESLint trusts the
   name alone; we add the keyword guard deliberately.)
-- **`peerDependencies.dhee-core`** declares the engine range, like an
-  eslint plugin peer-depends on `eslint`.
+- **`@dhee/runner-sdk`** is the package a runner builds against —
+  `defineRunner`, the canonical types, and the shared primitives
+  (`resolveEndpointUrl`, `retryTransient`, `computeInputsHash`). A runner
+  depends ONLY on the SDK, never on `dhee-core` internals (enforced by the
+  runner-sdk firewall test). The reference implementation is
+  `packages/openrouter-image-runner` (published name
+  `dhee-runner-openrouter-image`).
 - **`dhee`** field names the entry point(s). Either or both keys.
 
 ### Runner entry point
 
 The module named by `dhee.runners` exports an array of
-`{ manifest, runner }` pairs (the same shapes the built-in registry uses —
-`RunnerManifest` from `src/dag/runners/registry.ts`, `Runner` from
-`src/dag/schema.ts`):
+`{ manifest, runner }` pairs, built with the SDK's `defineRunner`
+(`RunnerManifest` + `Runner` come from `@dhee/runner-sdk`):
 
 ```ts
-export const runners: Array<{ manifest: RunnerManifest; runner: Runner }> = [
-  { manifest: { tool: 'runway.gen3', version: '1.2.0', engineCompat: '>=0.1.0',
-                credentials: ['RUNWAY_API_KEY'], displayName: 'Runway Gen-3' },
-    runner: runwayGen3Runner },
-];
+import { defineRunner, type RunnerManifest } from '@dhee/runner-sdk';
+
+export const manifest: RunnerManifest = {
+  tool: 'runway.gen3', version: '1.2.0', engineCompat: '>=0.1.0',
+  credentials: ['RUNWAY_API_KEY'], displayName: 'Runway Gen-3',
+  // Declared capability surface (network/filesystem/subprocess/env):
+  permissions: { network: ['api.runwayml.com'], filesystem: 'project', env: ['RUNWAY_API_KEY'] },
+};
+export const runner = defineRunner({ describe: () => ({ /* … */ }), run: async (ctx) => { /* … */ } });
+
+export const runners = [{ manifest, runner }];
 ```
 
 dhee-core calls `registry.register(manifest, runner)` for each. Tool ids

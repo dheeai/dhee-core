@@ -76,6 +76,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@dhee/runner-sdk": "workspace:*",
     "@fastify/cors": "^11.1.0",
     "@fastify/multipart": "^9.4.0",
     "@fastify/websocket": "^11.2.0",

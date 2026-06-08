@@ -29,8 +29,9 @@ function formatSrtTime(totalSeconds: number): string {
     `${ms.toString().padStart(3, '0')}`
   );
 }
-import type { DagBundle, NodeDef, RunnerContext, RunnerResult } from './schema.js';
+import type { DagBundle, LLMAccess, NodeDef, RunnerContext, RunnerResult } from './schema.js';
 import type { BundleInputDecl } from './schema.js';
+import { createRunnerLLMAccess } from './llmAccess.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
 import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
@@ -118,6 +119,12 @@ export interface WalkerOptions {
   bundle: DagBundle;
   cli?: WalkerCliParams;
   log?: (msg: string) => void;
+  /**
+   * LLM access capability injected into every runner's ctx.llm. When
+   * omitted, the walker builds a router-backed default from project
+   * config (createRunnerLLMAccess). Tests can inject a stub.
+   */
+  llm?: LLMAccess;
   /**
    * Bundle source URI (e.g. 'built-in:narrative_relay'). Required for
    * walkState persistence — when set, the walker reads/writes
@@ -934,6 +941,10 @@ async function walkBundleWithReviewLoop(
 async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const cli = opts.cli ?? {};
+  // LLM capability handed to every runner via ctx.llm — built once per
+  // walk. Runners (esp. SDK-only third-party ones) use this instead of
+  // importing a provider directly.
+  const runnerLlm = opts.llm ?? createRunnerLLMAccess(opts.projectDir);
 
   // Bundle dependency validation — fail BEFORE walking when a declared
   // runner isn't registered, version doesn't satisfy, or required
@@ -1484,6 +1495,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         inputs: resolvedInputs,
         ...(opts.signal ? { signal: opts.signal } : {}),
         log: (m) => log(`  ${m}`),
+        llm: runnerLlm,
       };
 
       if (state) {
