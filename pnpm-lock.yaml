@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@dhee/runner-sdk':
-        specifier: workspace:*
-        version: link:packages/runner-sdk
       '@fastify/cors':
         specifier: ^11.1.0
         version: 11.1.0
@@ -75,6 +72,9 @@ importers:
         specifier: ^3.24.4
         version: 3.25.76
     devDependencies:
+      '@dhee/runner-sdk':
+        specifier: workspace:*
+        version: link:packages/runner-sdk
       '@eslint/js':
         specifier: ^9.28.0
         version: 9.39.1
