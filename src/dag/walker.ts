@@ -811,10 +811,13 @@ function buildRunnerConfig(
           }
         }
         if (srtLines.length > 0) {
+          // Write the SRT sidecar for external players. We deliberately do
+          // NOT wire it into final_video as `subtitlesPath`: burned-in
+          // captions were dropped (no feature consumes them, and the
+          // drawtext pass used to fail and take the watermark down with it).
           const srtPath = resolve(projectDir, 'assets/subtitles/final.srt');
           mkdirSync(dirname(srtPath), { recursive: true });
           writeFileSync(srtPath, srtLines.join('\n'));
-          base['subtitlesPath'] = srtPath;
         }
       }
     }

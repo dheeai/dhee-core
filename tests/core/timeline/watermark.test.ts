@@ -55,4 +55,23 @@ describe('buildWatermarkOverlayFilter', () => {
     const filter = buildWatermarkOverlayFilter('0:v', 1, 'outv', 100);
     expect(filter).toContain('scale=-1:16'); // round(100 * 0.0903)=9 -> max(16, …)
   });
+
+  it('applies a default 0.8 alpha (translucent watermark) via colorchannelmixer', () => {
+    const filter = buildWatermarkOverlayFilter('0:v', 1, 'outv', 720);
+    expect(filter).toContain('colorchannelmixer=aa=0.8');
+  });
+
+  it('honors an explicit opacity argument', () => {
+    expect(buildWatermarkOverlayFilter('0:v', 1, 'outv', 720, 0.5)).toContain('colorchannelmixer=aa=0.5');
+  });
+
+  it('omits the alpha mixer at full opacity (1.0) so the filtergraph stays minimal', () => {
+    const filter = buildWatermarkOverlayFilter('0:v', 1, 'outv', 720, 1);
+    expect(filter).not.toContain('colorchannelmixer');
+  });
+
+  it('clamps out-of-range opacity into [0,1]', () => {
+    expect(buildWatermarkOverlayFilter('0:v', 1, 'outv', 720, 5)).not.toContain('colorchannelmixer'); // >1 → 1 → omitted
+    expect(buildWatermarkOverlayFilter('0:v', 1, 'outv', 720, -2)).toContain('colorchannelmixer=aa=0'); // <0 → 0
+  });
 });

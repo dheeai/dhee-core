@@ -2,27 +2,28 @@
  * `ffmpeg.concat` runner — concatenates N input videos into one mp4 and
  * applies the dhee.studio watermark overlay.
  *
- * v1 strategy:
+ * Strategy:
  *   1. Concat sources with the ffmpeg concat demuxer (`-c copy`, no
  *      re-encode) into a temp file. Fast when the sources already share
- *      codec/resolution/fps (true for all LTX Director outputs in this
- *      project).
+ *      codec/resolution/fps (true for all LTX Director outputs).
  *   2. If a watermark PNG is found via `resolveWatermarkPath` and the
  *      override `dhee_WATERMARK=off` is not set, re-encode the temp
  *      through the watermark overlay filter into the final output.
- *      Otherwise rename the temp to the final.
+ *      Otherwise the concat output IS the final.
  *
- * This restores the watermark presence on every assembled final video
- * — the previous (stripped) FFmpegAssembler path applied it, and the
- * v1 of this runner skipped it as a regression. Reuses the existing
- * `resolveWatermarkPath` + `buildWatermarkOverlayFilter` helpers so the
- * watermark sizing and placement stay identical (~9% of output height,
- * bottom-right with 24px inset).
+ * Subtitle burn-in was REMOVED. It was the only fragile step in the
+ * re-encode pass — drawtext needs a system font and careful filtergraph
+ * escaping, and when it failed it took the WATERMARK down with it (the
+ * watermark + captions shared one re-encode pass), so the final video
+ * shipped un-branded. No product feature consumes burned-in captions.
+ * The walker still writes the SRT sidecar (assets/subtitles/final.srt)
+ * for external players; this runner no longer touches subtitles, so the
+ * watermark can never again be collateral damage from a caption failure.
  *
- * Degenerate case (1 input + no watermark) is still a copy. Single
- * input + watermark re-encodes once through the overlay filter.
+ * Degenerate case (1 input + no watermark) is a copy. Single input +
+ * watermark re-encodes once through the overlay filter.
  */
-import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, unlinkSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -35,27 +36,6 @@ interface FfmpegConcatConfig {
   inputs: string[];
   /** Output path relative to project dir. */
   outputPath: string;
-  /**
-   * Optional absolute path to an SRT file. When set, ffmpeg burns the
-   * subtitles into the final output during the re-encode pass.
-   */
-  subtitlesPath?: string;
-}
-
-// Cached at module load — checked once per process.
-let drawtextAvailable: boolean | null = null;
-function hasDrawtextFilter(): Promise<boolean> {
-  if (drawtextAvailable !== null) return Promise.resolve(drawtextAvailable);
-  return new Promise((resolve) => {
-    const proc = spawn(ffmpegBin(), ['-hide_banner', '-filters'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    proc.stdout?.on('data', (d) => { out += d.toString(); });
-    proc.on('close', () => {
-      drawtextAvailable = /\bdrawtext\b/.test(out);
-      resolve(drawtextAvailable);
-    });
-    proc.on('error', () => { drawtextAvailable = false; resolve(false); });
-  });
 }
 
 function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
@@ -87,149 +67,34 @@ function probeHeight(inputPath: string): Promise<number | null> {
   });
 }
 
-interface SrtCue { start: number; end: number; text: string }
-
-function parseSrtTime(s: string): number {
-  // "HH:MM:SS,mmm" → seconds (float)
-  const m = s.trim().match(/^(\d+):(\d+):(\d+)[,.](\d+)$/);
-  if (!m) return 0;
-  return parseInt(m[1]!, 10) * 3600 + parseInt(m[2]!, 10) * 60 + parseInt(m[3]!, 10) + parseInt(m[4]!, 10) / 1000;
-}
-
-function parseSrt(srtText: string): SrtCue[] {
-  const cues: SrtCue[] = [];
-  // Split on blank lines (handle Windows + Unix line endings).
-  const blocks = srtText.replace(/\r\n/g, '\n').split(/\n{2,}/);
-  for (const block of blocks) {
-    const lines = block.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-    if (lines.length < 2) continue;
-    // lines[0] = index, lines[1] = "start --> end", lines[2..] = text
-    const timeLine = lines[1] ?? '';
-    const m = timeLine.match(/^(\S+)\s*-->\s*(\S+)/);
-    if (!m) continue;
-    const start = parseSrtTime(m[1]!);
-    const end = parseSrtTime(m[2]!);
-    const text = lines.slice(2).join(' ');
-    if (text.length > 0) cues.push({ start, end, text });
-  }
-  return cues;
-}
-
 /**
- * Resolve a TrueType/OpenType font for burned-in captions. drawtext
- * REQUIRES a font: the static ffmpeg builds we ship (@ffmpeg-installer)
- * have NO default font, so omitting `fontfile` fails at runtime with
- * "No font filename provided". Honor DHEE_SUBTITLE_FONT, else probe common
- * macOS / Linux system fonts. Returns null when none is available, so the
- * caller can degrade (render WITHOUT captions) instead of failing the whole
- * final video.
+ * Read the watermark opacity (0..1) from `dhee_WATERMARK_OPACITY`.
+ * Returns undefined when unset / unparseable / out of range so the
+ * overlay helper applies its own default (0.8).
  */
-const SUBTITLE_FONT_CANDIDATES = [
-  '/System/Library/Fonts/Supplemental/Arial.ttf',
-  '/System/Library/Fonts/Helvetica.ttc',
-  '/Library/Fonts/Arial.ttf',
-  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-  '/usr/share/fonts/dejavu/DejaVuSans.ttf',
-  '/usr/share/fonts/TTF/DejaVuSans.ttf',
-];
-export function resolveSubtitleFont(): string | null {
-  const env = process.env['DHEE_SUBTITLE_FONT']?.trim();
-  if (env && existsSync(env)) return env;
-  for (const p of SUBTITLE_FONT_CANDIDATES) if (existsSync(p)) return p;
-  return null;
-}
-
-/**
- * Build the per-cue drawtext chain. Cue text is passed via `textfile=`
- * (NOT inline `text='...'`) so arbitrary subtitle content — colons, single
- * quotes, commas, parentheses, percent — can never break the filtergraph
- * parse. (The previous inline approach mis-escaped a `'` inside the
- * single-quoted text, truncating the filter and crashing the re-encode.)
- * Each cue is gated by `enable='between(t,start,end)'`; one temp file per
- * cue is written under `tmpDir`.
- */
-export function buildDrawtextChain(
-  cues: SrtCue[],
-  inLabel: string,
-  outLabel: string,
-  fontFile: string,
-  tmpDir: string,
-): string {
-  const drawSpecs = cues.map((c, i) => {
-    const tf = join(tmpDir, `cue_${i}.txt`);
-    writeFileSync(tf, c.text, 'utf-8');
-    return [
-      `drawtext=fontfile='${fontFile}'`,
-      `textfile='${tf}'`,
-      `enable='between(t,${c.start.toFixed(3)},${c.end.toFixed(3)})'`,
-      `x=(w-text_w)/2`,
-      `y=h-(text_h*2)-20`,
-      `fontsize=22`,
-      `fontcolor=white`,
-      `box=1`,
-      `boxcolor=black@0.55`,
-      `boxborderw=12`,
-    ].join(':');
-  });
-  return `[${inLabel}]${drawSpecs.join(',')}[${outLabel}]`;
+function resolveWatermarkOpacity(): number | undefined {
+  const raw = process.env['dhee_WATERMARK_OPACITY'];
+  if (raw == null || raw.trim() === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(1, Math.max(0, n));
 }
 
 async function reencodePass(
   ctx: RunnerContext,
   inputPath: string,
   outputPath: string,
-  watermarkPath: string | null,
-  subtitlesPath: string | null,
+  watermarkPath: string,
 ): Promise<{ ok: boolean; stderr?: string }> {
   const height = (await probeHeight(inputPath)) ?? 720;
-  const args: string[] = ['-y', '-i', inputPath];
-  if (watermarkPath) args.push('-i', watermarkPath);
-
-  // Parse the SRT into cues and burn captions in via the drawtext filter.
-  // Pre-flight drawtext capability check happens in runFfmpegConcat, so
-  // a non-null subtitlesPath here means we already confirmed drawtext is
-  // available (the runner nulls it out on incompatible builds).
-  const cues: SrtCue[] = subtitlesPath ? parseSrt(readFileSync(subtitlesPath, 'utf-8')) : [];
-
-  // Build filter chain. Start from 0:v. If captions are requested, draw
-  // them in via the drawtext chain to produce [withsubs]. Then either
-  // overlay the watermark from input 1 onto that, or pass through.
-  // Captions need a font; degrade gracefully (render WITHOUT captions)
-  // rather than fail the whole final video when none is available.
-  const subtitleFont = cues.length > 0 ? resolveSubtitleFont() : null;
-  const burnSubs = cues.length > 0 && subtitleFont !== null;
-  if (cues.length > 0 && !burnSubs) {
-    ctx.log(
-      `ffmpeg.concat: WARNING — no usable caption font found (set DHEE_SUBTITLE_FONT); ` +
-        `rendering final video WITHOUT burned-in captions`,
-    );
-  }
-
-  const chains: string[] = [];
-  let lastLabel = '0:v';
-  let subsTmpDir: string | null = null;
-  if (burnSubs) {
-    subsTmpDir = mkdtempSync(join(tmpdir(), 'dhee-subs-'));
-    chains.push(buildDrawtextChain(cues, lastLabel, 'withsubs', subtitleFont, subsTmpDir));
-    lastLabel = 'withsubs';
-  }
-  if (watermarkPath) {
-    chains.push(buildWatermarkOverlayFilter(lastLabel, 1, 'outv', height));
-    lastLabel = 'outv';
-  }
-
-  const tag: string[] = [];
-  if (burnSubs) tag.push('subtitles');
-  if (watermarkPath) tag.push('watermark');
-  ctx.log(`ffmpeg.concat: re-encode pass (${tag.join('+') || 'copy'}, output ${height}p) → ${outputPath}`);
-
-  if (chains.length > 0) {
-    args.push('-filter_complex', chains.join(';'), '-map', `[${lastLabel}]`);
-  } else {
-    args.push('-map', '0:v');
-  }
-  args.push(
+  const filter = buildWatermarkOverlayFilter('0:v', 1, 'outv', height, resolveWatermarkOpacity());
+  ctx.log(`ffmpeg.concat: watermark re-encode pass (output ${height}p) → ${outputPath}`);
+  const result = await runFFmpeg([
+    '-y',
+    '-i', inputPath,
+    '-i', watermarkPath,
+    '-filter_complex', filter,
+    '-map', '[outv]',
     '-map', '0:a?',
     '-c:v', 'libx264',
     '-preset', 'fast',
@@ -237,14 +102,7 @@ async function reencodePass(
     '-c:a', 'copy',
     '-movflags', '+faststart',
     outputPath,
-  );
-
-  let result: { ok: boolean; stderr: string };
-  try {
-    result = await runFFmpeg(args);
-  } finally {
-    if (subsTmpDir) rmSync(subsTmpDir, { recursive: true, force: true });
-  }
+  ]);
   return result.ok ? { ok: true } : { ok: false, stderr: result.stderr };
 }
 
@@ -296,42 +154,21 @@ async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
   if (!watermarkPath && !watermarkDisabled) {
     ctx.log(`ffmpeg.concat: WARNING — no watermark asset found via resolveWatermarkPath (looked for assets/watermark_dhee.png, assets/watermark.png). Final video will ship un-branded.`);
   }
-
-  let subtitlesPath: string | null = cfg.subtitlesPath && existsSync(cfg.subtitlesPath) ? cfg.subtitlesPath : null;
-  if (cfg.subtitlesPath && !subtitlesPath) {
-    ctx.log(`ffmpeg.concat: WARNING — subtitlesPath ${cfg.subtitlesPath} not found, skipping subtitle burn-in`);
-  }
-  // If subtitles requested but ffmpeg lacks the drawtext filter, drop the
-  // subtitle path here so we don't enter the re-encode branch unnecessarily.
-  // SRT sidecar still exists for external use.
-  if (subtitlesPath) {
-    const canDrawtext = await hasDrawtextFilter();
-    if (!canDrawtext) {
-      ctx.log(
-        `ffmpeg.concat: WARNING — installed ffmpeg lacks the drawtext filter ` +
-        `(no libfreetype in build). Skipping subtitle burn-in. ` +
-        `SRT sidecar still produced at ${subtitlesPath}. ` +
-        `Reinstall ffmpeg with libfreetype (e.g. brew install ` +
-        `homebrew-ffmpeg/ffmpeg/ffmpeg) for in-video captions.`,
-      );
-      subtitlesPath = null;
-    }
-  }
-  const needsReencode = !!(watermarkPath || subtitlesPath);
+  const needsReencode = !!watermarkPath;
 
   // ── Single-input path ──
   if (cfg.inputs.length === 1) {
     if (!needsReencode) {
-      ctx.log(`ffmpeg.concat: single input + no watermark/subtitles — copying`);
+      ctx.log(`ffmpeg.concat: single input + no watermark — copying`);
       copyFileSync(cfg.inputs[0]!, outputAbs);
-      return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'copy', inputCount: 1, watermarked: false, subtitled: false } };
+      return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'copy', inputCount: 1, watermarked: false } };
     }
-    const r = await reencodePass(ctx, cfg.inputs[0]!, outputAbs, watermarkPath, subtitlesPath);
+    const r = await reencodePass(ctx, cfg.inputs[0]!, outputAbs, watermarkPath!);
     if (!r.ok) return { ok: false, error: `ffmpeg.concat: re-encode pass failed — ${(r.stderr ?? '').slice(-500)}` };
-    return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'reencode', inputCount: 1, watermarked: !!watermarkPath, subtitled: !!subtitlesPath } };
+    return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'reencode', inputCount: 1, watermarked: true } };
   }
 
-  // ── N-input path: concat demuxer → temp → optional re-encode pass ──
+  // ── N-input path: concat demuxer → temp → optional watermark pass ──
   const listFile = join(tmpdir(), `dag_concat_${Date.now()}.txt`);
   const listContent = cfg.inputs.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
   writeFileSync(listFile, listContent);
@@ -358,11 +195,11 @@ async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
     return {
       ok: true,
       outputPath: cfg.outputPath,
-      metadata: { mode: 'concat_demuxer', inputCount: cfg.inputs.length, watermarked: false, subtitled: false },
+      metadata: { mode: 'concat_demuxer', inputCount: cfg.inputs.length, watermarked: false },
     };
   }
 
-  const r = await reencodePass(ctx, concatTarget, outputAbs, watermarkPath, subtitlesPath);
+  const r = await reencodePass(ctx, concatTarget, outputAbs, watermarkPath!);
   try { unlinkSync(concatTarget); } catch { /* ignore */ }
   if (!r.ok) {
     return { ok: false, error: `ffmpeg.concat: re-encode pass failed — ${(r.stderr ?? '').slice(-500)}` };
@@ -370,7 +207,7 @@ async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
   return {
     ok: true,
     outputPath: cfg.outputPath,
-    metadata: { mode: 'concat_demuxer+reencode', inputCount: cfg.inputs.length, watermarked: !!watermarkPath, subtitled: !!subtitlesPath },
+    metadata: { mode: 'concat_demuxer+reencode', inputCount: cfg.inputs.length, watermarked: true },
   };
 }
 
@@ -387,7 +224,6 @@ function describe(): RunnerDescription {
       properties: {
         inputs: { type: 'array', items: { type: 'string' }, minItems: 1 },
         outputPath: { type: 'string' },
-        subtitlesPath: { type: 'string', description: 'Optional absolute path to an SRT file to burn into the final output.' },
       },
     },
     costHint: 'free',
