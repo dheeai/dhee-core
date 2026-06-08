@@ -12,6 +12,10 @@ export default defineConfig({
     'dag/index': 'src/dag/walker.ts',
   },
   format: ['esm'],
+  // Bundle the workspace SDK INLINE into dist so the shipped dhee-core is
+  // self-contained — the desktop loads dist/ and won't have a separate
+  // @dhee/runner-sdk install. (It's a workspace dep, otherwise external.)
+  noExternal: ['@dhee/runner-sdk'],
   dts: false,
   clean: true,
   splitting: false,

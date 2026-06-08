@@ -37,16 +37,35 @@ registered in **`src/dag/runners/index.ts`**.
 
 ---
 
-## 1. The contract (`src/dag/schema.ts`)
+## 1. The contract (`@dhee/runner-sdk`)
 
-A runner is just an object with two methods:
+The canonical types + primitives live in **`@dhee/runner-sdk`**
+(`packages/runner-sdk`); `src/dag/schema.ts` re-exports them. In-repo
+runners may import from either, but a **published / external** runner
+imports ONLY `@dhee/runner-sdk` (the firewall test enforces this).
+
+A runner is just an object with two methods (wrap it in the SDK's
+`defineRunner` for inference + intent):
 
 ```ts
-export interface Runner {
-  describe: () => RunnerDescription;
-  run: (ctx: RunnerContext) => Promise<RunnerResult>;
-}
+import { defineRunner } from '@dhee/runner-sdk';
+import type { RunnerContext, RunnerResult } from '@dhee/runner-sdk';
+
+export const runner = defineRunner({
+  describe: () => ({ /* RunnerDescription */ }),
+  run: async (ctx: RunnerContext): Promise<RunnerResult> => ({ ok: true, outputPath: '…' }),
+});
 ```
+
+Two capabilities the SDK adds to `ctx` / the result / the manifest:
+- **`ctx.llm`** (`LLMAccess`) — call `ctx.llm.generateText({ messages, tier })`
+  instead of importing a provider; the walker injects it. Essential for
+  sandboxed/external runners that must not reach into core.
+- **`RunnerResult.outputs?: RunnerArtifact[]`** — emit more than the single
+  `outputPath` when a runner produces several artifacts.
+- **`RunnerManifest.permissions`** — declare the capability surface
+  (`network` / `filesystem` / `subprocess` / `env`). Declarative today
+  (surfaced by `checkBundleRunners`); runtime sandboxing is future work.
 
 **`RunnerContext`** — what `run` receives:
 ```ts
