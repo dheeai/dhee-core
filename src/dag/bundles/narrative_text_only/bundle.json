@@ -32,6 +32,7 @@
   "nodes": [
     {
       "id": "plot",
+      "displayName": "Plot",
       "kind": "stage",
       "inputs": [],
       "outputs": { "format": "md", "pattern": "plans/plot.md" },
@@ -48,6 +49,7 @@
     },
     {
       "id": "scenes_plan",
+      "displayName": "Scene Breakdown",
       "kind": "stage",
       "inputs": [{ "from": "plot", "usage": "context" }],
       "outputs": { "format": "json", "pattern": "plans/scenes_plan.json" },
@@ -65,6 +67,7 @@
     },
     {
       "id": "shot_breakdown",
+      "displayName": "Shot Breakdown",
       "kind": "stage",
       "inputs": [
         { "from": "plot", "usage": "context" },
