@@ -5,6 +5,11 @@
 **Status:** Proposed — pending approval before implementation
 **Target completion:** ~2 weeks of focused work
 
+> **Historical note (2026-06):** the `comfy.image` runner referenced
+> throughout this plan was later split into the workflow-bound runners
+> `comfy.klein`, `comfy.tti`, and `comfy.fl2v` (over a shared
+> `comfyExecutor`). References to `comfy.image` below are historical.
+
 ---
 
 ## 1. Decision

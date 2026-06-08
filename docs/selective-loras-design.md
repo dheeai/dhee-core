@@ -11,8 +11,8 @@
 Let users bring their own LoRAs and apply them **selectively** — a style LoRA
 on the whole video, a trained character LoRA wherever that character appears, a
 one-off FX LoRA on a single shot. The pipeline is already ~80% wired for this:
-`comfy.image` injects workflow params via simple `{input, nodeId, field}`
-mappings, and the LTX/qwen workflows already chain `LoraLoaderModelOnly` nodes.
+the comfy runners inject workflow params via simple `{input, nodeId, field}`
+mappings (shared `comfyExecutor`), and the LTX/qwen workflows already chain `LoraLoaderModelOnly` nodes.
 The new work is (1) a declarative registry + scope-ranked assignment model the
 user authors at creation time, (2) a pure per-shot resolver, and (3) LoRA slots
 in the shot-image workflow + manifest mappings. Assignment is a workflow op the
@@ -43,7 +43,7 @@ globally. There is no mechanism for that today.
 
 | Capability | Where | Implication |
 |---|---|---|
-| Param injection into workflows | `comfy.image` runner — `parameterMappings: [{input, nodeId, field}]`, applied as `workflow[nodeId].inputs[field] = value` (`comfyImage.ts`) | Adding a LoRA param is a one-line manifest entry; no runner rewrite to *set* a field. |
+| Param injection into workflows | the comfy runners (`comfy.klein` et al.) — `parameterMappings: [{input, nodeId, field}]`, applied as `workflow[nodeId].inputs[field] = value` in the shared `comfyExecutor.ts` | Adding a LoRA param is a one-line manifest entry; no runner rewrite to *set* a field. |
 | LoRA loaders in workflows | `LoraLoaderModelOnly` nodes (fields `lora_name`, `strength_model`) chained in `ltx_director_local.json`, `qwen_edit_multi.json` — including **named slots** (`LORA_MA`, `LORA_LIGHT`) | "Fixed named LoRA slots in a graph" is a proven pattern in this repo. |
 | Shot-image model chain | `klein.json` has `UNETLoader` (node `92:70`) + `CLIPLoader` (`92:71`) | LoRA slots insert into this model chain; klein has **no** LoRA nodes yet. |
 | Per-shot config injection point | Walker calls `applyAspectToConfig` per shot instance (~`walker.ts:1256`) and merges ambient `bundleInputs` into every node's `ctx.inputs` (`resolveBundleInputs`, ~`walker.ts:538`) | The exact hook to also inject a resolved LoRA stack into `cfg`. |

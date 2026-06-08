@@ -6,6 +6,8 @@
 
 This is the first of three runners (`llm.generate`, `comfy.image`, `state.diff`) needed to bring the entire pipeline under the bundle architecture. See `docs/dag-bundles-sketch.md` "Sharing model" + "Backward walker" sections for the broader context.
 
+> **Historical note (2026-06):** the `comfy.image` runner mentioned here was later split into the workflow-bound runners `comfy.klein`, `comfy.tti`, and `comfy.fl2v` (over a shared `comfyExecutor`).
+
 ---
 
 ## What it replaces in the existing executor

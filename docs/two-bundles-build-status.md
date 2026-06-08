@@ -7,6 +7,10 @@ end-to-end on real Comfy hardware before reporting "done."
 
 **Status:** in progress on `feat/dag-bundles`. Multi-session work.
 
+> **Historical note (2026-06):** the `comfy.image` runner below was later
+> split into `comfy.klein` / `comfy.tti` / `comfy.fl2v` over a shared
+> `comfyExecutor`.
+
 ---
 
 ## Honest reality

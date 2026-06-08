@@ -64,7 +64,7 @@ Inside `bundle.json`, the four things you care about:
    - `outputs` — the file format + where it lands on disk.
    - `runner` — which tool runs this node, and the tool's config.
 4. **`dependencies.runners`** — which runner tools the bundle needs
-   (`llm.generate`, `comfy.image`, etc.) and at what versions.
+   (`llm.generate`, `comfy.klein`, etc.) and at what versions.
 
 That's it. No code. Just JSON.
 
@@ -108,14 +108,25 @@ For collection upstreams:
 
 ### Runners
 
-Today, four built-in runners cover most cases:
+The built-in runners cover most cases. Each ComfyUI runner is NAMED for
+the workflow family it drives (it's allowed to know that workflow's
+shape) — there is no single generic "comfy" runner:
 
 | Runner | What it does |
 |--------|--------------|
 | `llm.generate` | Renders a prompt template, calls the LLM, writes the output file (markdown or schema-validated JSON). |
-| `comfy.image` | Runs a ComfyUI workflow (Klein, Qwen Edit, SDXL, whatever) and writes the resulting image. |
+| `comfy.tti` | Runs a ComfyUI text-to-image workflow (prompt → image, no references). Used for character / setting reference renders. |
+| `comfy.klein` | Runs the Flux 2 Klein reference-edit workflow: a base image + up to 3 optional references; absent references are pruned from the graph. |
+| `comfy.fl2v` | Runs a first-frame/last-frame → video ComfyUI workflow. |
 | `comfy.ltx_director` | Drives the LTX Director Chain workflow to produce a continuous multi-segment video clip. |
+| `comfy.qwen_edit_chain` | Iteratively edits a prior shot into the next via Qwen-Image-Edit (camera-rotation continuity). |
 | `ffmpeg.concat` | Stitches a list of clips into one final video. |
+
+All the `comfy.*` runners share one workflow-agnostic core
+(`comfyExecutor`) for endpoint resolution, image upload, queueing,
+download, model aliases, and caching — but the core is **not itself a
+runner**; only the named tools above are registered and targetable by a
+bundle node.
 
 Anyone can write a new runner (an API wrapper, a new local workflow,
 a custom postprocess step) and drop it into `~/.kshana/runners/`.
@@ -157,7 +168,7 @@ A two-node bundle: take user text, generate one image.
       ],
       "outputs": { "format": "image", "pattern": "assets/cover.png" },
       "runner": {
-        "tool": "comfy.image",
+        "tool": "comfy.klein",
         "config": {
           "workflowPath": "workflows/klein.json",
           "manifestPath": "workflows/klein.manifest.json",
@@ -223,7 +234,7 @@ This is the part where the architecture's value shows up.
 
 ```jsonc
 "runner": {
-  "tool": "comfy.image",
+  "tool": "comfy.klein",
   "config": { "workflowPath": "workflows/klein.json", ... }
 }
 ```
