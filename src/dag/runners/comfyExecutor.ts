@@ -376,21 +376,20 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
   }
 
   // ── Per-endpoint workflow aliases (model rename / class swap) ──
-  try {
-    const { readAliases, applyAliases, defaultAliasesDir } = await import('../workflowAliases.js');
-    const aliasesDir = defaultAliasesDir();
-    const aliasEndpoint = baseUrl ?? process.env['COMFYUI_BASE_URL'] ?? 'unknown';
-    const aliases = readAliases(aliasesDir, aliasEndpoint);
-    if (
-      (aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0) ||
-      (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0)
-    ) {
-      const workflowKey = opts.workflowPath.split('/').slice(-2).join('/');
-      workflow = applyAliases(workflow as never, { workflowKey, aliases }) as never;
-      ctx.log(tag(`applied aliases for endpoint=${aliasEndpoint} workflow=${workflowKey}`));
-    }
-  } catch (e) {
-    ctx.log(tag(`alias load skipped (${(e as Error).message})`));
+  // Logs each class_swap applied and validates each swap target against the
+  // endpoint's node signatures — an invalid swap (e.g. one that needs an
+  // input the node lacks) fails fast here instead of a cryptic Comfy 400.
+  {
+    const { applyEndpointAliases, defaultAliasesDir } = await import('../workflowAliases.js');
+    const aliasRes = await applyEndpointAliases({
+      workflow: workflow as never,
+      workflowKey: opts.workflowPath.split('/').slice(-2).join('/'),
+      aliasesDir: defaultAliasesDir(),
+      endpointUrl: baseUrl ?? process.env['COMFYUI_BASE_URL'],
+      log: (m) => ctx.log(tag(m)),
+    });
+    if (aliasRes.error) return { ok: false, error: tag(aliasRes.error) };
+    workflow = aliasRes.workflow as never;
   }
 
   // ── Build client ──

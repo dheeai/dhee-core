@@ -271,25 +271,17 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   // untouched on disk; the user's local Comfy may have differently-
   // named LoRAs / UNETs (e.g. VBVR vs transition base LoRA), and the
   // agent's dhee_apply_workflow_aliases tool persists the chosen map.
-  try {
-    const { readAliases, applyAliases, defaultAliasesDir } = await import('../workflowAliases.js');
-    const aliasesDir = defaultAliasesDir();
-    const aliases = readAliases(aliasesDir, endpointBaseUrl ?? 'unknown');
-    if (
-      (aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0) ||
-      (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0)
-    ) {
-      const workflowKey = cfg.workflowPath.split('/').slice(-2).join('/');
-      workflow = applyAliases(workflow as never, {
-        workflowKey,
-        aliases,
-      }) as never;
-      ctx.log(
-        `comfy.ltx_director: applied aliases for endpoint=${endpointBaseUrl} workflow=${workflowKey}`,
-      );
-    }
-  } catch (e) {
-    ctx.log(`comfy.ltx_director: alias load skipped (${(e as Error).message})`);
+  {
+    const { applyEndpointAliases, defaultAliasesDir } = await import('../workflowAliases.js');
+    const aliasRes = await applyEndpointAliases({
+      workflow: workflow as never,
+      workflowKey: cfg.workflowPath.split('/').slice(-2).join('/'),
+      aliasesDir: defaultAliasesDir(),
+      endpointUrl: endpointBaseUrl,
+      log: (m) => ctx.log(`comfy.ltx_director: ${m}`),
+    });
+    if (aliasRes.error) return { ok: false, error: `comfy.ltx_director: ${aliasRes.error}` };
+    workflow = aliasRes.workflow as never;
   }
 
   const director = workflow['46'];

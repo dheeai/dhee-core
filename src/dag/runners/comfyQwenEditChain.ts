@@ -133,23 +133,17 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   //    expects; the agent's dhee_apply_workflow_aliases tool writes
   //    a per-endpoint mapping. Reading + applying here keeps the
   //    bundle's canonical workflow untouched.
-  try {
-    const { readAliases, applyAliases, defaultAliasesDir } = await import('../workflowAliases.js');
-    const aliasesDir = defaultAliasesDir();
-    const aliases = readAliases(aliasesDir, baseUrl ?? 'unknown');
-    if ((aliases.name_aliases && Object.keys(aliases.name_aliases).length > 0)
-        || (aliases.class_swaps && Object.keys(aliases.class_swaps).length > 0)) {
-      workflow = applyAliases(workflow as never, {
-        workflowKey: cfg.workflowPath,
-        aliases,
-      }) as never;
-      ctx.log(`comfy.qwen_edit_chain: applied aliases for endpoint=${baseUrl} workflow=${cfg.workflowPath}`);
-    }
-  } catch (e) {
-    // Non-fatal — aliases are an optional optimization. If the store
-    // is malformed or unreadable, fall through to the canonical
-    // workflow + let Comfy report the model-not-found.
-    ctx.log(`comfy.qwen_edit_chain: alias load skipped (${(e as Error).message})`);
+  {
+    const { applyEndpointAliases, defaultAliasesDir } = await import('../workflowAliases.js');
+    const aliasRes = await applyEndpointAliases({
+      workflow: workflow as never,
+      workflowKey: cfg.workflowPath,
+      aliasesDir: defaultAliasesDir(),
+      endpointUrl: baseUrl,
+      log: (m) => ctx.log(`comfy.qwen_edit_chain: ${m}`),
+    });
+    if (aliasRes.error) return { ok: false, error: `comfy.qwen_edit_chain: ${aliasRes.error}` };
+    workflow = aliasRes.workflow as never;
   }
 
   // ── Upload base + character refs (up to 2 extras for TextEncodeQwenImageEditPlus image2/image3) ──
