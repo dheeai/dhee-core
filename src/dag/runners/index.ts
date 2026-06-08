@@ -8,7 +8,9 @@
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';
-import { comfyImageRunner } from './comfyImage.js';
+import { comfyKleinRunner } from './comfyKlein.js';
+import { comfyTtiRunner } from './comfyTti.js';
+import { comfyFl2vRunner } from './comfyFl2v.js';
 import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
@@ -54,19 +56,43 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     runner: llmGenerateRunner,
   },
   {
+    // Bound to the Flux 2 Klein edit workflow. Endpoint URL resolved at
+    // runner.run() time from ENDPOINT_<name> env (same as the other comfy
+    // runners), validated with an actionable error pointing at Settings.
     manifest: {
-      tool: 'comfy.image',
+      tool: 'comfy.klein',
       version: '0.1.0',
       engineCompat: '>=0.1.0',
-      // Same as comfy.ltx_director — endpoint URL is resolved at
-      // runner.run() time from ENDPOINT_<name> env, validated with an
-      // actionable error pointing at the desktop Settings UI.
       credentials: [],
-      displayName: 'Comfy Image',
+      displayName: 'Comfy Klein (Flux 2 reference edit)',
       description:
-        'Generates a single image via a ComfyUI workflow (Flux 2 Klein or compatible). Handles uploads, parameter injection from bundle config + manifest, and output download.',
+        'Drives the Flux 2 Klein edit workflow: a base reference image plus up to 3 optional references threaded through a ReferenceLatent chain. Absent optional references are pruned from the graph; uploads + parameter injection + output download handled by the shared executor.',
     },
-    runner: comfyImageRunner,
+    runner: comfyKleinRunner,
+  },
+  {
+    manifest: {
+      tool: 'comfy.tti',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Comfy text-to-image',
+      description:
+        'Generates an image from a text prompt via a ComfyUI text-to-image workflow (no reference images). Used for character / setting reference renders.',
+    },
+    runner: comfyTtiRunner,
+  },
+  {
+    manifest: {
+      tool: 'comfy.fl2v',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Comfy first/last-frame to video',
+      description:
+        'Renders a short video from a required first frame, an optional last frame, and a motion prompt via a ComfyUI FL2V workflow.',
+    },
+    runner: comfyFl2vRunner,
   },
   {
     manifest: {

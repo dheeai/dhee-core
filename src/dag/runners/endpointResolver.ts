@@ -1,7 +1,7 @@
 /**
  * resolveEndpointUrl — central routing for bundle-declared Comfy
- * endpoints. Replaces three duplicated copies that lived in
- * comfyImage, comfyLtxDirector, comfyQwenEditChain.
+ * endpoints. Replaces duplicated copies that lived across the comfy
+ * runners (comfyExecutor, comfyLtxDirector, comfyQwenEditChain).
  *
  * Behavior:
  *   - When `COMFY_MODE=local` (or unset, which defaults to local):

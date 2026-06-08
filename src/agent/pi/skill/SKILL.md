@@ -27,7 +27,7 @@ no SaaS, no remote storage.
 - A **project** is a directory on disk. Its root has `project.json`
   (canonical state) and an `assets/` tree (artifacts the bundle writes).
 - A **bundle** is a DAG of typed nodes; each node has a `runner` (e.g.
-  `llm.generate`, `comfy.image`), an `outputPath`, and an `outputs.format`
+  `llm.generate`, `comfy.klein`, `comfy.tti`), an `outputPath`, and an `outputs.format`
   (`md | json | image | video | audio | text`). The walker executes
   nodes in topo order, persisting state to `walkState.json`.
 - **walkState** is the source of truth for run progress. Each node id
@@ -217,8 +217,9 @@ single-select the first click submits.
     re-rendering. `dhee_swap_runner` can target one node.
   - Image / workflow not found → check the workflow path with the
     user, do NOT auto-regenerate to "fix" it.
-  - File-upload errors → retry the SAME dispatch; the comfy.image
-    runner re-uploads refs on every call. Don't try to "re-upload by
+  - File-upload errors → retry the SAME dispatch; the comfy image
+    runners (comfy.klein / comfy.tti / comfy.fl2v) re-upload refs on
+    every call. Don't try to "re-upload by
     re-running upstream nodes" — there's no such mechanism, you'd
     just re-render unrelated artifacts.
 - **Don't poll.** When a tool reports work is in progress (a render,
@@ -402,8 +403,8 @@ flight**:
   critique on the next re-fire and corrects the output; the cascade
   invalidates everything downstream automatically.
 
-  **Critique only works on `llm.*` nodes.** Non-LLM nodes (comfy.image,
-  comfy.video, ffmpeg.concat) are deterministic given their inputs —
+  **Critique only works on `llm.*` nodes.** Non-LLM nodes (comfy.klein,
+  comfy.tti, comfy.fl2v, ffmpeg.concat) are deterministic given their inputs —
   the fix point is always an upstream LLM node. If the user reports a
   broken IMAGE or VIDEO:
 

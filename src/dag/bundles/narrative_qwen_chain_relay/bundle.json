@@ -6,7 +6,7 @@
   "dependencies": {
     "runners": {
       "llm.generate": ">=0.1.0",
-      "comfy.image": ">=0.1.0",
+      "comfy.tti": ">=0.1.0",
       "comfy.qwen_edit_chain": ">=0.1.0",
       "comfy.ltx_director": ">=0.1.0",
       "ffmpeg.concat": ">=0.1.0"
@@ -210,7 +210,7 @@
         "pattern": "assets/images/characters/{{item_id}}.png"
       },
       "runner": {
-        "tool": "comfy.image",
+        "tool": "comfy.tti",
         "config": {
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
@@ -296,7 +296,7 @@
         "pattern": "assets/images/settings/{{item_id}}.png"
       },
       "runner": {
-        "tool": "comfy.image",
+        "tool": "comfy.tti",
         "config": {
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
