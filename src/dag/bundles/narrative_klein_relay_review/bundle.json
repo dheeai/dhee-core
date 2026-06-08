@@ -619,7 +619,7 @@
   ],
   "display": {
     "thumbnail": {
-      "from": "shot.first_frame",
+      "from": ["shot.first_frame", "setting.image", "character.image"],
       "pick": "first_completed"
     },
     "stats": [
