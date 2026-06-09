@@ -166,12 +166,17 @@ single-select the first click submits.
 - **Inspect before acting.** When the user reports a problem, read
   `walkState.json` and the failing artifact's `outputPath` before
   proposing a fix.
-- **Batch critiques; render on request.** When the user says one shot
-  or one node is not good, critique only that one upstream LLM item and
-  use `applyOnly: true` when confirming. This stamps the critique and
-  invalidates the relevant downstream outputs, but does NOT immediately
-  re-render. Let the user queue more critiques; call `dhee_start_run`
-  only when they explicitly ask to re-render / continue / apply all.
+- **Critique-review loop.** When the user says one shot or one node is
+  not good, critique only that one upstream LLM item, then regenerate
+  only up to the user-visible artifact that needs review. Stop there
+  and ask whether they are satisfied. Do NOT continue to motion, clips,
+  or final until the user says the corrected shot is good.
+  For a shot image critique, use:
+  1. `dhee_critique_node(..., confirm: true, applyOnly: true)`
+  2. `dhee_start_run(projectDir, stopAt: 'shot_image', sessionId: <current session>)`
+  3. when the stopAt run completes, show `shot_image:<itemId>` and ask
+     if the user is satisfied. If not, repeat the critique-review loop.
+     If yes, then resume downstream with `dhee_start_run`.
 - **Regenerate locally.** When the user wants a fresh roll of one shot,
   regenerate only that node — don't re-run the entire DAG.
 
@@ -186,10 +191,10 @@ single-select the first click submits.
     incident 2026-06-01: agent escalated "fix shot 6 finger" to
     `runOnly=["shot_image"]` and re-rendered all 7 shots.
 
-  - When fixing multiple shots by critique, issue separate
-    `dhee_critique_node(..., confirm: true, applyOnly: true)` calls —
-    one per itemId — then one `dhee_start_run` after the user asks to
-    render them.
+  - When fixing multiple shots by critique, do them one at a time:
+    queue one critique, run to that shot's review artifact, ask the
+    user if it is good, then move to the next critique. Do not batch
+    multiple shot critiques unless the user explicitly asks for a batch.
 
   - **Which tool for "change a shot" — by intent, not mechanism:**
     - *Same shot, fresh roll, no new direction* (just unlucky output) →
@@ -487,9 +492,10 @@ When you see a gate pause:
 
      Decide based on this count, NOT the full structural cascade:
      - If `realImpactCount` ≤ 1 → call again with `confirm: true,
-       applyOnly: true`. Do not dispatch the bundle yet. The user can
-       critique one node at a time, then ask to re-render all pending
-       changes in one pass.
+       applyOnly: true`, then immediately start a bounded review run
+       with `dhee_start_run(stopAt: 'shot_image')` for shot-image
+       critiques. Stop after that review artifact and ask the user
+       whether it is satisfactory. Do not render motion/clips/final yet.
      - If `realImpactCount` > 1 → STOP. Present the diagnosis + plan
        + impact to the user in chat:
        - What was wrong with the broken artifact
@@ -497,8 +503,10 @@ When you see a gate pause:
        - The list of already-rendered artifacts the cascade will
          destroy (the preview gives you this verbatim)
        - Ask: "Proceed?" — wait for explicit consent.
-     - Only after consent: call with `confirm: true, applyOnly: true`
-       unless the user explicitly asked to render immediately.
+     - Only after consent: call with `confirm: true, applyOnly: true`,
+       then run only to the review artifact with `stopAt`. If the user
+       explicitly asked to render immediately, confirm that they want to
+       skip review before continuing to clips/final.
 
   The critique text should be specific and editorial. Cite missing
   tokens, broken composition, identity drift, ambiguous instructions.
