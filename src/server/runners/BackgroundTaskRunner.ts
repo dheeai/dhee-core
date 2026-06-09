@@ -64,6 +64,19 @@ export interface TaskRecord {
   startedAt: number;
   completedAt?: number;
   error?: string;
+  /**
+   * Set when the task `completed` because the stop-after-each-collection
+   * gate paused the run (not because it ran end-to-end). The value is the
+   * collection node id the walk halted after. Lets terminal-event
+   * consumers (the agent tool, the desktop re-wake nudge) tell an
+   * intentional gated pause apart from a true completion — so the agent
+   * narrates "paused at the gate, resume to continue" instead of
+   * confabulating a cause for the missing downstream output. See issue
+   * #133.
+   */
+  gatedAfter?: string;
+  /** Downstream node ids still pending behind the gate (only with `gatedAfter`). */
+  pendingAfterGate?: string[];
 }
 
 export type DispatchResult =
@@ -124,6 +137,20 @@ export interface ExecutorCancelled {
 }
 
 /**
+ * Sentinel an executor returns to signal "the task completed, but only
+ * because the stop-after-each-collection gate paused the run." The
+ * runner records the task as `completed` (the run didn't fail or
+ * cancel) AND stamps `gatedAfter` / `pendingAfterGate` onto the record
+ * so the terminal `completed` event carries the gate reason. Without
+ * this, a gated pause is indistinguishable from an end-to-end finish and
+ * the agent confabulates why downstream produced nothing (issue #133).
+ */
+export interface ExecutorGated {
+  gatedAfter: string;
+  pendingAfterGate?: string[];
+}
+
+/**
  * Executor: actually runs the task. Production wires this to
  * `runExecutor` (for run_to) / `redoNode` (for regen) / etc.;
  * tests inject a stub.
@@ -133,9 +160,14 @@ export interface ExecutorCancelled {
  *   - Resolve `void` on success
  *   - Resolve `{ cancelled: true }` when the underlying job
  *     cancelled itself out-of-band (stop file, soft shutdown)
+ *   - Resolve `{ gatedAfter, pendingAfterGate? }` when the run paused
+ *     on the stop-after-each-collection gate (a completion, but a gated
+ *     one — the runner stamps the reason onto the terminal event)
  *   - Reject (or throw) on error — the runner records it
  */
-export type TaskExecutor = (ctx: TaskExecutionContext) => Promise<void | ExecutorCancelled>;
+export type TaskExecutor = (
+  ctx: TaskExecutionContext,
+) => Promise<void | ExecutorCancelled | ExecutorGated>;
 
 export interface BackgroundTaskRunnerEvents {
   started: { task: TaskRecord };
@@ -321,12 +353,25 @@ export class BackgroundTaskRunner {
 
     try {
       const outcome = await this.executor({ spec: record.spec, signal: controller.signal, hooks });
-      const cancelledByOutcome = outcome !== undefined && outcome.cancelled === true;
+      const cancelledByOutcome =
+        outcome !== undefined && (outcome as ExecutorCancelled).cancelled === true;
+      const gated =
+        outcome !== undefined && typeof (outcome as ExecutorGated).gatedAfter === 'string'
+          ? (outcome as ExecutorGated)
+          : null;
       if (controller.signal.aborted || cancelledByOutcome) {
         record.status = 'cancelled';
         record.completedAt = Date.now();
         this.emit('cancelled', { task: { ...record } });
       } else {
+        // A gated pause is still a `completed` task — but stamp the gate
+        // reason onto the record so the terminal event carries it (the
+        // agent / desktop distinguish "paused at the gate" from "ran
+        // end-to-end"; issue #133).
+        if (gated) {
+          record.gatedAfter = gated.gatedAfter;
+          if (gated.pendingAfterGate) record.pendingAfterGate = gated.pendingAfterGate;
+        }
         record.status = 'completed';
         record.completedAt = Date.now();
         this.emit('completed', { task: { ...record } });

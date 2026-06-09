@@ -76,6 +76,13 @@ export interface RunProjectViaBundleResult {
    * it halted after. ok stays true; resume (re-run) to continue.
    */
   gatedAfter?: string;
+  /**
+   * Downstream node ids that still need to run when the gate paused the
+   * walk. Surfaced so the terminal-event consumers (the agent tool, the
+   * desktop's re-wake nudge) can say what's left instead of inferring a
+   * cause for the missing output. Only set alongside `gatedAfter`.
+   */
+  pendingAfterGate?: string[];
 }
 
 export async function runProjectViaBundle(
@@ -185,7 +192,11 @@ export async function runProjectViaBundle(
       `runProjectViaBundle: paused after collection '${walkResult.gatedAfter}' ` +
         `(stop-after-each-collection is on). Resume to continue.`,
     );
-    return { ok: true, gatedAfter: walkResult.gatedAfter };
+    return {
+      ok: true,
+      gatedAfter: walkResult.gatedAfter,
+      ...(walkResult.pendingAfterGate ? { pendingAfterGate: walkResult.pendingAfterGate } : {}),
+    };
   }
   return {
     ok: true,

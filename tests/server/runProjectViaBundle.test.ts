@@ -268,6 +268,10 @@ describe('runProjectViaBundle', () => {
     expect(result.ok).toBe(true);
     // Paused after the collection, before the goal.
     expect(result.gatedAfter).toBe('fanout');
+    // The unrun downstream tail flows all the way through (walker →
+    // runProjectViaBundle) so the terminal event can name what's left
+    // instead of leaving the agent to guess (issue #133).
+    expect(result.pendingAfterGate).toEqual(['final']);
     expect(result.finalVideoAbs).toBeUndefined();
 
     // walkState: the goal stayed pending — resume would run it next.

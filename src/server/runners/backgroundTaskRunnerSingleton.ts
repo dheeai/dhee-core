@@ -5,6 +5,7 @@
 import {
   BackgroundTaskRunner,
   type ExecutorCancelled,
+  type ExecutorGated,
   type TaskExecutionContext,
 } from './BackgroundTaskRunner.js';
 import { getProjectsDir } from '../../agent/pi/paths.js';
@@ -18,7 +19,9 @@ function resolveProjectDir(opts: { name: string; basePath: string; projectDir?: 
   return resolve(opts.basePath, opts.name);
 }
 
-async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorCancelled> {
+async function executeRunTo(
+  ctx: TaskExecutionContext,
+): Promise<void | ExecutorCancelled | ExecutorGated> {
   const params = ctx.spec.params as {
     projectDir?: string;
     stage?: string;
@@ -60,7 +63,14 @@ async function executeRunTo(ctx: TaskExecutionContext): Promise<void | ExecutorC
         `⏸ Paused after collection node '${result.gatedAfter}' — ` +
         `stop-after-each-collection is on. Resume to continue.`,
     });
-    return;
+    // Return the gate reason as a structured outcome so the runner stamps
+    // it onto the terminal `completed` event — the side-channel
+    // notification above isn't visible to consumers that key off the
+    // event (the agent tool, the desktop re-wake nudge). See issue #133.
+    return {
+      gatedAfter: result.gatedAfter,
+      ...(result.pendingAfterGate ? { pendingAfterGate: result.pendingAfterGate } : {}),
+    };
   }
   if (result.finalVideoAbs) {
     ctx.hooks.onNotification({
@@ -82,8 +92,9 @@ export function getBackgroundTaskRunner(): BackgroundTaskRunner {
     singleton = new BackgroundTaskRunner(async (ctx) => {
       switch (ctx.spec.kind) {
         case 'run_to':
-          await executeRunTo(ctx);
-          return;
+          // Propagate executeRunTo's outcome (void | cancelled | gated)
+          // so a gated pause reaches the runner's terminal-event stamping.
+          return await executeRunTo(ctx);
         case 'regen':
         case 'audit_fidelity':
           throw new Error(

@@ -209,7 +209,11 @@ single-select the first click submits.
   as "the cloud images expired"; the agent then proposed a re-render
   cascade that wouldn't have helped even if the diagnosis were right.
   If you can't read the runner's literal error, the right move is to
-  ask the user, not invent a plausible-sounding alternative.
+  ask the user, not invent a plausible-sounding alternative. The same
+  applies to an *early stop*: before you attribute one to a missing
+  endpoint or misconfig, check whether the run simply **paused on the
+  stop-after-each-collection gate** (see that section) — a by-design
+  pause is not a failure.
 
 - **On Comfy errors specifically:**
   - 429 PAYMENT_REQUIRED / subscription issues → the user may want to
@@ -382,6 +386,41 @@ flight**:
    auto-start another run. A `[system] run failed` message is
    classified for you: *transient* (Comfy/tunnel was briefly flaky) →
    offer to retry; *structural* → fix the upstream node then resume.
+   A `[system]` message that says the run **PAUSED on the gate** means
+   the run stopped *on purpose* after a collection — see the next
+   section; do NOT treat it as a failure or a completion.
+
+### Stop after each collection — the review gate
+
+A project can have **"Stop after each collection"** turned on
+(`gateAfterCollections` — a per-project toggle the user controls in the
+desktop). When it's on, the walker **pauses the run by design** right
+after each collection node (e.g. `shot_image_prompt`) finishes, so the
+user can review that batch before the next, more expensive stage runs.
+Resuming (`dhee_start_run` / `dhee_run_bundle` again) continues from
+where it paused — completed nodes are cached, only the remaining nodes
+run.
+
+When a run pauses on this gate, the terminal result / `[system]`
+notification **tells you so explicitly** and names the stages still
+pending. When you see that:
+
+- **Say the truth: the run paused at the gate, by design.** It did NOT
+  fail, and it is NOT waiting on a missing endpoint. The downstream
+  stages (images, video, …) produced nothing simply because the gate
+  halted the run before them.
+- **Do NOT diagnose a cause for the missing downstream output.** In
+  particular, do NOT tell the user ComfyUI is "likely not configured"
+  or offer to set it up — that's a confabulation. The gate is the
+  reason, and it's already in the message you received. (Real incident,
+  issue #133: a gated pause was explained as a ComfyUI misconfig and the
+  agent offered an irrelevant setup step.)
+- **Offer the correct next step:** the batch is ready to review; resume
+  to continue, or (if they don't want per-collection pauses) turn the
+  gate off for an end-to-end run.
+- Only attribute an early stop to a missing/failed endpoint when a stage
+  actually **failed** with an endpoint error — never when stages are
+  merely **pending** behind the gate.
 - `dhee_regenerate_node(projectDir, nodeId, itemId?)` — invalidate a
   single node (optionally a single collection item) and re-run it +
   everything downstream. Use when the user wants a fresh roll of the

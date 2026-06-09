@@ -20,6 +20,7 @@ import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
+import { buildGateRunResult } from './gateRunResult.js';
 
 const Params = Type.Object({
   projectDir: Type.String({ description: 'Absolute path to the project directory.' }),
@@ -50,7 +51,18 @@ interface DispatchResultRejected {
 type DispatchResult = DispatchResultStarted | DispatchResultRejected;
 
 interface RunnerRecord {
-  task: { id: string };
+  task: {
+    id: string;
+    /**
+     * Set when the run `completed` only because the
+     * stop-after-each-collection gate paused it. Lets the completed
+     * handler report the real (gated) reason instead of a generic
+     * "completed". See issue #133.
+     */
+    gatedAfter?: string;
+    /** Downstream node ids still pending behind the gate (with `gatedAfter`). */
+    pendingAfterGate?: string[];
+  };
 }
 interface TaskFailedEvent extends RunnerRecord {
   error: string;
@@ -93,7 +105,7 @@ export function makeRunBundleTool(deps: RunBundleDeps = {}) {
     name: 'dhee_run_bundle',
     label: 'Run bundle',
     description:
-      'Dispatch the bundle DAG for a project via the in-process BackgroundTaskRunner. Returns when the run finishes (success / failure / cancelled). The runner emits per-node progress to the UI status strip while this tool call is in flight. Pass stopAt to halt at an earlier stage, or runOnly to re-run specific nodes (cascades to their downstream).',
+      'Dispatch the bundle DAG for a project via the in-process BackgroundTaskRunner. Returns when the run finishes (success / failure / cancelled). The runner emits per-node progress to the UI status strip while this tool call is in flight. Pass stopAt to halt at an earlier stage, or runOnly to re-run specific nodes (cascades to their downstream). NOTE: a run can also pause on the "Stop after each collection" gate (gateAfterCollections) — when it does, the result says so and lists the stages still pending; that is an intentional pause, not a failure or a missing endpoint, so resume to continue rather than diagnosing the missing downstream output.',
     parameters: Params,
     async execute(_id, params): Promise<ReturnType<typeof textResult>> {
       const projectJsonPath = join(params.projectDir, 'project.json');
@@ -142,6 +154,25 @@ export function makeRunBundleTool(deps: RunBundleDeps = {}) {
           runner.on('completed', (e) => {
             if (!matches(e)) return;
             cleanup();
+            // A run can "complete" because it paused on the
+            // stop-after-each-collection gate, not because it ran
+            // end-to-end. When the runner stamped `gatedAfter` onto the
+            // event, report the gate reason explicitly so the agent
+            // narrates "paused, resume to continue" instead of guessing
+            // why downstream produced nothing (issue #133).
+            if (e.task.gatedAfter) {
+              resolve(
+                textResult(
+                  buildGateRunResult({
+                    gatedAfter: e.task.gatedAfter,
+                    ...(e.task.pendingAfterGate
+                      ? { pendingAfterGate: e.task.pendingAfterGate }
+                      : {}),
+                  }),
+                ),
+              );
+              return;
+            }
             resolve(textResult(`Bundle run completed (taskId=${taskId}).`));
           }),
         );
