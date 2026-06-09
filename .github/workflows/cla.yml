@@ -33,7 +33,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: 'signatures/cla.json'
-          path-to-document: 'https://github.com/dheeai/dhee-core/blob/main/CLA.md'
+          path-to-document: 'https://github.com/dheeai/dhee-core/blob/master/CLA.md'
           branch: 'cla-signatures'
           # Team members with employment IP assignment — they don't sign.
           # VERIFY these usernames before relying on the workflow.
