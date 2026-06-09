@@ -12,7 +12,7 @@
  * or the legacy executor (bundleSource absent). The two paths don't
  * collaborate per-run.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   parseBundleSource,
@@ -83,6 +83,45 @@ export interface RunProjectViaBundleResult {
    * cause for the missing output. Only set alongside `gatedAfter`.
    */
   pendingAfterGate?: string[];
+}
+
+/**
+ * Persist (or clear) a durable `pausedAtGate` marker on project.json so
+ * the PULL path — `dhee_get_status` — can tell a gated pause apart from a
+ * finish. The terminal-event nudge (push path) is suppressed when the
+ * agent session is busy (e.g. mid-poll), so the gate reason MUST also
+ * live somewhere any read can see it; otherwise the agent reads an idle
+ * walkState that looks done and resumes past the gate (issue #133, caught
+ * in a live run). Set on a gated pause; cleared on any non-gated walk
+ * outcome (goal reached / stopAt / runOnly) so it never goes stale.
+ *
+ * Best-effort + re-reads fresh: the walker already wrote walkState to
+ * project.json during the walk (which is finished by the time we're
+ * called), so we re-read before mutating to avoid clobbering it.
+ */
+function persistGateMarker(
+  projectDir: string,
+  marker: { gatedAfter: string; pendingAfterGate?: string[] } | null,
+): void {
+  const p = join(projectDir, 'project.json');
+  try {
+    if (!existsSync(p)) return;
+    const proj = JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>;
+    if (marker) {
+      proj['pausedAtGate'] = {
+        gatedAfter: marker.gatedAfter,
+        ...(marker.pendingAfterGate ? { pendingAfterGate: marker.pendingAfterGate } : {}),
+        ts: Date.now(),
+      };
+    } else if ('pausedAtGate' in proj) {
+      delete proj['pausedAtGate'];
+    } else {
+      return; // nothing to clear
+    }
+    writeFileSync(p, JSON.stringify(proj, null, 2));
+  } catch {
+    // Advisory hint only — a failure to persist must not break the run.
+  }
 }
 
 export async function runProjectViaBundle(
@@ -192,12 +231,21 @@ export async function runProjectViaBundle(
       `runProjectViaBundle: paused after collection '${walkResult.gatedAfter}' ` +
         `(stop-after-each-collection is on). Resume to continue.`,
     );
+    // Durable marker for the pull path (dhee_get_status). See persistGateMarker.
+    persistGateMarker(opts.projectDir, {
+      gatedAfter: walkResult.gatedAfter,
+      ...(walkResult.pendingAfterGate ? { pendingAfterGate: walkResult.pendingAfterGate } : {}),
+    });
     return {
       ok: true,
       gatedAfter: walkResult.gatedAfter,
       ...(walkResult.pendingAfterGate ? { pendingAfterGate: walkResult.pendingAfterGate } : {}),
     };
   }
+  // Any non-gated outcome (goal reached / stopAt / runOnly) means there is
+  // no pending gate — clear a stale marker so the pull path doesn't report
+  // a pause that no longer holds.
+  persistGateMarker(opts.projectDir, null);
   return {
     ok: true,
     ...(walkResult.goal ? { finalVideoAbs: walkResult.goal.outputAbs } : {}),

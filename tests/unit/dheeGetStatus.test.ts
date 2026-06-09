@@ -28,6 +28,15 @@ function projectWith(nodes: Record<string, { status: string; startedAt?: number 
   writeFileSync(join(dir, 'project.json'), JSON.stringify({ walkState: { nodes } }), 'utf8');
   return dir;
 }
+function projectWithGate(
+  nodes: Record<string, { status: string; startedAt?: number }>,
+  pausedAtGate: { gatedAfter: string; pendingAfterGate?: string[] },
+): string {
+  const dir = mkdtempSync(join(tmpdir(), 'getstatus-gate-'));
+  dirs.push(dir);
+  writeFileSync(join(dir, 'project.json'), JSON.stringify({ walkState: { nodes }, pausedAtGate }), 'utf8');
+  return dir;
+}
 function tool(probe: () => Promise<ActiveRunProbe>): ToolLike {
   return makeGetStatusTool({ probeActiveRun: probe }) as unknown as ToolLike;
 }
@@ -82,5 +91,46 @@ describe('dhee_get_status liveness reconciliation', () => {
     const r = await tool(async () => { probed = true; return { known: true }; }).execute('t', { projectDir: dir });
     expect(probed).toBe(false);
     expect(r.content[0]!.text).toMatch(/failed:\s+1/);
+  });
+});
+
+describe('dhee_get_status — gate pause on the PULL path (issue #133)', () => {
+  it('surfaces a PAUSED-AT-GATE banner when idle with a gate marker, steering away from resume/confabulation', async () => {
+    const dir = projectWithGate(
+      { story: { status: 'completed' }, shot_image_prompt: { status: 'completed' } },
+      { gatedAfter: 'shot_image_prompt', pendingAfterGate: ['shot_image', 'scene_clip', 'final_video'] },
+    );
+    const r = await tool(async () => ({ known: true })).execute('t', { projectDir: dir });
+    const text = r.content[0]!.text;
+    // The banner must be unmistakable and lead the output.
+    expect(text).toMatch(/paused at the gate/i);
+    expect(text).toContain('shot_image_prompt');
+    expect(text).toMatch(/gateAfterCollections|stop after each collection/i);
+    // Names what's still pending.
+    expect(text).toContain('final_video');
+    // Steers the agent off the two observed failure modes:
+    expect(text).toMatch(/do NOT dispatch another run|never auto-resume|wait for them/i);
+    expect(text).toMatch(/ComfyUI/);
+    // Idle counts must NOT be read as "finished".
+    expect(text).toMatch(/intentional/i);
+  });
+
+  it('does NOT show the gate banner while a resume is actively in progress (in_progress > 0)', async () => {
+    const dir = projectWithGate(
+      { story: { status: 'completed' }, scene_clip: { status: 'in_progress', startedAt: Date.now() - 5000 } },
+      { gatedAfter: 'shot_image_prompt', pendingAfterGate: ['final_video'] },
+    );
+    const projectName = dir.split('/').pop()!;
+    const r = await tool(async () => ({ known: true, activeProjectName: projectName })).execute('t', { projectDir: dir });
+    const text = r.content[0]!.text;
+    // An active run supersedes a stale marker — show progress, not a pause.
+    expect(text).not.toMatch(/paused at the gate/i);
+    expect(text).toMatch(/run is active/i);
+  });
+
+  it('no gate banner when there is no pausedAtGate marker (plain idle project)', async () => {
+    const dir = projectWith({ story: { status: 'completed' }, final_video: { status: 'completed' } });
+    const r = await tool(async () => ({ known: true })).execute('t', { projectDir: dir });
+    expect(r.content[0]!.text).not.toMatch(/paused at the gate/i);
   });
 });

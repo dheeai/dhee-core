@@ -277,8 +277,26 @@ describe('runProjectViaBundle', () => {
     // walkState: the goal stayed pending — resume would run it next.
     const proj = JSON.parse(
       readFileSync(join(projectDir, 'project.json'), 'utf-8'),
-    ) as { walkState: { nodes: Record<string, { status: string }> } };
+    ) as {
+      walkState: { nodes: Record<string, { status: string }> };
+      pausedAtGate?: { gatedAfter: string; pendingAfterGate?: string[] };
+    };
     expect(proj.walkState.nodes['final']?.status ?? 'pending').toBe('pending');
+    // A durable gate marker is persisted so the PULL path (dhee_get_status)
+    // can tell this pause apart from a finish (issue #133, the live-run gap).
+    expect(proj.pausedAtGate?.gatedAfter).toBe('fanout');
+    expect(proj.pausedAtGate?.pendingAfterGate).toEqual(['final']);
+
+    // Resume: the completed collection cache-skips (no re-gate), the goal
+    // runs, and the gate marker is CLEARED so a stale pause isn't reported.
+    const resume = await runProjectViaBundle({ projectDir });
+    expect(resume.ok).toBe(true);
+    expect(resume.gatedAfter).toBeUndefined();
+    expect(resume.finalVideoAbs).toBeDefined();
+    const proj2 = JSON.parse(
+      readFileSync(join(projectDir, 'project.json'), 'utf-8'),
+    ) as { pausedAtGate?: unknown };
+    expect(proj2.pausedAtGate).toBeUndefined();
   });
 
   it('fails clearly when the bundle declares a runner that is not registered', async () => {

@@ -398,22 +398,36 @@ user can review that batch before the next, more expensive stage runs.
 Resuming (`dhee_start_run` again) continues from where it paused —
 completed nodes are cached, only the remaining nodes run.
 
-When a run pauses on this gate, the terminal result / `[system]`
-notification **tells you so explicitly** and names the stages still
-pending. When you see that:
+You learn a run paused on the gate through **two** channels — trust
+either:
+1. A `[system]` re-wake notification that says the run **PAUSED** on the
+   gate and names the stages still pending.
+2. **`dhee_get_status`** — it prints a `⏸ PAUSED AT THE GATE` banner when
+   the run stopped on the gate.
+
+**A gated pause and a finished run look the same in raw counts** (zero
+in-progress, downstream produced nothing). Do NOT infer "the run
+finished" from an idle status — if the gate banner is there, the run
+PAUSED; it did not complete. (Real failure, issue #133: the agent saw an
+idle status, assumed it was done, and silently dispatched another run.)
+
+When you see a gate pause:
 
 - **Say the truth: the run paused at the gate, by design.** It did NOT
   fail, and it is NOT waiting on a missing endpoint. The downstream
   stages (images, video, …) produced nothing simply because the gate
   halted the run before them.
+- **NEVER auto-resume.** Do NOT dispatch another run (`dhee_start_run`)
+  to "continue" past the gate — that defeats the gate's whole purpose.
+  A gate means **STOP, tell the user the batch is ready to review, and
+  WAIT.** Resume only when the user explicitly says to.
 - **Do NOT diagnose a cause for the missing downstream output.** In
   particular, do NOT tell the user ComfyUI is "likely not configured"
   or offer to set it up — that's a confabulation. The gate is the
-  reason, and it's already in the message you received. (Real incident,
-  issue #133: a gated pause was explained as a ComfyUI misconfig and the
-  agent offered an irrelevant setup step.)
+  reason. (Issue #133: a gated pause was explained as a ComfyUI misconfig
+  and the agent offered an irrelevant setup step.)
 - **Offer the correct next step:** the batch is ready to review; resume
-  to continue, or (if they don't want per-collection pauses) turn the
+  *when they ask*, or (if they don't want per-collection pauses) turn the
   gate off for an end-to-end run.
 - Only attribute an early stop to a missing/failed endpoint when a stage
   actually **failed** with an endpoint error — never when stages are
