@@ -1,6 +1,7 @@
 {
   "id": "narrative_text_only",
   "version": "0.1.0",
+  "license": "MIT",
   "engineCompat": ">=0.1.0",
   "description": "Text-only narrative pipeline for end-to-end testing of the event-sourced graph. Produces plot + scenes + per-shot prompts for a ~30s video. No images, no GPU — runs end-to-end against an LLM API in 20-60s.",
   "dependencies": {
