@@ -518,6 +518,11 @@
           "scope": "matching"
         },
         {
+          "from": "shot_image_prompt",
+          "usage": "context",
+          "scope": "matching"
+        },
+        {
           "from": "world_style",
           "usage": "context"
         }
@@ -530,6 +535,15 @@
         "tool": "llm.generate",
         "config": {
           "promptTemplate": "prompts/shot_motion_directive.md",
+          "derivedInputs": [
+            {
+              "id": "motion_context",
+              "kind": "shot_motion_context",
+              "shotsInput": "scenes_plan",
+              "imagePromptPattern": "prompts/shot_image/{{item_id}}.json",
+              "motionDirectivePattern": "prompts/motion/{{item_id}}.json"
+            }
+          ],
           "tier": "medium",
           "outputFormat": "json"
         }
@@ -597,8 +611,13 @@
           "scope": "all"
         },
         {
-          "from": "scene_video_prompt",
+          "from": "scenes_plan",
           "usage": "context"
+        },
+        {
+          "from": "scene_video_prompt",
+          "usage": "context",
+          "scope": "all"
         }
       ],
       "outputs": {

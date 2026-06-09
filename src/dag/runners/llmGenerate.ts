@@ -41,6 +41,11 @@ import type { LLMPurpose, LLMTier } from '../../core/llm/purposes.js';
 import { LLMRouter, loadRoutingFromEnv, isRoutingEnabledFromEnv } from '../../core/llm/router.js';
 import { getLLMConfig } from '../../core/llm/config.js';
 import { recordLlmUsage } from '../../core/llm/usageTelemetry.js';
+import {
+  buildShotMotionContext,
+  type MotionContextDependency,
+  type MotionContextShotPlanShot,
+} from './shotMotionContext.js';
 
 // Pull the actual constructor from whichever export shape ajv ships.
 type AjvInstance = { compile: (schema: unknown) => (data: unknown) => boolean; errors?: Array<{ instancePath?: string; message?: string }> | null };
@@ -79,6 +84,12 @@ export interface LlmGenerateConfig {
   /** Sampling temperature. Default 0.7. */
   temperature?: number;
   /**
+   * Derived template variables built by the runner from project artifacts.
+   * Keeps bundle prompts declarative without teaching the walker about a
+   * specific prompt's context shape.
+   */
+  derivedInputs?: LlmGenerateDerivedInput[];
+  /**
    * When true, deterministically (re)assign scene + shot ids on the
    * parsed JSON output BEFORE schema validation. Use on scene/shot
    * breakdown nodes whose schema requires `scene_N_shot_M` shot ids:
@@ -90,6 +101,17 @@ export interface LlmGenerateConfig {
    * by construction. No-op for output with no top-level `shots` array.
    */
   normalizeShotIds?: boolean;
+}
+
+export interface LlmGenerateDerivedInput {
+  id: string;
+  kind: 'shot_motion_context';
+  /** ctx.inputs key containing { shots: [...] }. Default: scenes_plan. */
+  shotsInput?: string;
+  /** Project-relative pattern for per-shot image prompt JSON. */
+  imagePromptPattern?: string;
+  /** Project-relative pattern for per-shot motion directive JSON. */
+  motionDirectivePattern?: string;
 }
 
 // ── DI: client factory ─────────────────────────────────────────────────
@@ -269,6 +291,46 @@ export function splitOnCacheBreakpoint(
   return { prefix, suffix };
 }
 
+function recordFromUnknown(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function applyDerivedInputs(
+  ctx: RunnerContext,
+  cfg: LlmGenerateConfig,
+  vars: Record<string, unknown>,
+): { ok: true; additionalDependencies: MotionContextDependency[] } | { ok: false; error: string } {
+  const derivedInputs = cfg.derivedInputs ?? [];
+  const additionalDependencies: MotionContextDependency[] = [];
+  for (const derived of derivedInputs) {
+    if (!derived.id || typeof derived.id !== 'string') {
+      return { ok: false, error: 'llm.generate: derivedInputs entries require a string id' };
+    }
+    if (derived.kind !== 'shot_motion_context') {
+      return { ok: false, error: `llm.generate: unsupported derived input kind '${String(derived.kind)}'` };
+    }
+
+    const shotsInput = derived.shotsInput ?? 'scenes_plan';
+    const plan = recordFromUnknown(vars[shotsInput]);
+    const rawShots = plan?.['shots'];
+    const shots = Array.isArray(rawShots)
+      ? (rawShots as MotionContextShotPlanShot[])
+      : [];
+    const built = buildShotMotionContext({
+      projectDir: ctx.projectDir,
+      ...(ctx.itemId !== undefined ? { itemId: ctx.itemId } : {}),
+      shots,
+      imagePromptPattern: derived.imagePromptPattern ?? 'prompts/shot_image/{{item_id}}.json',
+      motionDirectivePattern: derived.motionDirectivePattern ?? 'prompts/motion/{{item_id}}.json',
+    });
+    vars[derived.id] = built.context;
+    additionalDependencies.push(...built.additionalDependencies);
+  }
+  return { ok: true, additionalDependencies };
+}
+
 // ── JSON parsing & validation ──────────────────────────────────────────
 
 function tryParseJson(raw: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -387,6 +449,7 @@ export function createLlmGenerateRunner(opts?: {
         forceRerun:     { type: 'boolean' },
         maxTokens:      { type: 'integer', minimum: 1 },
         temperature:    { type: 'number' },
+        derivedInputs:  { type: 'array' },
         normalizeShotIds: { type: 'boolean' },
       },
     },
@@ -414,6 +477,9 @@ export function createLlmGenerateRunner(opts?: {
     if (ctx.itemId !== undefined && inputsWithItemId['item_id'] === undefined) {
       inputsWithItemId['item_id'] = ctx.itemId;
     }
+    const derived = applyDerivedInputs(ctx, cfg, inputsWithItemId);
+    if (!derived.ok) return { ok: false, error: derived.error };
+    const additionalDependencies = derived.additionalDependencies;
 
     // 2. Skip-if-output-exists (cache hit) — but only when no pending
     //    critique exists for this (node, item). When a critique is
@@ -447,7 +513,14 @@ export function createLlmGenerateRunner(opts?: {
         const st = statSync(outAbs);
         if (st.isFile() && st.size > 0) {
           ctx.log(`llm.generate: cached → ${cfg.outputPath}`);
-          return { ok: true, outputPath: cfg.outputPath, metadata: { cached: true } };
+          return {
+            ok: true,
+            outputPath: cfg.outputPath,
+            metadata: {
+              cached: true,
+              ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
+            },
+          };
         }
       } catch {
         // Fall through to re-render.
@@ -526,6 +599,7 @@ export function createLlmGenerateRunner(opts?: {
             inputsHash: inputsHashCS,
             casHit: true,
             ...(hit.metadata ?? {}),
+            ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
           },
         };
       }
@@ -778,6 +852,7 @@ export function createLlmGenerateRunner(opts?: {
         cached: false,
         ...(inputsHashForEvent ? { inputsHash: inputsHashForEvent } : {}),
         ...(pendingCritique ? { critiqueApplied: true } : {}),
+        ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
       },
     };
   }

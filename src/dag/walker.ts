@@ -36,11 +36,10 @@ import type { BundleInputDecl } from './schema.js';
 import { createRunnerLLMAccess } from './llmAccess.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
-import { resolveRelayInputs, chunkScene } from './projectResolvers.js';
+import { chunkScene } from './projectResolvers.js';
 import { depBelongsToChunk } from './chunkDeps.js';
 import { applyAspect, applyAspectToConfig } from './aspect.js';
 import { effectiveFrameCap, scaleBudgetForGpu } from './chunkBudget.js';
-import { REPO_ROOT } from '../agent/pi/paths.js';
 import {
   loadWalkState,
   saveWalkState,
@@ -238,26 +237,6 @@ interface NodeInstance {
   outputRel?: string;
   /** Runner metadata. */
   metadata?: Record<string, unknown>;
-}
-
-/**
- * Pick the `scene_video_prompt` instance that supplies a `scene_clip`'s
- * global prompt. Per-scene global prompts: `scene_clip:scene_N` must read
- * `scene_video_prompt:scene_N`, not the first instance — otherwise every
- * clip is conditioned on scene 1's brief (the bug behind the repeating
- * spoken title). Falls back to the first instance when `scene_video_prompt`
- * is a single `stage` node (legacy one-prompt-for-the-whole-video bundles)
- * or when no instance matches the clip's scene.
- */
-export function pickSceneVideoPrompt<T extends { sceneNumber?: number }>(
-  svpInsts: T[],
-  sceneNumber: number | undefined,
-): T | undefined {
-  if (sceneNumber !== undefined) {
-    const match = svpInsts.find((s) => s.sceneNumber === sceneNumber);
-    if (match) return match;
-  }
-  return svpInsts[0];
 }
 
 /**
@@ -705,7 +684,6 @@ function buildRunnerConfig(
   inst: NodeInstance,
   projectDir: string,
   instancesById: Map<string, NodeInstance[]>,
-  bundleDir?: string,
 ): Record<string, unknown> {
   const node = inst.def;
   const base = { ...node.runner.config };
@@ -715,119 +693,13 @@ function buildRunnerConfig(
   if (inst.itemId) outputCtx['scene_id'] = inst.itemId;
   const outputPath = applyPattern(node.outputs.pattern, outputCtx);
   base['outputPath'] = outputPath;
+  if (inst.sceneNumber !== undefined) base['sceneNumber'] = inst.sceneNumber;
+  if (inst.shotRange !== undefined) base['shotRange'] = inst.shotRange;
+  if (inst.chunkIndex !== undefined) base['chunkIndex'] = inst.chunkIndex;
+  if (inst.chunkCount !== undefined) base['chunkCount'] = inst.chunkCount;
 
   // Per-runner input resolution.
-  if (node.runner.tool === 'comfy.ltx_director') {
-    // Instance carries chunk-specific scene info after materialization.
-    if (inst.sceneNumber === undefined) {
-      throw new Error('comfy.ltx_director: instance missing sceneNumber');
-    }
-    // Prefer NEW path: read shots from scenes_plan upstream, first-frame
-    // paths from shot_image's outputs, globalPrompt from
-    // scene_video_prompt's output. Falls back to legacy resolveRelayInputs
-    // (scene_*.json on disk) when scenes_plan upstream isn't present.
-    const scenesPlanInsts = instancesById.get('scenes_plan') ?? [];
-    const scenesPlanInst = scenesPlanInsts[0];
-    if (scenesPlanInst?.outputRel) {
-      const scenesPlanPath = resolve(projectDir, scenesPlanInst.outputRel);
-      if (existsSync(scenesPlanPath)) {
-        const plan = JSON.parse(readFileSync(scenesPlanPath, 'utf-8')) as {
-          scenes?: Array<{ id?: string }>;
-          shots?: Array<{ id?: string; scene?: number; shotNumber?: number; duration?: number; description?: string; cameraWork?: string; dialogue?: string | null; speaker?: string | null }>;
-        };
-        // Derive scene + shotNumber from shot.id when the LLM omits
-        // them — id format is `scene_N_shot_M`. This makes the runner
-        // robust to LLM output drift (DeepSeek sometimes skips fields
-        // the prompt asks for; the schema's relaxed shotNumber/scene
-        // requirement plus this derivation are paired).
-        for (const s of (plan.shots ?? []) as Array<{ id?: string; scene?: number; shotNumber?: number }>) {
-          if (s.scene === undefined || s.shotNumber === undefined) {
-            const m = (s.id ?? '').match(/^scene_(\d+)_shot_(\d+)$/);
-            if (m) {
-              if (s.scene === undefined) s.scene = parseInt(m[1]!, 10);
-              if (s.shotNumber === undefined) s.shotNumber = parseInt(m[2]!, 10);
-            }
-          }
-        }
-        const sceneShots = (plan.shots ?? []).filter((s) => s.scene === inst.sceneNumber);
-        if (sceneShots.length === 0) {
-          throw new Error(`comfy.ltx_director: scenes_plan has no shots for scene ${inst.sceneNumber}`);
-        }
-        // Honor shotRange when materializer set it (chunked); otherwise
-        // use all shots in the scene.
-        const filteredShots = inst.shotRange
-          ? sceneShots.filter((s) => (s.shotNumber ?? 0) >= inst.shotRange![0] && (s.shotNumber ?? 0) <= inst.shotRange![1])
-          : sceneShots;
-        // Match first frame paths against shot_image outputs by itemId.
-        const shotImageInsts = instancesById.get('shot_image') ?? [];
-        const shotImagePathById: Record<string, string> = {};
-        for (const u of shotImageInsts) {
-          if (u.itemId && u.outputRel) {
-            shotImagePathById[u.itemId] = resolve(projectDir, u.outputRel);
-          }
-        }
-        const firstFrames: string[] = [];
-        for (const s of filteredShots) {
-          const sid = s.id ?? `scene_${inst.sceneNumber}_shot_${s.shotNumber}`;
-          const path = shotImagePathById[sid];
-          if (!path || !existsSync(path)) {
-            throw new Error(`comfy.ltx_director: shot_image output missing for ${sid} (looked up: ${path ?? '<no upstream instance>'})`);
-          }
-          firstFrames.push(path);
-        }
-        // globalPrompt from scene_video_prompt's output, if present.
-        // Per-scene: this clip reads its OWN scene's brief
-        // (scene_clip:scene_N → scene_video_prompt:scene_N). Falls back
-        // to the first instance for single-stage (one-global) bundles.
-        let globalPrompt = '';
-        const svpInsts = instancesById.get('scene_video_prompt') ?? [];
-        const svp = pickSceneVideoPrompt(svpInsts, inst.sceneNumber);
-        if (svp?.outputRel) {
-          const svpPath = resolve(projectDir, svp.outputRel);
-          if (existsSync(svpPath)) globalPrompt = readFileSync(svpPath, 'utf-8');
-        }
-        base['shots'] = filteredShots.map((s) => ({
-          shotNumber: s.shotNumber ?? 0,
-          duration: s.duration ?? 3,
-          ...(s.description ? { description: s.description } : {}),
-          ...(s.cameraWork ? { cameraWork: s.cameraWork } : {}),
-          ...(s.dialogue ? { dialogue: s.dialogue } : {}),
-          ...(s.speaker ? { speaker: s.speaker } : {}),
-        }));
-        base['firstFrames'] = firstFrames;
-        base['globalPrompt'] = globalPrompt || `Scene ${inst.sceneNumber}`;
-      } else {
-        // scenes_plan output file missing; fall back to legacy
-        const resolved = resolveRelayInputs(projectDir, inst.sceneNumber, inst.shotRange ?? [1, 999]);
-        base['shots'] = resolved.shots;
-        base['firstFrames'] = resolved.firstFrames;
-        base['globalPrompt'] = resolved.globalPrompt;
-      }
-    } else {
-      // No scenes_plan upstream — fall back to legacy disk-file path.
-      if (!inst.shotRange) {
-        throw new Error('comfy.ltx_director: instance missing shotRange (no scenes_plan upstream and no chunkBy materialization)');
-      }
-      const resolved = resolveRelayInputs(projectDir, inst.sceneNumber, inst.shotRange);
-      base['shots'] = resolved.shots;
-      base['firstFrames'] = resolved.firstFrames;
-      base['globalPrompt'] = resolved.globalPrompt;
-    }
-    // workflowPath may already be in config; resolve relative paths
-    // against the kshana-core package root (NOT process.cwd()), so the
-    // bundle resolves correctly when kshana-core is loaded as a library
-    // by a host process (desktop Electron, packaged CLI) whose cwd is
-    // unrelated to where the workflow JSONs ship.
-    const wfRaw = (base['workflowPath'] as string | undefined) ?? '';
-    if (wfRaw && !wfRaw.startsWith('/')) {
-      // Prefer bundleDir when set (directory-layout bundles ship
-      // workflows in their own dir). Fall back to REPO_ROOT for
-      // legacy single-file bundles that referenced shared workflows.
-      const bundleRel = bundleDir ? resolve(bundleDir, wfRaw) : null;
-      base['workflowPath'] =
-        bundleRel && existsSync(bundleRel) ? bundleRel : resolve(REPO_ROOT, wfRaw);
-    }
-  } else if (node.runner.tool === 'ffmpeg.concat') {
+  if (node.runner.tool === 'ffmpeg.concat') {
     // Inputs come from upstream node outputs. Walk node.inputs and
     // collect absolute paths from completed instances.
     const inputs: string[] = [];
@@ -890,14 +762,6 @@ function buildRunnerConfig(
   return base;
 }
 
-const BUILT_IN_COMFY_TOOLS = new Set([
-  'comfy.klein',
-  'comfy.tti',
-  'comfy.fl2v',
-  'comfy.ltx_director',
-  'comfy.qwen_edit_chain',
-]);
-
 function isComfyCloudUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   try {
@@ -913,7 +777,7 @@ function classifyLocalResource(
   runtimeNode: NodeDef,
   inst: NodeInstance,
 ): Omit<LocalResourceSnapshot, 'startedAt'> | null {
-  if (!BUILT_IN_COMFY_TOOLS.has(tool)) return null;
+  if (!tool.startsWith('comfy.')) return null;
   const comfyMode = (process.env['COMFY_MODE'] ?? 'local').trim();
   if (comfyMode !== 'local') return null;
 
@@ -1420,7 +1284,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         return { ok: false, error: err, instances: allInstances };
       }
 
-      const cfg = buildRunnerConfig(inst, opts.projectDir, instancesById, opts.bundleDir);
+      const cfg = buildRunnerConfig(inst, opts.projectDir, instancesById);
       // outputPath: render the bundle's outputs.pattern against
       // item-context vars so per-instance writes don't collide. Every
       // runner that writes a single output file expects an outputPath
@@ -1751,7 +1615,13 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         const runnerDeps = result.metadata && typeof result.metadata === 'object'
           ? (result.metadata as { dependencies?: Array<{ nodeId: string; itemId?: string; role?: 'input' | 'context' | 'reference' | 'aggregate' }> }).dependencies
           : undefined;
-        const sourceDeps = Array.isArray(runnerDeps) ? runnerDeps : dependenciesUsed;
+        const additionalRunnerDeps = result.metadata && typeof result.metadata === 'object'
+          ? (result.metadata as { additionalDependencies?: Array<{ nodeId: string; itemId?: string; role?: 'input' | 'context' | 'reference' | 'aggregate' }> }).additionalDependencies
+          : undefined;
+        const sourceDeps = [
+          ...(Array.isArray(runnerDeps) ? runnerDeps : dependenciesUsed),
+          ...(Array.isArray(additionalRunnerDeps) ? additionalRunnerDeps : []),
+        ];
         const depSeen = new Set<string>();
         const depsForEvent: typeof dependenciesUsed = [];
         for (const d of sourceDeps) {

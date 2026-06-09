@@ -21,12 +21,15 @@
  */
 import 'dotenv/config';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, basename } from 'node:path';
+import { dirname, join, basename, resolve } from 'node:path';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { retryTransient } from './transientRetry.js';
+import { resolveRelayInputs } from '../projectResolvers.js';
+import { REPO_ROOT } from '../../agent/pi/paths.js';
+import { canonicalShotId, extractMotionDirective, readJsonFile } from './shotMotionContext.js';
 
-interface ShotInput {
+export interface ShotInput {
   shotNumber: number;
   duration: number;
   description?: string;
@@ -35,17 +38,22 @@ interface ShotInput {
   dialogue?: string | null;
   speaker?: string | null;
   purpose?: string;
+  transition?: string;
 }
 
-interface LtxDirectorConfig {
+export interface LtxDirectorConfig {
   workflowPath: string;
-  shots: ShotInput[];
-  firstFrames: string[];
-  globalPrompt: string;
+  shots?: ShotInput[];
+  firstFrames?: string[];
+  globalPrompt?: string;
   fps?: number;
   outputPath: string;
   width?: number;
   height?: number;
+  sceneNumber?: number;
+  shotRange?: [number, number];
+  chunkIndex?: number;
+  chunkCount?: number;
   /**
    * Named endpoint this runner targets. Resolved against the user's
    * endpoint registry — `ENDPOINT_<name_with_dots_replaced_by_underscores>`
@@ -129,6 +137,9 @@ function buildLocalPrompt(s: ShotInput): string {
   } else if (s.audio && s.audio.trim().length > 0) {
     parts.push(`Audio: ${reformatDialogue(s.audio.trim())}`);
   }
+  if (s.transition && s.transition.trim().length > 0) {
+    parts.push(`Transition: ${s.transition.trim()}`);
+  }
   return parts.join(' ');
 }
 
@@ -140,14 +151,215 @@ function alignToLTX(rawFrames: number[]): number[] {
   return rounded;
 }
 
+export interface ResolvedLtxDirectorConfig extends LtxDirectorConfig {
+  workflowPath: string;
+  shots: ShotInput[];
+  firstFrames: string[];
+  globalPrompt: string;
+  outputPath: string;
+  dependencies?: Array<{ nodeId: string; itemId?: string; role?: 'input' | 'context' | 'reference' | 'aggregate' }>;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asStringMap(value: unknown): Record<string, string> | undefined {
+  const obj = asRecord(value);
+  if (!obj) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
+function parseSceneNumberFromItemId(itemId: string | undefined): number | undefined {
+  const m = itemId?.match(/^scene_(\d+)/);
+  return m ? parseInt(m[1]!, 10) : undefined;
+}
+
+export function pickSceneVideoPrompt<T extends { sceneNumber?: number }>(
+  svpInsts: T[],
+  sceneNumber: number | undefined,
+): T | undefined {
+  if (sceneNumber !== undefined) {
+    const match = svpInsts.find((s) => s.sceneNumber === sceneNumber);
+    if (match) return match;
+  }
+  return svpInsts[0];
+}
+
+function deriveSceneShotFields(shots: Array<ShotInput & { id?: string; scene?: number }>): void {
+  for (const s of shots) {
+    if (s.scene === undefined || s.shotNumber === undefined) {
+      const m = s.id?.match(/^scene_(\d+)_shot_(\d+)$/);
+      if (m) {
+        if (s.scene === undefined) s.scene = parseInt(m[1]!, 10);
+        if (s.shotNumber === undefined) s.shotNumber = parseInt(m[2]!, 10);
+      }
+    }
+  }
+}
+
+function readPromptFromScenePromptInput(
+  ctx: RunnerContext,
+  sceneNumber: number | undefined,
+): { prompt?: string; dependency?: { nodeId: string; itemId?: string; role: 'context' } } {
+  const input = ctx.inputs['scene_video_prompt'];
+  if (typeof input === 'string') return { prompt: input, dependency: { nodeId: 'scene_video_prompt', role: 'context' } };
+  const pathsById = asStringMap(input);
+  if (!pathsById) return {};
+  const sceneKey = sceneNumber !== undefined ? `scene_${sceneNumber}` : undefined;
+  const promptPath = (sceneKey ? pathsById[sceneKey] : undefined) ?? Object.values(pathsById)[0];
+  if (!promptPath || !existsSync(promptPath)) return {};
+  try {
+    const itemId = Object.entries(pathsById).find(([, p]) => p === promptPath)?.[0];
+    return {
+      prompt: readFileSync(promptPath, 'utf-8'),
+      dependency: { nodeId: 'scene_video_prompt', ...(itemId !== undefined ? { itemId } : {}), role: 'context' },
+    };
+  } catch {
+    return {};
+  }
+}
+
+function resolveWorkflowPath(ctx: RunnerContext, workflowPath: string): string {
+  if (workflowPath.startsWith('/')) return workflowPath;
+  const bundleRel = ctx.bundleDir ? resolve(ctx.bundleDir, workflowPath) : undefined;
+  return bundleRel && existsSync(bundleRel) ? bundleRel : resolve(REPO_ROOT, workflowPath);
+}
+
+export function resolveLtxDirectorConfigFromInputs(
+  ctx: RunnerContext,
+  cfg: LtxDirectorConfig,
+): { ok: true; cfg: ResolvedLtxDirectorConfig } | { ok: false; error: string } {
+  if (cfg.shots && cfg.firstFrames && cfg.globalPrompt) {
+    return {
+      ok: true,
+      cfg: {
+        ...cfg,
+        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        shots: cfg.shots,
+        firstFrames: cfg.firstFrames,
+        globalPrompt: cfg.globalPrompt,
+        outputPath: cfg.outputPath,
+      },
+    };
+  }
+
+  const sceneNumber = cfg.sceneNumber ?? parseSceneNumberFromItemId(ctx.itemId);
+  const plan = asRecord(ctx.inputs['scenes_plan']);
+  const rawShots = plan?.['shots'];
+  if (Array.isArray(rawShots)) {
+    if (sceneNumber === undefined) {
+      return { ok: false, error: 'comfy.ltx_director: missing sceneNumber for scenes_plan input' };
+    }
+    const shots = (rawShots as Array<ShotInput & { id?: string; scene?: number }>).map((s) => ({ ...s }));
+    deriveSceneShotFields(shots);
+    const sceneShots = shots.filter((s) => s.scene === sceneNumber);
+    const selected = cfg.shotRange
+      ? sceneShots.filter((s) => s.shotNumber >= cfg.shotRange![0] && s.shotNumber <= cfg.shotRange![1])
+      : sceneShots;
+    if (selected.length === 0) {
+      return { ok: false, error: `comfy.ltx_director: scenes_plan has no shots for scene ${sceneNumber}` };
+    }
+
+    const firstFrameById = asStringMap(ctx.inputs['shot_image']);
+    if (!firstFrameById) {
+      return { ok: false, error: "comfy.ltx_director: missing ctx.inputs['shot_image'] path map" };
+    }
+    const motionById = asStringMap(ctx.inputs['shot_motion_directive']) ?? {};
+    const firstFrames: string[] = [];
+    const resolvedShots: ShotInput[] = [];
+    const dependencies: ResolvedLtxDirectorConfig['dependencies'] = [
+      { nodeId: 'scenes_plan', role: 'context' },
+    ];
+    for (const s of selected) {
+      const sid = canonicalShotId(s);
+      if (!sid) {
+        return { ok: false, error: `comfy.ltx_director: shot ${s.shotNumber} has no canonical id` };
+      }
+      const firstFrame = firstFrameById[sid];
+      if (!firstFrame || !existsSync(firstFrame)) {
+        return {
+          ok: false,
+          error: `comfy.ltx_director: shot_image output missing for ${sid} (looked up: ${firstFrame ?? '<no path>'})`,
+        };
+      }
+      firstFrames.push(firstFrame);
+      dependencies.push({ nodeId: 'shot_image', itemId: sid, role: 'input' });
+
+      const motion = motionById[sid]
+        ? extractMotionDirective(readJsonFile(motionById[sid]))
+        : undefined;
+      if (motionById[sid]) dependencies.push({ nodeId: 'shot_motion_directive', itemId: sid, role: 'input' });
+      resolvedShots.push({
+        shotNumber: s.shotNumber,
+        duration: s.duration ?? 3,
+        ...(motion?.description ?? s.description ? { description: motion?.description ?? s.description } : {}),
+        ...(motion?.cameraWork ?? s.cameraWork ? { cameraWork: motion?.cameraWork ?? s.cameraWork } : {}),
+        ...(motion?.audio ? { audio: motion.audio } : {}),
+        ...(s.dialogue ? { dialogue: s.dialogue } : {}),
+        ...(s.speaker ? { speaker: s.speaker } : {}),
+        ...(motion?.purpose ? { purpose: motion.purpose } : {}),
+        ...(motion?.transition ? { transition: motion.transition } : {}),
+      });
+    }
+    const scenePrompt = readPromptFromScenePromptInput(ctx, sceneNumber);
+    if (scenePrompt.dependency) dependencies.push(scenePrompt.dependency);
+
+    return {
+      ok: true,
+      cfg: {
+        ...cfg,
+        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        shots: resolvedShots,
+        firstFrames,
+        globalPrompt: scenePrompt.prompt ?? `Scene ${sceneNumber}`,
+        outputPath: cfg.outputPath,
+        dependencies,
+      },
+    };
+  }
+
+  if (sceneNumber === undefined || !cfg.shotRange) {
+    return {
+      ok: false,
+      error: 'comfy.ltx_director: missing scenes_plan input and no legacy sceneNumber/shotRange fallback is available',
+    };
+  }
+  try {
+    const resolved = resolveRelayInputs(ctx.projectDir, sceneNumber, cfg.shotRange);
+    return {
+      ok: true,
+      cfg: {
+        ...cfg,
+        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        shots: resolved.shots,
+        firstFrames: resolved.firstFrames,
+        globalPrompt: resolved.globalPrompt,
+        outputPath: cfg.outputPath,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: `comfy.ltx_director: ${(err as Error).message}` };
+  }
+}
+
 // ── Runner implementation ─────────────────────────────────────────────
 
 async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
-  const cfg = ctx.node.runner.config as unknown as LtxDirectorConfig;
+  const rawCfg = ctx.node.runner.config as unknown as LtxDirectorConfig;
 
-  if (!cfg.workflowPath || !cfg.shots || !cfg.firstFrames || !cfg.globalPrompt) {
-    return { ok: false, error: 'comfy.ltx_director: missing required config (workflowPath/shots/firstFrames/globalPrompt)' };
+  if (!rawCfg.workflowPath || !rawCfg.outputPath) {
+    return { ok: false, error: 'comfy.ltx_director: missing required config (workflowPath/outputPath)' };
   }
+  const resolvedCfg = resolveLtxDirectorConfigFromInputs(ctx, rawCfg);
+  if (!resolvedCfg.ok) return { ok: false, error: resolvedCfg.error };
+  const cfg = resolvedCfg.cfg;
 
   // Resume short-circuit: if the chunk's output mp4 already exists on
   // disk, skip the (expensive) Comfy call and return success with the
@@ -387,7 +599,14 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   return {
     ok: true,
     outputPath: cfg.outputPath,
-    metadata: { absolutePath: downloaded, promptId, seed, totalFrames, fps },
+    metadata: {
+      absolutePath: downloaded,
+      promptId,
+      seed,
+      totalFrames,
+      fps,
+      ...(cfg.dependencies ? { dependencies: cfg.dependencies } : {}),
+    },
   };
 }
 
@@ -400,15 +619,19 @@ function describe(): RunnerDescription {
     modalities: { input: ['image', 'text'], output: ['video'] },
     configSchema: {
       type: 'object',
-      required: ['workflowPath', 'shots', 'firstFrames', 'globalPrompt', 'outputPath'],
+      required: ['workflowPath', 'outputPath'],
       properties: {
-        workflowPath: { type: 'string', description: 'Absolute path to LTX Director Comfy workflow JSON' },
+        workflowPath: { type: 'string', description: 'Path to LTX Director Comfy workflow JSON' },
         shots: { type: 'array', items: { type: 'object' } },
         firstFrames: { type: 'array', items: { type: 'string' } },
         globalPrompt: { type: 'string' },
         fps: { type: 'number', default: 24 },
         width: { type: 'number', default: 854 },
         height: { type: 'number', default: 480 },
+        sceneNumber: { type: 'number' },
+        shotRange: { type: 'array', items: { type: 'number' } },
+        chunkIndex: { type: 'number' },
+        chunkCount: { type: 'number' },
         outputPath: { type: 'string', description: 'Output video path relative to project dir' },
       },
     },

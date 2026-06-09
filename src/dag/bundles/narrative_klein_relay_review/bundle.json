@@ -570,8 +570,13 @@
           "scope": "all"
         },
         {
-          "from": "scene_video_prompt",
+          "from": "scenes_plan",
           "usage": "context"
+        },
+        {
+          "from": "scene_video_prompt",
+          "usage": "context",
+          "scope": "all"
         },
         {
           "from": "shot_image_review",
