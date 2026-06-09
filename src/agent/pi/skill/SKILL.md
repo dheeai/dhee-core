@@ -174,7 +174,7 @@ single-select the first click submits.
     Example: shot 6 of `shot_image` →
     `dhee_regenerate_node(nodeId='shot_image', itemId='scene_1_shot_6')`.
 
-  - NEVER use `dhee_run_bundle(runOnly=[bareNodeId])` to fix one item.
+  - NEVER use `dhee_start_run(runOnly=[bareNodeId])` to fix one item.
     `runOnly` with a bare nodeId re-renders EVERY itemId under that
     node — destroying renders the user didn't ask to touch. Real
     incident 2026-06-01: agent escalated "fix shot 6 finger" to
@@ -315,8 +315,8 @@ scoped to the project so you don't waste context on engine internals.
      predate it).
   3. Regenerate ALL flagged image nodes in ONE run: take the DISTINCT
      node ids from the report (e.g. `character_image`, `setting_image`,
-     `shot_image`) and `dhee_run_bundle(runOnly=[those ids])` (or
-     `dhee_start_run`). The walker re-renders them in dependency order —
+     `shot_image`) and `dhee_start_run(runOnly=[those ids])`. The walker
+     re-renders them in dependency order —
      reference images (character/setting) before the shots that use them
      — then cascades to the scene clips + final cut. Do NOT regenerate
      them one node at a time with separate `dhee_regenerate_node` calls:
@@ -328,7 +328,7 @@ scoped to the project so you don't waste context on engine internals.
   — override a node's output content. Same payload shapes as
   `dhee_write_input`. Resolves outputPath from the bundle's pattern,
   writes the bytes, marks the node user-supplied (`generation.tool='user'`),
-  and invalidates downstream so the next `dhee_run_bundle` cascades
+  and invalidates downstream so the next `dhee_start_run` cascades
   correctly. Use when:
     - the user wants to rewrite a generated prompt (better tone, more
       detail, fix a hallucination)
@@ -340,20 +340,18 @@ scoped to the project so you don't waste context on engine internals.
   preserve the old file as `.v<N>.<ext>`). That matches user intent:
   if a character ref is updated, downstream shots should not be stuck
   with the prior version. The user can re-attach.
-- `dhee_start_run(projectDir, stopAt?, runOnly?)` — **PREFER THIS in
-  interactive (desktop) sessions.** Dispatches the DAG and returns
-  IMMEDIATELY (non-blocking) — the run continues in the background
-  while you stay free to talk to the user. You'll be notified when it
-  finishes (a `[system] run completed/failed` message arrives). This is
-  what makes you interruptible: while a run is in flight you can answer
-  questions or redirect without the run blocking your turn.
+- `dhee_start_run(projectDir, stopAt?, runOnly?)` — **the way you run a
+  bundle.** Dispatches the DAG and returns IMMEDIATELY (non-blocking) —
+  the run continues in the background while you stay free to talk to the
+  user. You'll be notified when it finishes (a `[system] run completed /
+  failed / paused-on-the-gate` message arrives). This is what makes you
+  interruptible: while a run is in flight you can answer questions or
+  redirect without the run blocking your turn. There is no "run and
+  wait" variant — a blocking run would freeze your turn for the whole
+  render; always use this and react to the notification when it lands.
 - `dhee_stop_run(projectDir?)` — abort the in-flight run and WAIT until
   it has actually stopped (so a follow-up `dhee_start_run` is safe).
   Call this when the user's message warrants halting the run.
-- `dhee_run_bundle(projectDir, stopAt?, runOnly?)` — the BLOCKING
-  variant: dispatch + wait, returns the final video path. Use only in
-  headless / non-interactive contexts where there's no human to
-  interject. In a desktop chat, use `dhee_start_run` instead.
 - `dhee_get_status(projectDir)` — summarize current walkState as
   counts + per-failed-node detail. Read-only and cheap; use this
   often.
@@ -397,9 +395,8 @@ A project can have **"Stop after each collection"** turned on
 desktop). When it's on, the walker **pauses the run by design** right
 after each collection node (e.g. `shot_image_prompt`) finishes, so the
 user can review that batch before the next, more expensive stage runs.
-Resuming (`dhee_start_run` / `dhee_run_bundle` again) continues from
-where it paused — completed nodes are cached, only the remaining nodes
-run.
+Resuming (`dhee_start_run` again) continues from where it paused —
+completed nodes are cached, only the remaining nodes run.
 
 When a run pauses on this gate, the terminal result / `[system]`
 notification **tells you so explicitly** and names the stages still
@@ -497,7 +494,7 @@ pending. When you see that:
       Comfy exposes (includes `UnetLoaderGGUF.unet_name`,
       `CLIPLoaderGGUF.clip_name`, etc. so you can see ALL options)
 
-  When to call: any time a `dhee_run_bundle` or `dhee_regenerate_node`
+  When to call: any time a `dhee_start_run` or `dhee_regenerate_node`
   fails with a "Value not in list" / "prompt_outputs_failed_validation"
   / "model not found" error. Also proactively for new projects against
   a user's local Comfy you haven't run this workflow on before.
@@ -616,7 +613,7 @@ the story say" (text content), call dhee_read_artifact.
 **Typical loop:**
 
 1. `dhee_create_project` → user gives you a goal
-2. `dhee_run_bundle` → blocks while the DAG runs end-to-end
+2. `dhee_start_run` → dispatches the DAG (non-blocking); you're notified when it finishes
 3. `dhee_get_status` → confirm what completed and what failed
 4. `dhee_read_artifact` → inspect a specific output the user asks about
 5. `dhee_regenerate_node` → fix one shot the user doesn't like

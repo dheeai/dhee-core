@@ -4,8 +4,8 @@
  * log.
  *
  * Why this exists (the 2026-06-03 eye-of-the-storm incident): the agent
- * reaches the walker through two asymmetric paths. `dhee_start_run` /
- * `dhee_run_bundle` go through the single-flight `BackgroundTaskRunner`;
+ * reaches the walker through two asymmetric paths. `dhee_start_run`
+ * goes through the single-flight `BackgroundTaskRunner`;
  * `dhee_regenerate_node` goes straight to `runProjectViaBundle` →
  * `walkBundle`, bypassing that guard. So a regenerate could launch a
  * SECOND walk while a start_run walk was still live. Two concurrent

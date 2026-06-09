@@ -66,7 +66,7 @@ export function makeShowNodeOutputTool() {
     name: 'dhee_show_node_output',
     label: 'Show node output',
     description:
-      "Display a bundle node's output file inline in the chat. The chat panel renders images, videos, and audio inline; other file types appear as a path. Use this after dhee_run_bundle / dhee_regenerate_node when you want the user to see what was generated. For arbitrary on-disk files outside the bundle's walkState (e.g. user-uploaded refs), use dhee_show_file instead.",
+      "Display a bundle node's output file inline in the chat. The chat panel renders images, videos, and audio inline; other file types appear as a path. Use this after dhee_start_run / dhee_regenerate_node when you want the user to see what was generated. For arbitrary on-disk files outside the bundle's walkState (e.g. user-uploaded refs), use dhee_show_file instead.",
     parameters: Params,
     async execute(_id, params) {
       const projectJsonPath = join(params.projectDir, 'project.json');

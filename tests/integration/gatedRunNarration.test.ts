@@ -1,19 +1,26 @@
 /**
- * Gated-run narration integration (issue #133) — drives the REAL
+ * Gated-run terminal-event integration (issue #133) — drives the REAL
  * production runner singleton (which wires `executeRunTo` →
- * runProjectViaBundle → walker) through the `dhee_run_bundle` tool
- * against a project whose stop-after-each-collection gate is ON.
+ * runProjectViaBundle → walker) against a project whose
+ * stop-after-each-collection gate is ON, and asserts the terminal
+ * `completed` event carries the gate reason.
  *
- * This is the full blocking-path seam, no stubs in the middle:
- *   tool → singleton.dispatch → executeRunTo → runProjectViaBundle →
- *   walker gate → ExecutorGated outcome → runner stamps the terminal
- *   `completed` event → dheeRunBundle's gate branch → buildGateRunResult.
+ * This is the structural signal BOTH run-completion consumers depend on:
+ *   - dhee-desktop's non-blocking re-wake nudge (dheeCoreManager
+ *     .onRunTerminal reads `task.gatedAfter`), and
+ *   - any future headless consumer.
  *
- * The bug it pins: before the fix the tool returned a generic "Bundle
- * run completed", the agent saw the downstream stages produced nothing,
- * and confabulated a ComfyUI-misconfig cause. Now the tool result states
- * the real (gated) reason, names what's pending, and steers toward
- * resume — so the agent narrates correctly.
+ * The bug it pins (issue #133): without the gate reason on the event, a
+ * gated pause is indistinguishable from an end-to-end finish, and the
+ * agent confabulates why downstream produced nothing ("ComfyUI likely
+ * not configured"). Here we prove the real singleton stamps
+ * `gatedAfter` + `pendingAfterGate` onto the `completed` event when the
+ * walk pauses on the gate.
+ *
+ * (There is intentionally no blocking "run and wait" agent tool — the
+ * agent always dispatches via the non-blocking dhee_start_run and reacts
+ * to this terminal event. The singleton path under test is the one both
+ * dhee_start_run and the desktop re-wake share.)
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -24,19 +31,11 @@ import {
   getBackgroundTaskRunner,
   __resetBackgroundTaskRunnerForTesting,
 } from '../../src/server/runners/backgroundTaskRunnerSingleton.js';
-import { makeRunBundleTool } from '../../src/agent/pi/tools/dheeRunBundle.js';
 import {
   __resetGlobalRegistryForTesting,
   getGlobalRegistry,
 } from '../../src/dag/runners/registry.js';
 import type { Runner } from '../../src/dag/schema.js';
-
-interface ToolLike {
-  execute: (
-    id: string,
-    params: Record<string, unknown>,
-  ) => Promise<{ content: Array<{ text: string }>; isError?: boolean }>;
-}
 
 /** Item-aware stub: upstream emits the fan-out items; the rest write a stub file. */
 function fanRunner(): Runner {
@@ -64,7 +63,7 @@ function fanRunner(): Runner {
   };
 }
 
-describe('gated-run narration — dhee_run_bundle × real runner singleton', () => {
+describe('gated-run terminal event — real BackgroundTaskRunner singleton', () => {
   let projectDir: string;
   let tmpHome: string;
   let origHome: string | undefined;
@@ -139,28 +138,38 @@ describe('gated-run narration — dhee_run_bundle × real runner singleton', () 
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  it('returns the gate reason (not a generic completion) and steers off the ComfyUI confabulation', async () => {
+  it('stamps gatedAfter + pendingAfterGate onto the completed event when the walk pauses on the gate', async () => {
     const runner = getBackgroundTaskRunner();
-    const tool = makeRunBundleTool({
-      getBackgroundTaskRunner: () => runner as never,
-    }) as unknown as ToolLike;
 
-    const out = await tool.execute('t', { projectDir });
+    const terminal = new Promise<{ gatedAfter?: string; pendingAfterGate?: string[] }>(
+      (resolve, reject) => {
+        runner.on('completed', (e: { task: { gatedAfter?: string; pendingAfterGate?: string[] } }) => {
+          resolve({
+            ...(e.task.gatedAfter !== undefined ? { gatedAfter: e.task.gatedAfter } : {}),
+            ...(e.task.pendingAfterGate !== undefined
+              ? { pendingAfterGate: e.task.pendingAfterGate }
+              : {}),
+          });
+        });
+        // A gated pause classifies as `completed`, never failed/cancelled —
+        // fail loudly if it does, so a regression here can't pass silently.
+        runner.on('failed', (e: { error?: string }) => reject(new Error(`run failed: ${e.error}`)));
+        runner.on('cancelled', () => reject(new Error('run cancelled unexpectedly')));
+      },
+    );
 
-    // A gated pause is a successful, intentional stop — NOT an error.
-    expect(out.isError).toBeFalsy();
-    const text = out.content[0]!.text;
-    // The real reason, named explicitly:
-    expect(text).toMatch(/paused/i);
-    expect(text).toContain('fanout'); // the collection it gated after
-    expect(text).toMatch(/gateAfterCollections|stop after each collection/i);
-    // What's still pending behind the gate (resolved through the full stack):
-    expect(text).toContain('final');
-    // It must NOT read as a finished run…
-    expect(text).not.toMatch(/run completed \(taskId/i);
-    // …and must steer the agent off the confabulation, toward resume.
-    expect(text).toMatch(/ComfyUI/);
-    expect(text).toMatch(/not a failure/i);
-    expect(text).toMatch(/resume/i);
+    const dispatch = runner.dispatch({
+      kind: 'run_to',
+      projectName: 'gated-proj',
+      params: { projectDir },
+      sessionId: 'test-gated',
+    });
+    expect(dispatch.status).toBe('started');
+
+    const task = await terminal;
+    // The run paused on the gate, by design — and said so on the event.
+    expect(task.gatedAfter).toBe('fanout');
+    // …and named the unrun downstream tail, resolved through the full stack.
+    expect(task.pendingAfterGate).toEqual(['final']);
   });
 });

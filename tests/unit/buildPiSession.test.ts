@@ -65,7 +65,7 @@ describe('buildPiSessionConfig', () => {
       sessionManager: SessionManager.inMemory(process.cwd()),
     });
     expect(cfg.tools).toContain('dhee_create_project');
-    expect(cfg.tools).toContain('dhee_run_bundle');
+    expect(cfg.tools).toContain('dhee_start_run');
     expect(cfg.tools).toContain('dhee_get_status');
     expect(cfg.tools).toContain('dhee_regenerate_node');
     expect(cfg.tools).toContain('dhee_read_artifact');

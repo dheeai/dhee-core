@@ -65,7 +65,7 @@ const Params = Type.Object({
   applyOnly: Type.Optional(
     Type.Boolean({
       description:
-        'BATCH MODE. When true, stamps the critique + invalidates the target but does NOT dispatch the bundle. Use when you have many critiques to apply in a row — each call returns in milliseconds instead of waiting on the full cascade. After the last batched critique, call dhee_run_bundle ONCE to process every pending critique in a single walker pass. Ignored if confirm is not also true.',
+        'BATCH MODE. When true, stamps the critique + invalidates the target but does NOT dispatch the bundle. Use when you have many critiques to apply in a row — each call returns in milliseconds instead of waiting on the full cascade. After the last batched critique, call dhee_start_run ONCE to process every pending critique in a single walker pass. Ignored if confirm is not also true.',
     }),
   ),
 });
@@ -240,7 +240,7 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
         );
       }
       const message = params.applyOnly
-        ? `Critique batched for '${target}'. pendingCritique stamped + node invalidated; dispatch SKIPPED (applyOnly). Call dhee_run_bundle when all batched critiques are queued.`
+        ? `Critique batched for '${target}'. pendingCritique stamped + node invalidated; dispatch SKIPPED (applyOnly). Call dhee_start_run when all batched critiques are queued.`
         : `Critique applied to '${target}'. Pending critique stamped in project.json; node + downstream cascade invalidated via event-derived dep graph; bundle re-dispatched (walker re-runs everything pending).`;
       return textResult(message, {
         applied: true,

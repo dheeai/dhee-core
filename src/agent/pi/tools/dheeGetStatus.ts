@@ -254,7 +254,7 @@ export function makeGetStatusTool(deps: GetStatusDeps = {}) {
           );
           summary.push(
             ``,
-            `These node(s) are stale walkState leftovers from a run that stopped, NOT live work — do NOT tell the user "it's still running". To finish them, dispatch a run (dhee_start_run / dhee_run_bundle); the walker re-runs interrupted + failed nodes and skips completed ones.`,
+            `These node(s) are stale walkState leftovers from a run that stopped, NOT live work — do NOT tell the user "it's still running". To finish them, dispatch a run (dhee_start_run); the walker re-runs interrupted + failed nodes and skips completed ones.`,
           );
         } else {
           summary.push(``, `In progress (run is active):`, ...inProgressDetail);

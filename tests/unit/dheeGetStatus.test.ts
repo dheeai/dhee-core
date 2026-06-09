@@ -45,7 +45,7 @@ describe('dhee_get_status liveness reconciliation', () => {
     const text = r.content[0]!.text;
     expect(text).toMatch(/interrupted/i);
     expect(text).toMatch(/NOT running|not.*active/i);
-    expect(text).toMatch(/dhee_start_run|dhee_run_bundle|dispatch a run/i);
+    expect(text).toMatch(/dhee_start_run|dispatch a run/i);
     // It must NOT frame the stale node as live "running Ns".
     expect(text).not.toMatch(/running 26m/i);
   });

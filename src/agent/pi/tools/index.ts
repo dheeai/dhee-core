@@ -29,7 +29,6 @@ import { dheeListVersionsTool, makeListVersionsTool } from './dheeListVersions.j
 import { dheePresentBundleChoicesTool, makePresentBundleChoicesTool } from './dheePresentBundleChoices.js';
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
-import { dheeRunBundleTool, makeRunBundleTool } from './dheeRunBundle.js';
 import { dheeStartRunTool, makeStartRunTool } from './dheeStartRun.js';
 import { dheeStopRunTool, makeStopRunTool } from './dheeStopRun.js';
 import { dheeSetProjectFieldTool, makeSetProjectFieldTool } from './dheeSetProjectField.js';
@@ -46,7 +45,6 @@ export const DHEE_TOOL_NAMES = [
   'dhee_list_bundles',
   'dhee_present_bundle_choices',
   'dhee_describe_bundle',
-  'dhee_run_bundle',
   'dhee_start_run',
   'dhee_stop_run',
   'dhee_get_status',
@@ -86,7 +84,6 @@ export {
   dheePresentBundleChoicesTool,
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
-  dheeRunBundleTool,
   dheeStartRunTool,
   dheeStopRunTool,
   dheeSelectVersionTool,
@@ -114,7 +111,6 @@ export {
   makePresentBundleChoicesTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
-  makeRunBundleTool,
   makeStartRunTool,
   makeStopRunTool,
   makeSelectVersionTool,
@@ -140,7 +136,6 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeListBundlesTool);
   pi.registerTool(dheePresentBundleChoicesTool);
   pi.registerTool(dheeDescribeBundleTool);
-  pi.registerTool(dheeRunBundleTool);
   pi.registerTool(dheeStartRunTool);
   pi.registerTool(dheeStopRunTool);
   pi.registerTool(dheeGetStatusTool);
