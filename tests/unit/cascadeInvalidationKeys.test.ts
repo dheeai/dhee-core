@@ -201,4 +201,43 @@ describe('cascadeInvalidationKeys', () => {
     // longer the current state, so it shouldn't appear in cascade.
     expect(keysOf(r)).toEqual(['plot']);
   });
+
+  it('12. motion context stays bounded to prev/current/next shot prompts', () => {
+    const events = [
+      completed('shot_image_prompt', 'scene_1_shot_1', [], 1),
+      completed('shot_image_prompt', 'scene_1_shot_2', [], 2),
+      completed('shot_image_prompt', 'scene_1_shot_3', [], 3),
+      completed('shot_image_prompt', 'scene_1_shot_4', [], 4),
+      completed('shot_motion_directive', 'scene_1_shot_1', [
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_1' },
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_2' },
+      ], 5),
+      completed('shot_motion_directive', 'scene_1_shot_2', [
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_1' },
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_2' },
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_3' },
+      ], 6),
+      completed('shot_motion_directive', 'scene_1_shot_3', [
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_2' },
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_3' },
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_4' },
+      ], 7),
+      completed('shot_motion_directive', 'scene_1_shot_4', [
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_3' },
+        { nodeId: 'shot_image_prompt', itemId: 'scene_1_shot_4' },
+      ], 8),
+    ];
+
+    const r = cascadeInvalidationKeys(events, {
+      nodeId: 'shot_image_prompt',
+      itemId: 'scene_1_shot_2',
+    });
+
+    expect(keysOf(r)).toEqual([
+      'shot_image_prompt:scene_1_shot_2',
+      'shot_motion_directive:scene_1_shot_1',
+      'shot_motion_directive:scene_1_shot_2',
+      'shot_motion_directive:scene_1_shot_3',
+    ]);
+  });
 });

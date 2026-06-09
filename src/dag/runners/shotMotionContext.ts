@@ -183,7 +183,6 @@ export function buildShotMotionContext(
   for (const shot of [previous, current, next]) {
     addDep('shot_image_prompt', canonicalShotId(shot), 'context');
   }
-  addDep('shot_motion_directive', canonicalShotId(previous), 'context');
 
   return {
     context: {
