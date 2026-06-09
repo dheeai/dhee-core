@@ -33,6 +33,10 @@
  */
 
 import { EventEmitter } from 'node:events';
+import {
+  getCurrentLocalResource,
+  type LocalResourceSnapshot,
+} from '../../dag/localResourceState.js';
 
 export type TaskKind = 'run_to' | 'regen' | 'audit_fidelity';
 
@@ -77,6 +81,12 @@ export interface TaskRecord {
   gatedAfter?: string;
   /** Downstream node ids still pending behind the gate (only with `gatedAfter`). */
   pendingAfterGate?: string[];
+  /**
+   * Current local resource held by the active task, when a runner has
+   * declared one. This is a live status hint for UI gating; terminal
+   * records usually omit it.
+   */
+  currentResource?: LocalResourceSnapshot | null;
 }
 
 export type DispatchResult =
@@ -238,7 +248,11 @@ export class BackgroundTaskRunner {
   /** Returns the active task record (if any) — read-only snapshot. */
   getActive(): TaskRecord | null {
     if (!this.active) return null;
-    return { ...this.active.record };
+    const currentResource = getCurrentLocalResource();
+    return {
+      ...this.active.record,
+      ...(currentResource ? { currentResource } : {}),
+    };
   }
 
   isBusy(): boolean {

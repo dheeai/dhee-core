@@ -12,13 +12,70 @@
  * before any IO.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve as pathResolve, relative } from 'node:path';
+import { basename, resolve as pathResolve, relative } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
 import { assertPathInProject } from './scopeGuard.js';
 
 function textResult(text: string, isError = false) {
   return { content: [{ type: 'text' as const, text }], details: {}, ...(isError ? { isError: true } : {}) };
+}
+
+function summarizeProjectJson(raw: string): string | null {
+  let project: Record<string, unknown>;
+  try {
+    project = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const walkStateRaw = project['walkState'];
+  const walkState =
+    walkStateRaw && typeof walkStateRaw === 'object'
+      ? (walkStateRaw as { nodes?: Record<string, { status?: string; outputPath?: string; error?: string }> })
+      : null;
+  const nodes = walkState?.nodes ?? {};
+  const entries = Object.entries(nodes);
+  const counts = entries.reduce<Record<string, number>>((acc, [, entry]) => {
+    const status = entry.status ?? 'unknown';
+    acc[status] = (acc[status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const incomplete = entries
+    .filter(([, entry]) => entry.status !== 'completed')
+    .slice(0, 20)
+    .map(([key, entry]) => ({
+      key,
+      status: entry.status ?? 'unknown',
+      ...(entry.error ? { error: entry.error } : {}),
+    }));
+  const finalVideo = nodes['final_video'];
+
+  return JSON.stringify(
+    {
+      name: project['name'],
+      bundleSource: project['bundleSource'],
+      features: project['features'],
+      targetDuration: project['targetDuration'],
+      style: project['style'],
+      aspect: project['aspect'],
+      resolution: project['resolution'],
+      pausedAtGate: project['pausedAtGate'],
+      walkState: {
+        nodeCount: entries.length,
+        counts,
+        incomplete,
+        final_video: finalVideo
+          ? {
+              status: finalVideo.status,
+              outputPath: finalVideo.outputPath,
+            }
+          : null,
+      },
+    },
+    null,
+    2,
+  );
 }
 
 // ── dhee_read ─────────────────────────────────────────────────────────
@@ -28,7 +85,10 @@ const ReadParams = Type.Object({
     description: "Absolute path to the file to read. Must be inside projectDir — paths outside are refused. For node outputs, prefer dhee_read_artifact (resolves the path via walkState).",
   }),
   maxBytes: Type.Optional(
-    Type.Number({ description: 'Truncate output to this many bytes. Defaults to 64 KB.' }),
+    Type.Number({
+      description:
+        'Truncate output to this many bytes. Defaults to 16 KB. Passing maxBytes when reading project.json returns the raw file; otherwise project.json is summarized to protect chat context.',
+    }),
   ),
 });
 
@@ -37,7 +97,7 @@ export function makeReadTool() {
     name: 'dhee_read',
     label: 'Read file',
     description:
-      "Read a text file inside the project directory. Refuses any path outside projectDir. Output is truncated at maxBytes (default 64 KB). For bundle node outputs, use dhee_read_artifact instead.",
+      "Read a text file inside the project directory. Refuses any path outside projectDir. Output is truncated at maxBytes (default 16 KB). For project.json, returns a compact walkState summary by default; pass maxBytes only if raw JSON is truly needed. For bundle node outputs, use dhee_read_artifact instead.",
     parameters: ReadParams,
     async execute(_id, params) {
       try {
@@ -48,12 +108,16 @@ export function makeReadTool() {
       if (!existsSync(params.path)) {
         return textResult(`file not found: ${params.path}`, true);
       }
-      const max = typeof params.maxBytes === 'number' ? params.maxBytes : 64 * 1024;
+      const max = typeof params.maxBytes === 'number' ? params.maxBytes : 16 * 1024;
       let content: string;
       try {
         content = readFileSync(params.path, 'utf8');
       } catch (e) {
         return textResult(`read failed: ${e instanceof Error ? e.message : String(e)}`, true);
+      }
+      if (basename(params.path) === 'project.json' && params.maxBytes === undefined) {
+        const summary = summarizeProjectJson(content);
+        if (summary) return textResult(summary);
       }
       const truncated = content.length > max;
       const body = truncated ? content.slice(0, max) + `\n…(truncated at ${max} bytes)` : content;

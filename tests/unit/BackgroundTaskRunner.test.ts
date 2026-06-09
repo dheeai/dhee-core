@@ -5,6 +5,10 @@ import {
   type TaskSpec,
   type TaskExecutor,
 } from '../../src/server/runners/BackgroundTaskRunner.js';
+import {
+  __resetLocalResourceForTesting,
+  withLocalResource,
+} from '../../src/dag/localResourceState.js';
 
 function makeSpec(overrides: Partial<TaskSpec> = {}): TaskSpec {
   return {
@@ -28,6 +32,7 @@ function once<K extends string>(
 
 beforeEach(() => {
   __resetTaskIdCounterForTesting();
+  __resetLocalResourceForTesting();
 });
 
 describe('BackgroundTaskRunner — dispatch + state', () => {
@@ -95,6 +100,40 @@ describe('BackgroundTaskRunner — dispatch + state', () => {
     expect(runner.isBusy()).toBe(false);
     const second = runner.dispatch(makeSpec({ projectName: 'Other' }));
     expect(second.status).toBe('started');
+  });
+
+  it('surfaces the active local resource while the task is running', async () => {
+    let releaseResource: (() => void) | null = null;
+    const resourceReleased = new Promise<void>((resolve) => {
+      releaseResource = resolve;
+    });
+    const runner = new BackgroundTaskRunner(async () => {
+      await withLocalResource(
+        {
+          kind: 'local_comfy',
+          tool: 'comfy.tti',
+          nodeId: 'shot_image',
+          itemId: 'scene_1_shot_1',
+          resourceKey: 'self.local',
+        },
+        () => resourceReleased,
+      );
+    });
+
+    runner.dispatch(makeSpec());
+    await Promise.resolve();
+
+    expect(runner.getActive()?.currentResource).toMatchObject({
+      kind: 'local_comfy',
+      tool: 'comfy.tti',
+      nodeId: 'shot_image',
+      itemId: 'scene_1_shot_1',
+      resourceKey: 'self.local',
+    });
+
+    releaseResource?.();
+    await once(runner, 'completed');
+    expect(runner.getActive()).toBeNull();
   });
 });
 

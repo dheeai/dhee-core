@@ -18,6 +18,8 @@ import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
 import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
+import { withLocalResource, type LocalResourceSnapshot } from './localResourceState.js';
+import { resolveEndpointUrl } from './runners/endpointResolver.js';
 
 function formatSrtTime(totalSeconds: number): string {
   const ms = Math.floor((totalSeconds % 1) * 1000);
@@ -284,6 +286,68 @@ function topoFromGoal(bundle: DagBundle): NodeDef[] {
 
   visit(goal);
   return order;
+}
+
+function nodeExecutionPhasePriority(node: NodeDef): number {
+  return node.runner.tool.startsWith('llm.') ? 0 : 1;
+}
+
+/**
+ * Preserve topological correctness, but when multiple nodes are ready at
+ * the same time, drain LLM planning/prompting work before dispatching media
+ * work. This keeps local single-GPU runs from interleaving LLM calls with
+ * Comfy renders when the remaining text branch does not depend on the image.
+ */
+function prioritizeReadyLlmNodes(ordered: NodeDef[]): NodeDef[] {
+  const reachable = new Set(ordered.map((n) => n.id));
+  const byId = new Map(ordered.map((n) => [n.id, n]));
+  const originalIndex = new Map(ordered.map((n, idx) => [n.id, idx]));
+  const indegree = new Map<string, number>();
+  const downstream = new Map<string, string[]>();
+
+  for (const node of ordered) {
+    indegree.set(node.id, 0);
+    downstream.set(node.id, []);
+  }
+  for (const node of ordered) {
+    for (const inp of node.inputs) {
+      if (!reachable.has(inp.from)) continue;
+      indegree.set(node.id, (indegree.get(node.id) ?? 0) + 1);
+      downstream.get(inp.from)?.push(node.id);
+    }
+  }
+
+  const compareReady = (a: string, b: string): number => {
+    const nodeA = byId.get(a);
+    const nodeB = byId.get(b);
+    if (!nodeA || !nodeB) return 0;
+    const phase = nodeExecutionPhasePriority(nodeA) - nodeExecutionPhasePriority(nodeB);
+    if (phase !== 0) return phase;
+    return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
+  };
+
+  const ready = ordered
+    .filter((n) => (indegree.get(n.id) ?? 0) === 0)
+    .map((n) => n.id)
+    .sort(compareReady);
+  const prioritized: NodeDef[] = [];
+
+  while (ready.length > 0) {
+    const id = ready.shift()!;
+    const node = byId.get(id);
+    if (!node) continue;
+    prioritized.push(node);
+    for (const child of downstream.get(id) ?? []) {
+      const next = (indegree.get(child) ?? 0) - 1;
+      indegree.set(child, next);
+      if (next === 0) {
+        ready.push(child);
+        ready.sort(compareReady);
+      }
+    }
+  }
+
+  return prioritized.length === ordered.length ? prioritized : ordered;
 }
 
 /**
@@ -826,6 +890,53 @@ function buildRunnerConfig(
   return base;
 }
 
+const BUILT_IN_COMFY_TOOLS = new Set([
+  'comfy.klein',
+  'comfy.tti',
+  'comfy.fl2v',
+  'comfy.ltx_director',
+  'comfy.qwen_edit_chain',
+]);
+
+function isComfyCloudUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === 'cloud.comfy.org';
+  } catch {
+    return url.includes('cloud.comfy.org');
+  }
+}
+
+function classifyLocalResource(
+  tool: string,
+  runtimeNode: NodeDef,
+  inst: NodeInstance,
+): Omit<LocalResourceSnapshot, 'startedAt'> | null {
+  if (!BUILT_IN_COMFY_TOOLS.has(tool)) return null;
+  const comfyMode = (process.env['COMFY_MODE'] ?? 'local').trim();
+  if (comfyMode !== 'local') return null;
+
+  const cfg = runtimeNode.runner.config as Record<string, unknown>;
+  const endpoint =
+    typeof cfg['endpoint'] === 'string' && cfg['endpoint'].trim().length > 0
+      ? cfg['endpoint'].trim()
+      : 'self.local';
+  const resolvedUrl =
+    resolveEndpointUrl(endpoint) ??
+    process.env['ENDPOINT_self_local'] ??
+    process.env['COMFYUI_BASE_URL'];
+  if (isComfyCloudUrl(resolvedUrl)) return null;
+
+  return {
+    kind: 'local_comfy',
+    tool,
+    nodeId: runtimeNode.id,
+    ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+    resourceKey: endpoint,
+  };
+}
+
 /** Walk the bundle and run every reachable node to completion. */
 interface WalkResult {
   ok: boolean;
@@ -1022,6 +1133,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   } else {
     ordered = fullOrder;
   }
+  ordered = prioritizeReadyLlmNodes(ordered);
   log(`walker: bundle '${opts.bundle.id}' v${opts.bundle.version}, ${ordered.length} reachable nodes${opts.stopAt ? ` (ancestors of '${opts.stopAt}')` : ''}`);
 
   // Resolve bundle-level inputs (project files + project.json fields)
@@ -1574,7 +1686,12 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
 
       let result: RunnerResult;
       try {
-        result = await runner.run(ctx);
+        const localResource = classifyLocalResource(effectiveTool, runtimeNode, inst);
+        if (localResource) {
+          result = await withLocalResource(localResource, () => runner.run(ctx));
+        } else {
+          result = await runner.run(ctx);
+        }
       } catch (e) {
         result = { ok: false, error: (e as Error).message };
       }
@@ -1847,4 +1964,3 @@ export {
   suggestParameterMappings,
 } from './importWorkflow.js';
 export type { ApiWorkflowValidation, ParameterMapping } from './importWorkflow.js';
-

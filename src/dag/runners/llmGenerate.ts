@@ -466,10 +466,19 @@ export function createLlmGenerateRunner(opts?: {
     const sub = substituteTemplate(template, inputsWithItemId);
     if (!sub.ok) return { ok: false, error: sub.error };
 
+    const tier: LLMTier = cfg.tier ?? 'medium';
+    let client: LlmGenerateClient;
+    try {
+      client = clientFactory(tier, cfg.purpose);
+    } catch (err) {
+      return { ok: false, error: `llm.generate: failed to construct LLM client: ${(err as Error).message}` };
+    }
+    const resolvedModel = client.getModel();
+
     // 3a. CAS lookup — cross-project replay. The key is content-based:
     //     - prompt template FILE CONTENTS (so template edits bust)
     //     - rendered prompt (which folds in all upstream inputs)
-    //     - config (tier, temperature, schema path, etc.)
+    //     - resolved model + config (tier, temperature, schema path, etc.)
     //     - schema FILE CONTENTS when applicable
     // Hit → link cached file to outputPath, return cached:true with
     // inputsHash on the metadata so the walker stamps it on
@@ -485,6 +494,7 @@ export function createLlmGenerateRunner(opts?: {
           : {}),
       },
       config: {
+        model: resolvedModel,
         tier: cfg.tier ?? 'medium',
         ...(cfg.purpose ? { purpose: cfg.purpose } : {}),
         ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
@@ -549,14 +559,6 @@ export function createLlmGenerateRunner(opts?: {
     }
 
     // 4. Call LLM (with retries + abort).
-    const tier: LLMTier = cfg.tier ?? 'medium';
-    let client: LlmGenerateClient;
-    try {
-      client = clientFactory(tier, cfg.purpose);
-    } catch (err) {
-      return { ok: false, error: `llm.generate: failed to construct LLM client: ${(err as Error).message}` };
-    }
-
     const maxRetries = cfg.maxRetries ?? 2;
     const isJson = (cfg.outputFormat ?? 'markdown') === 'json';
     let lastErr: string | undefined;
