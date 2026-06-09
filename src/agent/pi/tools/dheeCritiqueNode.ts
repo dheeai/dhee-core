@@ -7,7 +7,13 @@
  *   the critique were applied). DOES NOT mutate. Use this to surface
  *   "this will rebuild N images" before pulling the trigger.
  *
- *   confirm=true: stamps the critique into project.json's
+ *   confirm=true + applyOnly=true: stamps the critique into
+ *   project.json's pendingCritiques map and invalidates the target
+ *   plus downstream consumers, but skips dispatch. This is the normal
+ *   chat UX: queue one or more critiques, then run once when the user
+ *   asks to render.
+ *
+ *   confirm=true without applyOnly: stamps the critique into project.json's
  *   pendingCritiques map, invalidates the target node + walkState
  *   entry (and every transitive consumer via cascade-invalidation),
  *   then dispatches the bundle. Post-cascade-refactor: dispatch
@@ -65,7 +71,7 @@ const Params = Type.Object({
   applyOnly: Type.Optional(
     Type.Boolean({
       description:
-        'BATCH MODE. When true, stamps the critique + invalidates the target but does NOT dispatch the bundle. Use when you have many critiques to apply in a row — each call returns in milliseconds instead of waiting on the full cascade. After the last batched critique, call dhee_start_run ONCE to process every pending critique in a single walker pass. Ignored if confirm is not also true.',
+        'BATCH MODE. When true, stamps the critique + invalidates the target but does NOT dispatch the bundle. Use this for normal chat critique UX, even for one shot: queue critiques one node at a time, then call dhee_start_run ONCE only when the user asks to render/apply them. Ignored if confirm is not also true.',
     }),
   ),
 });
@@ -161,7 +167,7 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
     name: 'dhee_critique_node',
     label: 'Critique LLM node',
     description:
-      "ADJUST or CORRECT what an LLM node produced, by describing the change in plain words — e.g. 'make shot 1 a wide establishing shot of the lighthouse', 'darker, rainier mood', 'wrong character — this is Marcus not Sarah'. NOT just for broken outputs; this is the go-to for ANY per-shot/per-node change you can describe rather than hand-author. The runner prepends your note to the next regeneration; the walker cascades only the true downstream. To change ONE shot, target that shot's own prompt item: nodeId='shot_image_prompt', itemId='scene_1_shot_1' — that re-renders only that shot, never the whole storyboard. Two-phase: call FIRST without confirm to preview the cascade, then confirm=true to apply. Only works on llm.* nodes — for a broken image/video, walk upstream to its prompt node and critique that.",
+      "ADJUST or CORRECT what an LLM node produced, by describing the change in plain words — e.g. 'make shot 1 a wide establishing shot of the lighthouse', 'darker, rainier mood', 'wrong character — this is Marcus not Sarah'. NOT just for broken outputs; this is the go-to for ANY per-shot/per-node change you can describe rather than hand-author. The runner prepends your note to the next regeneration; the walker cascades only the true downstream. To change ONE shot, target that shot's own prompt item: nodeId='shot_image_prompt', itemId='scene_1_shot_1' — that invalidates only that shot's true downstream, never the whole storyboard. Two-phase: call FIRST without confirm to preview the cascade, then for normal chat critique call confirm=true and applyOnly=true to queue the fix without rendering. Call dhee_start_run later when the user asks to render/apply all queued critiques. Only works on llm.* nodes — for a broken image/video, walk upstream to its prompt node and critique that.",
     parameters: Params,
     async execute(_id, params, signal) {
       const loadRes = loadProjectBundle(params.projectDir);

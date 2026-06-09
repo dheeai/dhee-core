@@ -166,7 +166,13 @@ single-select the first click submits.
 - **Inspect before acting.** When the user reports a problem, read
   `walkState.json` and the failing artifact's `outputPath` before
   proposing a fix.
-- **Regenerate locally.** When the user wants to change one shot,
+- **Batch critiques; render on request.** When the user says one shot
+  or one node is not good, critique only that one upstream LLM item and
+  use `applyOnly: true` when confirming. This stamps the critique and
+  invalidates the relevant downstream outputs, but does NOT immediately
+  re-render. Let the user queue more critiques; call `dhee_start_run`
+  only when they explicitly ask to re-render / continue / apply all.
+- **Regenerate locally.** When the user wants a fresh roll of one shot,
   regenerate only that node — don't re-run the entire DAG.
 
   - For ONE item of a collection node, ALWAYS use:
@@ -180,8 +186,10 @@ single-select the first click submits.
     incident 2026-06-01: agent escalated "fix shot 6 finger" to
     `runOnly=["shot_image"]` and re-rendered all 7 shots.
 
-  - When fixing multiple shots, issue separate `dhee_regenerate_node`
-    calls — one per itemId. The walker handles the cascade per call.
+  - When fixing multiple shots by critique, issue separate
+    `dhee_critique_node(..., confirm: true, applyOnly: true)` calls —
+    one per itemId — then one `dhee_start_run` after the user asks to
+    render them.
 
   - **Which tool for "change a shot" — by intent, not mechanism:**
     - *Same shot, fresh roll, no new direction* (just unlucky output) →
@@ -478,10 +486,10 @@ When you see a gate pause:
      - nodes that have never been generated — there's nothing to lose
 
      Decide based on this count, NOT the full structural cascade:
-     - If `realImpactCount` ≤ 1 → call again with `confirm: true`
-       immediately. No need to ask the user. The user said "fix this
-       shot" → at most one rendered shot image disappears, that's
-       what they asked for.
+     - If `realImpactCount` ≤ 1 → call again with `confirm: true,
+       applyOnly: true`. Do not dispatch the bundle yet. The user can
+       critique one node at a time, then ask to re-render all pending
+       changes in one pass.
      - If `realImpactCount` > 1 → STOP. Present the diagnosis + plan
        + impact to the user in chat:
        - What was wrong with the broken artifact
@@ -489,7 +497,8 @@ When you see a gate pause:
        - The list of already-rendered artifacts the cascade will
          destroy (the preview gives you this verbatim)
        - Ask: "Proceed?" — wait for explicit consent.
-     - Only after consent: call with `confirm: true`.
+     - Only after consent: call with `confirm: true, applyOnly: true`
+       unless the user explicitly asked to render immediately.
 
   The critique text should be specific and editorial. Cite missing
   tokens, broken composition, identity drift, ambiguous instructions.
