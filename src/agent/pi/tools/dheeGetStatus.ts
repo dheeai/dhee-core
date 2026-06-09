@@ -90,6 +90,19 @@ interface ProjectJsonLite {
     nodes?: Record<string, NodeEntry>;
     lastInvalidatedIds?: string[];
   };
+  /**
+   * Durable marker written by runProjectViaBundle when a run paused on
+   * the stop-after-each-collection gate. The PUSH path (the desktop
+   * re-wake nudge) is suppressed when the agent session is busy, so the
+   * gate reason must also be readable here — otherwise a polling agent
+   * sees an idle, done-looking walkState and resumes past the gate
+   * (issue #133). Cleared on the next non-gated walk.
+   */
+  pausedAtGate?: {
+    gatedAfter: string;
+    pendingAfterGate?: string[];
+    ts?: number;
+  };
 }
 
 function textResult(text: string, isError = false) {
@@ -137,7 +150,7 @@ export function makeGetStatusTool(deps: GetStatusDeps = {}) {
     name: 'dhee_get_status',
     label: 'Project status',
     description:
-      "Summarize current run progress for a project — counts of pending / in_progress / completed / failed nodes, plus error text for failed nodes and elapsed-time for in-progress nodes. Read-only. **Call AT MOST ONCE per user message.** Repeated calls within 15s are rate-limited (return cached result). The agent must not poll this tool waiting for work to finish — wait for the user to ask again.",
+      "Summarize current run progress for a project — counts of pending / in_progress / completed / failed nodes, plus error text for failed nodes and elapsed-time for in-progress nodes. Also reports when a run has PAUSED on the stop-after-each-collection gate (an idle walkState otherwise looks identical to a finish — trust this banner, don't infer 'done' from zero in-progress). Read-only. **Call AT MOST ONCE per user message.** Repeated calls within 15s are rate-limited (return cached result). The agent must not poll this tool waiting for work to finish — wait for the user to ask again.",
     parameters: Params,
     async execute(_id, params) {
       const now = Date.now();
@@ -254,7 +267,7 @@ export function makeGetStatusTool(deps: GetStatusDeps = {}) {
           );
           summary.push(
             ``,
-            `These node(s) are stale walkState leftovers from a run that stopped, NOT live work — do NOT tell the user "it's still running". To finish them, dispatch a run (dhee_start_run / dhee_run_bundle); the walker re-runs interrupted + failed nodes and skips completed ones.`,
+            `These node(s) are stale walkState leftovers from a run that stopped, NOT live work — do NOT tell the user "it's still running". To finish them, dispatch a run (dhee_start_run); the walker re-runs interrupted + failed nodes and skips completed ones.`,
           );
         } else {
           summary.push(``, `In progress (run is active):`, ...inProgressDetail);
@@ -270,6 +283,29 @@ export function makeGetStatusTool(deps: GetStatusDeps = {}) {
       const invalidated = project.walkState?.lastInvalidatedIds ?? [];
       if (invalidated.length > 0) {
         summary.push(``, `Recently invalidated (will re-run on next dispatch): ${invalidated.join(', ')}`);
+      }
+
+      // PAUSED-AT-GATE (issue #133): when the run is idle and a gate
+      // marker is on disk, the run did NOT finish — it stopped, by
+      // design, on the stop-after-each-collection gate. Surface this
+      // LOUDLY and FIRST, because an idle walkState otherwise looks
+      // identical to a completion, and a polling agent will misread it
+      // and resume past the gate (the live-run failure mode). Only when
+      // idle: an active resume (in_progress > 0) supersedes a stale marker.
+      const gate = project.pausedAtGate;
+      if (gate && gate.gatedAfter && inProgressKeys.length === 0) {
+        const pending = gate.pendingAfterGate ?? [];
+        const pendingLine =
+          pending.length > 0 ? ` Stages still pending behind the gate: ${pending.join(', ')}.` : '';
+        const banner =
+          `⏸ PAUSED AT THE GATE — the run stopped after collection '${gate.gatedAfter}' because the ` +
+          `"Stop after each collection" gate (gateAfterCollections) is ON. This is an INTENTIONAL pause, ` +
+          `NOT a finish and NOT a failure or a missing endpoint.${pendingLine} ` +
+          `Do NOT dispatch another run to "continue" and do NOT attribute the missing downstream output to ` +
+          `a misconfig (e.g. ComfyUI) — the gate is the reason. Tell the user this batch is ready to review ` +
+          `and WAIT for them to say go; resume (dhee_start_run) only when they ask, or they can turn the ` +
+          `gate off for an end-to-end run.\n\n`;
+        summary.unshift(banner.trimEnd(), ``);
       }
 
       const resultText = summary.join('\n');

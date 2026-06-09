@@ -154,6 +154,36 @@ describe('BackgroundTaskRunner — cancel', () => {
     expect(payload.task.status).toBe('cancelled');
   });
 
+  it('emits "completed" with gatedAfter/pendingAfterGate when the executor returns an ExecutorGated outcome', async () => {
+    // Issue #133: a run that paused on the stop-after-each-collection
+    // gate is a `completed` task — but the runner must stamp the gate
+    // reason onto the terminal event so consumers (agent tool, desktop
+    // nudge) can tell it apart from an end-to-end finish.
+    const runner = new BackgroundTaskRunner(async () => {
+      return { gatedAfter: 'shot_image_prompt', pendingAfterGate: ['shot_image', 'scene_clip', 'final_video'] };
+    });
+    const completed = once(runner, 'completed');
+    let cancelledFired = false;
+    runner.on('cancelled' as never, (() => (cancelledFired = true)) as never);
+    runner.dispatch(makeSpec());
+    const payload = (await completed) as {
+      task: { status: string; gatedAfter?: string; pendingAfterGate?: string[] };
+    };
+    expect(payload.task.status).toBe('completed');
+    expect(payload.task.gatedAfter).toBe('shot_image_prompt');
+    expect(payload.task.pendingAfterGate).toEqual(['shot_image', 'scene_clip', 'final_video']);
+    expect(cancelledFired).toBe(false);
+    expect(runner.isBusy()).toBe(false);
+  });
+
+  it('a plain (non-gated) completion leaves gatedAfter unset', async () => {
+    const runner = new BackgroundTaskRunner(async () => {});
+    const completed = once(runner, 'completed');
+    runner.dispatch(makeSpec());
+    const payload = (await completed) as { task: { gatedAfter?: string } };
+    expect(payload.task.gatedAfter).toBeUndefined();
+  });
+
   it('emits "cancelled" when the executor returns { cancelled: true } without an abort', async () => {
     // Bug 2026-05-04: ExecutorAgent stops via `.executor.stop` sentinel
     // — the AbortController is never tripped, so the runner used to

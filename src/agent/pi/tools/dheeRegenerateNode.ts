@@ -40,7 +40,7 @@ export function makeRegenerateNodeTool(deps: RegenerateNodeDeps = {}) {
     name: 'dhee_regenerate_node',
     label: 'Regenerate node',
     description:
-      "Invalidate a single node (or a single collection item) and re-run it + everything downstream. Use when the user is unhappy with one specific output. Don't use to re-run the whole project — call dhee_run_bundle for that.",
+      "Invalidate a single node (or a single collection item) and re-run it + everything downstream. Use when the user is unhappy with one specific output. Don't use to re-run the whole project — call dhee_start_run for that.",
     parameters: Params,
     async execute(_id, params, signal) {
       const result = await regenerateNode({

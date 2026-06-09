@@ -130,7 +130,7 @@ describe('drive.cmdSend', () => {
       sessionFileFromBuild: sfile,
       promptEvents: [
         { kind: 'text', payload: 'Hello ' },
-        { kind: 'tool', payload: 'dhee_run_bundle' },
+        { kind: 'tool', payload: 'dhee_start_run' },
         { kind: 'text', payload: 'world.' },
       ],
     });
@@ -140,7 +140,7 @@ describe('drive.cmdSend', () => {
     expect(out.ok).toBe(true);
     expect(out.sessionId).toBe(sid);
     expect(out.assistant_text).toBe('Hello world.');
-    expect(out.tool_calls.map((c) => c.name)).toEqual(['dhee_run_bundle']);
+    expect(out.tool_calls.map((c) => c.name)).toEqual(['dhee_start_run']);
   });
 });
 

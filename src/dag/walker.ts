@@ -145,7 +145,7 @@ export interface WalkerOptions {
    * a pass in which at least one of its instances actually ran (i.e.
    * the runner was invoked, not a cache-skip). Downstream nodes stay
    * pending in walkState, so the next walk (the desktop "Resume"
-   * button, `dhee_run_bundle` again, etc.) cache-skips the now-complete
+   * button, `dhee_start_run` again, etc.) cache-skips the now-complete
    * collection — which therefore does NO new work and does NOT re-gate
    * — and proceeds to the next collection. Net effect: one collection
    * step per run, letting the user inspect each fan-out batch before
@@ -839,6 +839,15 @@ interface WalkResult {
    * stopAt / run-to-completion result. Absent on all other outcomes.
    */
   gatedAfter?: string;
+  /**
+   * The downstream node ids that still need to run when the walk paused
+   * on the gate (the topo-ordered tail after `gatedAfter` that hasn't
+   * completed). Lets callers state exactly what's left — "Stages still
+   * pending: shot_image, scene_clip, final_video" — instead of leaving
+   * the agent to guess why downstream produced nothing. Only set
+   * alongside `gatedAfter`.
+   */
+  pendingAfterGate?: string[];
 }
 
 /**
@@ -1716,9 +1725,25 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   }
   // Gated mid-graph by gateAfterCollections — ok, but no goal yet.
   // Report which collection we halted after so callers can say
-  // "paused, resume to continue" rather than treating it as done.
+  // "paused, resume to continue" rather than treating it as done, plus
+  // the topo-ordered tail of nodes that still have work — so the agent
+  // narrates the real reason ("paused at the gate, X/Y/Z still pending")
+  // instead of confabulating a cause for the missing downstream output.
   if (gatedAfter) {
-    return { ok: true, gatedAfter, instances: allInstances };
+    const gateIdx = ordered.findIndex((n) => n.id === gatedAfter);
+    const pendingAfterGate =
+      gateIdx >= 0
+        ? ordered
+            .slice(gateIdx + 1)
+            .filter((n) => {
+              const insts = instancesById.get(n.id) ?? [];
+              // Not-yet-materialized (length 0) or any non-completed
+              // instance → still pending behind the gate.
+              return insts.length === 0 || insts.some((i) => i.status !== 'completed');
+            })
+            .map((n) => n.id)
+        : [];
+    return { ok: true, gatedAfter, pendingAfterGate, instances: allInstances };
   }
   // If stopAt was used or runOnly was set, the goal isn't expected to
   // have completed — return ok without a goal payload.

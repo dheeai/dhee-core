@@ -1,20 +1,23 @@
 /**
- * dhee_start_run — NON-BLOCKING bundle dispatch.
+ * dhee_start_run — NON-BLOCKING bundle dispatch. The agent's ONE way to
+ * run a bundle.
  *
- * The interactive sibling of `dhee_run_bundle`. Where `dhee_run_bundle`
- * awaits the run's terminal event (freezing the agent turn for the
- * whole multi-minute run), `dhee_start_run` dispatches and returns
- * IMMEDIATELY with the taskId. The agent's turn ends; the run executes
- * in the background; the agent stays free to receive the user's next
- * message and decide whether it warrants stopping the run.
+ * Dispatches the run and returns IMMEDIATELY with the taskId. The
+ * agent's turn ends; the run executes in the background; the agent stays
+ * free to receive the user's next message and decide whether it warrants
+ * stopping the run. This is what keeps the agent interruptible — the
+ * whole point of the bundle-run refactor.
  *
  * The desktop re-wakes the agent on the run's terminal event (see
  * dheeCoreManager terminal-event subscription), so completion /
- * failure are still surfaced — just not by blocking inside this tool.
+ * failure / a gate pause are still surfaced — just not by blocking
+ * inside this tool.
  *
- * Use `dhee_start_run` in interactive (desktop) contexts. Use
- * `dhee_run_bundle` for headless / CLI where there's no human to
- * interject and a synchronous result is convenient.
+ * (There is intentionally no blocking "run and wait" agent tool: a
+ * blocking run would freeze the chat turn for the whole multi-minute
+ * render, defeating interruptibility. Headless callers that genuinely
+ * want a synchronous result call `runProjectViaBundle()` directly — the
+ * library function the CLI uses — not an agent tool.)
  */
 
 import { existsSync } from 'node:fs';
@@ -89,7 +92,7 @@ export function makeStartRunTool(deps: StartRunDeps = {}) {
     name: 'dhee_start_run',
     label: 'Start run',
     description:
-      'Dispatch the bundle DAG for a project and return IMMEDIATELY (non-blocking) — the run continues in the background while you stay free to talk to the user. Prefer this over dhee_run_bundle in interactive sessions: it lets you answer questions or redirect (dhee_stop_run + fix + dhee_start_run) while the run is in flight. You will be notified when the run finishes. Pass stopAt to halt early, runOnly to re-run specific nodes (cascades downstream), sessionId so the host can route the completion back to you.',
+      'Run the bundle DAG for a project. Dispatches and returns IMMEDIATELY (non-blocking) — the run continues in the background while you stay free to talk to the user: you can answer questions or redirect (dhee_stop_run + fix + dhee_start_run) while it is in flight. You will be notified when the run finishes (completed, failed, or paused on the stop-after-each-collection gate). Pass stopAt to halt early, runOnly to re-run specific nodes (cascades downstream), sessionId so the host can route the completion back to you.',
     parameters: Params,
     async execute(_id, params): Promise<ReturnType<typeof textResult>> {
       const projectJsonPath = join(params.projectDir, 'project.json');

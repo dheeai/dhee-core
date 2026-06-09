@@ -11,7 +11,7 @@
  *   3. Marks the node as completed (generation.tool='user') in walkState
  *      so the walker treats it as done.
  *   4. Cascades: invalidates every downstream node so a subsequent
- *      dhee_run_bundle picks up the new content.
+ *      dhee_start_run picks up the new content.
  *
  * Failure modes:
  *   1. Happy path (text): writes file, walkState[nodeId] completed

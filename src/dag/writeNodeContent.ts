@@ -374,7 +374,7 @@ export function writeNodeContent(input: WriteNodeContentInput): WriteNodeContent
   const message =
     `Wrote ${bytes.length} bytes to ${outputPath} for ${key}. ` +
     `Invalidated ${invalidatedKeys.length} downstream entr${invalidatedKeys.length === 1 ? 'y' : 'ies'} ` +
-    `(${[...downstreamNodeIdsSeen].join(', ') || 'none'}). Call dhee_run_bundle to cascade.`;
+    `(${[...downstreamNodeIdsSeen].join(', ') || 'none'}). Call dhee_start_run to cascade.`;
 
   return {
     ok: true,

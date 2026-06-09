@@ -54,7 +54,7 @@ export function makeCreateProjectTool(deps: CreateProjectDeps = {}) {
     name: 'dhee_create_project',
     label: 'Create project',
     description:
-      'Create a fresh dhee project directory pinned to a specific bundle. Writes project.json with bundleSource = built-in:<bundleId>. Does NOT start a run — call dhee_run_bundle for that.',
+      'Create a fresh dhee project directory pinned to a specific bundle. Writes project.json with bundleSource = built-in:<bundleId>. Does NOT start a run — call dhee_start_run for that.',
     parameters: Params,
     async execute(_id, params) {
       if (deps.knownBundleIds && !deps.knownBundleIds.includes(params.bundleId)) {

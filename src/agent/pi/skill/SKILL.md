@@ -174,7 +174,7 @@ single-select the first click submits.
     Example: shot 6 of `shot_image` →
     `dhee_regenerate_node(nodeId='shot_image', itemId='scene_1_shot_6')`.
 
-  - NEVER use `dhee_run_bundle(runOnly=[bareNodeId])` to fix one item.
+  - NEVER use `dhee_start_run(runOnly=[bareNodeId])` to fix one item.
     `runOnly` with a bare nodeId re-renders EVERY itemId under that
     node — destroying renders the user didn't ask to touch. Real
     incident 2026-06-01: agent escalated "fix shot 6 finger" to
@@ -209,7 +209,11 @@ single-select the first click submits.
   as "the cloud images expired"; the agent then proposed a re-render
   cascade that wouldn't have helped even if the diagnosis were right.
   If you can't read the runner's literal error, the right move is to
-  ask the user, not invent a plausible-sounding alternative.
+  ask the user, not invent a plausible-sounding alternative. The same
+  applies to an *early stop*: before you attribute one to a missing
+  endpoint or misconfig, check whether the run simply **paused on the
+  stop-after-each-collection gate** (see that section) — a by-design
+  pause is not a failure.
 
 - **On Comfy errors specifically:**
   - 429 PAYMENT_REQUIRED / subscription issues → the user may want to
@@ -311,8 +315,8 @@ scoped to the project so you don't waste context on engine internals.
      predate it).
   3. Regenerate ALL flagged image nodes in ONE run: take the DISTINCT
      node ids from the report (e.g. `character_image`, `setting_image`,
-     `shot_image`) and `dhee_run_bundle(runOnly=[those ids])` (or
-     `dhee_start_run`). The walker re-renders them in dependency order —
+     `shot_image`) and `dhee_start_run(runOnly=[those ids])`. The walker
+     re-renders them in dependency order —
      reference images (character/setting) before the shots that use them
      — then cascades to the scene clips + final cut. Do NOT regenerate
      them one node at a time with separate `dhee_regenerate_node` calls:
@@ -324,7 +328,7 @@ scoped to the project so you don't waste context on engine internals.
   — override a node's output content. Same payload shapes as
   `dhee_write_input`. Resolves outputPath from the bundle's pattern,
   writes the bytes, marks the node user-supplied (`generation.tool='user'`),
-  and invalidates downstream so the next `dhee_run_bundle` cascades
+  and invalidates downstream so the next `dhee_start_run` cascades
   correctly. Use when:
     - the user wants to rewrite a generated prompt (better tone, more
       detail, fix a hallucination)
@@ -336,20 +340,18 @@ scoped to the project so you don't waste context on engine internals.
   preserve the old file as `.v<N>.<ext>`). That matches user intent:
   if a character ref is updated, downstream shots should not be stuck
   with the prior version. The user can re-attach.
-- `dhee_start_run(projectDir, stopAt?, runOnly?)` — **PREFER THIS in
-  interactive (desktop) sessions.** Dispatches the DAG and returns
-  IMMEDIATELY (non-blocking) — the run continues in the background
-  while you stay free to talk to the user. You'll be notified when it
-  finishes (a `[system] run completed/failed` message arrives). This is
-  what makes you interruptible: while a run is in flight you can answer
-  questions or redirect without the run blocking your turn.
+- `dhee_start_run(projectDir, stopAt?, runOnly?)` — **the way you run a
+  bundle.** Dispatches the DAG and returns IMMEDIATELY (non-blocking) —
+  the run continues in the background while you stay free to talk to the
+  user. You'll be notified when it finishes (a `[system] run completed /
+  failed / paused-on-the-gate` message arrives). This is what makes you
+  interruptible: while a run is in flight you can answer questions or
+  redirect without the run blocking your turn. There is no "run and
+  wait" variant — a blocking run would freeze your turn for the whole
+  render; always use this and react to the notification when it lands.
 - `dhee_stop_run(projectDir?)` — abort the in-flight run and WAIT until
   it has actually stopped (so a follow-up `dhee_start_run` is safe).
   Call this when the user's message warrants halting the run.
-- `dhee_run_bundle(projectDir, stopAt?, runOnly?)` — the BLOCKING
-  variant: dispatch + wait, returns the final video path. Use only in
-  headless / non-interactive contexts where there's no human to
-  interject. In a desktop chat, use `dhee_start_run` instead.
 - `dhee_get_status(projectDir)` — summarize current walkState as
   counts + per-failed-node detail. Read-only and cheap; use this
   often.
@@ -382,6 +384,54 @@ flight**:
    auto-start another run. A `[system] run failed` message is
    classified for you: *transient* (Comfy/tunnel was briefly flaky) →
    offer to retry; *structural* → fix the upstream node then resume.
+   A `[system]` message that says the run **PAUSED on the gate** means
+   the run stopped *on purpose* after a collection — see the next
+   section; do NOT treat it as a failure or a completion.
+
+### Stop after each collection — the review gate
+
+A project can have **"Stop after each collection"** turned on
+(`gateAfterCollections` — a per-project toggle the user controls in the
+desktop). When it's on, the walker **pauses the run by design** right
+after each collection node (e.g. `shot_image_prompt`) finishes, so the
+user can review that batch before the next, more expensive stage runs.
+Resuming (`dhee_start_run` again) continues from where it paused —
+completed nodes are cached, only the remaining nodes run.
+
+You learn a run paused on the gate through **two** channels — trust
+either:
+1. A `[system]` re-wake notification that says the run **PAUSED** on the
+   gate and names the stages still pending.
+2. **`dhee_get_status`** — it prints a `⏸ PAUSED AT THE GATE` banner when
+   the run stopped on the gate.
+
+**A gated pause and a finished run look the same in raw counts** (zero
+in-progress, downstream produced nothing). Do NOT infer "the run
+finished" from an idle status — if the gate banner is there, the run
+PAUSED; it did not complete. (Real failure, issue #133: the agent saw an
+idle status, assumed it was done, and silently dispatched another run.)
+
+When you see a gate pause:
+
+- **Say the truth: the run paused at the gate, by design.** It did NOT
+  fail, and it is NOT waiting on a missing endpoint. The downstream
+  stages (images, video, …) produced nothing simply because the gate
+  halted the run before them.
+- **NEVER auto-resume.** Do NOT dispatch another run (`dhee_start_run`)
+  to "continue" past the gate — that defeats the gate's whole purpose.
+  A gate means **STOP, tell the user the batch is ready to review, and
+  WAIT.** Resume only when the user explicitly says to.
+- **Do NOT diagnose a cause for the missing downstream output.** In
+  particular, do NOT tell the user ComfyUI is "likely not configured"
+  or offer to set it up — that's a confabulation. The gate is the
+  reason. (Issue #133: a gated pause was explained as a ComfyUI misconfig
+  and the agent offered an irrelevant setup step.)
+- **Offer the correct next step:** the batch is ready to review; resume
+  *when they ask*, or (if they don't want per-collection pauses) turn the
+  gate off for an end-to-end run.
+- Only attribute an early stop to a missing/failed endpoint when a stage
+  actually **failed** with an endpoint error — never when stages are
+  merely **pending** behind the gate.
 - `dhee_regenerate_node(projectDir, nodeId, itemId?)` — invalidate a
   single node (optionally a single collection item) and re-run it +
   everything downstream. Use when the user wants a fresh roll of the
@@ -458,7 +508,7 @@ flight**:
       Comfy exposes (includes `UnetLoaderGGUF.unet_name`,
       `CLIPLoaderGGUF.clip_name`, etc. so you can see ALL options)
 
-  When to call: any time a `dhee_run_bundle` or `dhee_regenerate_node`
+  When to call: any time a `dhee_start_run` or `dhee_regenerate_node`
   fails with a "Value not in list" / "prompt_outputs_failed_validation"
   / "model not found" error. Also proactively for new projects against
   a user's local Comfy you haven't run this workflow on before.
@@ -577,7 +627,7 @@ the story say" (text content), call dhee_read_artifact.
 **Typical loop:**
 
 1. `dhee_create_project` → user gives you a goal
-2. `dhee_run_bundle` → blocks while the DAG runs end-to-end
+2. `dhee_start_run` → dispatches the DAG (non-blocking); you're notified when it finishes
 3. `dhee_get_status` → confirm what completed and what failed
 4. `dhee_read_artifact` → inspect a specific output the user asks about
 5. `dhee_regenerate_node` → fix one shot the user doesn't like

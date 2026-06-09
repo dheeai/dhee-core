@@ -113,6 +113,9 @@ describe('gateAfterCollections', () => {
     expect(r.ok).toBe(true);
     expect(r.gatedAfter).toBe('fanout');
     expect(r.goal).toBeUndefined();
+    // The unrun downstream tail is reported so the caller can say
+    // exactly what's pending behind the gate (issue #133).
+    expect(r.pendingAfterGate).toEqual(['final']);
     // upstream + all three fan-out items ran; final did NOT.
     expect(ran.sort()).toEqual(['fanout:a', 'fanout:b', 'fanout:c', 'upstream']);
     expect(ran).not.toContain('final');
