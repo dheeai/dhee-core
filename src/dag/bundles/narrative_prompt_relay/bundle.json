@@ -1,6 +1,7 @@
 {
   "id": "narrative_prompt_relay",
   "version": "0.1.0",
+  "license": "MIT",
   "displayName": "Narrative Prompt Relay",
   "summary": "Cinematic story video. Best for slow-to-moderate paced stories — not fast action.",
   "techLine": "LTX-2 RELAY · DIRECTOR CHAIN",

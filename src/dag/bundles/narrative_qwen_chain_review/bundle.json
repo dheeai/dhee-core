@@ -1,6 +1,7 @@
 {
   "id": "narrative_qwen_chain_review",
   "version": "0.1.0",
+  "license": "MIT",
   "engineCompat": ">=0.1.0",
   "description": "Quality-gated variant of narrative_qwen_chain_relay. Each shot image is judged by a VLM (xiaomi/mimo-v2.5 by default); on fail, the walker re-runs shot_image_prompt with the judge's critique applied and re-renders. Up to 3 total attempts per shot — the runner keeps the BEST of N (passing attempt earliest, else highest-scoring) at the canonical path so downstream LTX consumes the strongest available image.",
   "reviewLoopMax": 3,

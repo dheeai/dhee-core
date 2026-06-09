@@ -269,6 +269,20 @@ export interface DagBundle {
   id: string;
   version: string;
   /**
+   * SPDX license identifier for THIS bundle (e.g. "MIT", "Apache-2.0",
+   * "CC-BY-4.0", or "LicenseRef-Proprietary" for closed bundles).
+   *
+   * Bundles are runtime data + runner manifests loaded by the engine
+   * through the Apache-2.0 `@dhee/runner-sdk` boundary; they are NOT
+   * derivative works of the AGPL-3.0 engine and carry their own license
+   * (see BUNDLE_LICENSING.md). Bundle authors may choose any license,
+   * including proprietary. First-party bundles are MIT.
+   *
+   * Optional for back-compat (legacy bundles validate without it), but
+   * the marketplace requires a declared license on submission.
+   */
+  license?: string;
+  /**
    * Human-readable display name for the bundle (e.g. "Narrative Prompt
    * Relay"). Shown in bundle picker cards + project tiles. When omitted,
    * the desktop falls back to `titleizeBundleId(id)` (snake_case → Title

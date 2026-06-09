@@ -1,6 +1,7 @@
 {
   "id": "narrative_shot_by_shot",
   "version": "0.1.0",
+  "license": "MIT",
   "displayName": "Narrative Shot by Shot",
   "summary": "Precise per-shot control. Best for dialogue + composed scenes.",
   "techLine": "KLEIN + FL2V · PER-SHOT RENDER",

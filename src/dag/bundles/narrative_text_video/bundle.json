@@ -1,6 +1,7 @@
 {
   "id": "narrative_text_video",
   "version": "0.1.0",
+  "license": "MIT",
   "engineCompat": ">=0.1.0",
   "description": "Text-only LLM pipeline + ffmpeg shot_clip stub videos. Produces a real, playable ~30s MP4 final cut (3 shots × 10s) without needing GPU/Comfy/LTX. Each shot's clip is an animated colored composition tinted by the project's style (warm for cinematic_realism, cool for noir). Used for end-to-end testing of the event-sourced graph with real binary artifacts.",
   "dependencies": {

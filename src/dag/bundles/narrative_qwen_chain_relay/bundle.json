@@ -1,6 +1,7 @@
 {
   "id": "narrative_qwen_chain_relay",
   "version": "0.1.0",
+  "license": "MIT",
   "engineCompat": ">=0.1.0",
   "description": "Full narrative pipeline from plot to final video. Shot images are generated iteratively via Qwen Image Edit 2511 + Multi-Angle LoRA: each shot edits a prior shot picked by the LLM, preserving character/setting continuity across the scene. Video stage uses LTX Director relay on local Comfy.",
   "dependencies": {

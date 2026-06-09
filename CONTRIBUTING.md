@@ -288,6 +288,35 @@ For security-sensitive reports, do not publish secrets, private media, provider 
 
 ## License
 
-This repository is licensed under the GNU Affero General Public License v3.0. By contributing, you agree that your contributions are licensed under AGPL-3.0. See `LICENSE` for the full terms.
+The `dhee-core` engine is licensed under the **GNU Affero General Public
+License v3.0 or later** (AGPL-3.0-or-later). See `LICENSE` for the full terms.
 
-If you run a modified version of `dhee-core` as a network service, AGPL requires you to make the complete corresponding source available to users of that service.
+If you run a modified version of `dhee-core` as a network service, AGPL
+requires you to make the complete corresponding source available to users of
+that service.
+
+### Contributor License Agreement (CLA)
+
+Before your first pull request can be merged, you'll be asked to sign our
+[Contributor License Agreement](./CLA.md). The **CLA Assistant** bot posts a
+link on your PR; you confirm once and it applies to all your future
+contributions (~30 seconds, one time).
+
+**You keep your copyright.** The CLA is a license, not an assignment — you
+grant the project steward (Indhic Software Pvt Ltd.) a broad, perpetual license
+to use and **relicense** your contributions. This is what lets the project stay
+open-source under AGPL today while preserving the ability to offer commercial
+licenses or relicense in the future without having to re-contact every past
+contributor. Read [`CLA.md`](./CLA.md) for the exact grant.
+
+Team members whose IP is already assigned through employment do not need to
+sign (they're on the workflow allowlist).
+
+### Bundle and runner licensing
+
+**Bundles and custom runners are not derivative works of the AGPL engine.**
+They load through the Apache-2.0 `@dhee/runner-sdk` boundary and carry their
+own license — MIT, Apache-2.0, Creative Commons, or proprietary, your choice.
+First-party bundles in `src/dag/bundles/*` are MIT. See
+[`BUNDLE_LICENSING.md`](./BUNDLE_LICENSING.md) for the boundary, the legal
+rationale, and how to declare a bundle's license.
