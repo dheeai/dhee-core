@@ -91,6 +91,31 @@ describe('dhee_fs tools', () => {
       expect(r.isError).toBe(true);
       expect(r.content[0].text).toMatch(/not found/i);
     });
+
+    it('4b. project.json without maxBytes returns a compact walkState summary', async () => {
+      const p = project();
+      writeFileSync(
+        join(p, 'project.json'),
+        JSON.stringify({
+          name: 'Demo',
+          bundleSource: 'built-in:narrative_prompt_relay',
+          walkState: {
+            nodes: {
+              final_video: {
+                status: 'completed',
+                outputPath: 'assets/videos/final/final_video.mp4',
+              },
+              shot_image: { status: 'pending' },
+            },
+          },
+        }),
+      );
+      const r = await tool.execute('t', { projectDir: p, path: join(p, 'project.json') });
+      expect(r.isError).toBeFalsy();
+      expect(r.content[0].text).toContain('"nodeCount": 2');
+      expect(r.content[0].text).toContain('final_video.mp4');
+      expect(r.content[0].text).not.toContain('"nodes":');
+    });
   });
 
   describe('dhee_ls', () => {

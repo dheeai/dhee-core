@@ -238,15 +238,24 @@ export async function buildPiSessionConfig(
     sessionManager,
   };
 
-  // Phase 6.5b: when the caller supplies an explicit model + key, wire
+  // Phase 6.5b: when the caller supplies an explicit model target, wire
   // a fresh in-memory AuthStorage with the runtime key set + resolve
   // the typed Model via pi-ai's getModel. This bypasses pi-coding-
   // agent's `findInitialModel` heuristic (which reads ~/.pi/agent/
   // settings.json + auth.json + env vars, and returns null silently
   // when none align) — the desktop owns its own credentials.
-  if (opts.modelProvider && opts.apiKey) {
+  //
+  // Local OpenAI-compatible servers often do not require an API key, but
+  // pi-ai's OpenAI transport still expects a runtime credential slot.
+  // Use a harmless placeholder in that no-key local/proxy case so the
+  // explicit model path still activates instead of falling back to pi's
+  // default OpenAI model.
+  if (opts.modelProvider && (opts.apiKey !== undefined || opts.modelBaseUrl)) {
+    if (opts.modelProvider === DHEE_CLOUD_PI_MODEL_PROVIDER && !opts.apiKey) {
+      return config;
+    }
     const authStorage = AuthStorage.inMemory();
-    authStorage.setRuntimeApiKey(opts.modelProvider, opts.apiKey);
+    authStorage.setRuntimeApiKey(opts.modelProvider, opts.apiKey?.trim() || 'local');
     config.authStorage = authStorage;
     const modelBaseUrl = opts.modelBaseUrl?.trim();
     if (opts.modelProvider === DHEE_CLOUD_PI_MODEL_PROVIDER && modelBaseUrl) {

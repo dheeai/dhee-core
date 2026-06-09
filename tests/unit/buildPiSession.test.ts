@@ -149,6 +149,27 @@ describe('buildPiSessionConfig', () => {
     expect(key).toBe('sk-or-v1-test-key');
   });
 
+  it('honors a local OpenAI-compatible model with no API key instead of falling back to pi auto-discovery', async () => {
+    const cfg = await buildPiSessionConfig({
+      sessionManager: SessionManager.inMemory(process.cwd()),
+      modelProvider: 'openai',
+      modelId: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q5_K_S.gguf',
+      apiKey: '',
+      modelBaseUrl: 'http://100.93.149.119:8080/v1',
+    });
+
+    expect(cfg.model).toBeDefined();
+    expect((cfg.model as { id: string }).id).toBe(
+      'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q5_K_S.gguf',
+    );
+    expect((cfg.model as { provider: string }).provider).toBe('openai');
+    expect((cfg.model as { baseUrl: string }).baseUrl).toBe(
+      'http://100.93.149.119:8080/v1',
+    );
+    const key = await (cfg.authStorage as unknown as { getApiKey: (p: string) => Promise<string | undefined> }).getApiKey('openai');
+    expect(key).toBe('local');
+  });
+
   it('Phase 6.5b: partial overrides (e.g. modelProvider without apiKey) do NOT activate the explicit-model path — falls back to auto-discovery', async () => {
     const cfg = await buildPiSessionConfig({
       sessionManager: SessionManager.inMemory(process.cwd()),

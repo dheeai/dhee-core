@@ -59,6 +59,60 @@ const TINY_BUNDLE: DagBundle = {
   ],
 };
 
+const TEXT_FIRST_BUNDLE: DagBundle = {
+  id: 'text-first',
+  version: '0.1.0',
+  engineCompat: '>=0.1.0',
+  goal: 'final',
+  nodes: [
+    {
+      id: 'story',
+      kind: 'stage',
+      inputs: [],
+      outputs: { format: 'md', pattern: 'plans/story.md' },
+      runner: { tool: 'llm.fake', config: { name: 'story' } },
+    },
+    {
+      id: 'character_image_prompt',
+      kind: 'stage',
+      inputs: [{ from: 'story', usage: 'context' }],
+      outputs: { format: 'json', pattern: 'prompts/character.json' },
+      runner: { tool: 'llm.fake', config: { name: 'character_image_prompt' } },
+    },
+    {
+      id: 'character_image',
+      kind: 'stage',
+      inputs: [{ from: 'character_image_prompt', usage: 'input' }],
+      outputs: { format: 'image', pattern: 'images/character.png' },
+      runner: { tool: 'comfy.fake', config: { name: 'character_image' } },
+    },
+    {
+      id: 'settings_plan',
+      kind: 'stage',
+      inputs: [{ from: 'story', usage: 'context' }],
+      outputs: { format: 'json', pattern: 'plans/settings.json' },
+      runner: { tool: 'llm.fake', config: { name: 'settings_plan' } },
+    },
+    {
+      id: 'scene_video_prompt',
+      kind: 'stage',
+      inputs: [{ from: 'settings_plan', usage: 'context' }],
+      outputs: { format: 'md', pattern: 'prompts/scene-video.md' },
+      runner: { tool: 'llm.fake', config: { name: 'scene_video_prompt' } },
+    },
+    {
+      id: 'final',
+      kind: 'stage',
+      inputs: [
+        { from: 'character_image', usage: 'input' },
+        { from: 'scene_video_prompt', usage: 'context' },
+      ],
+      outputs: { format: 'video', pattern: 'final.mp4' },
+      runner: { tool: 'stub.final', config: { name: 'final' } },
+    },
+  ],
+};
+
 // ── Stub runner that records what it ran ───────────────────────────────
 
 function makeStubRunner(opts: {
@@ -421,5 +475,41 @@ describe('runOnly (back-compat — now a no-op)', () => {
     if (!result.ok) {
       expect(result.error).toMatch(/no_such_node|not in bundle/i);
     }
+  });
+});
+
+// ── Ready-node scheduling ─────────────────────────────────────────────
+
+describe('runner phase scheduling', () => {
+  it('drains ready llm.* nodes before dispatching ready media nodes', async () => {
+    const reg = getGlobalRegistry();
+    reg.register(
+      { tool: 'llm.fake', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      makeStubRunner({ ranNodes }),
+    );
+    reg.register(
+      { tool: 'comfy.fake', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      makeStubRunner({ ranNodes }),
+    );
+    reg.register(
+      { tool: 'stub.final', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      makeStubRunner({ ranNodes }),
+    );
+
+    const result = await walkBundle({
+      projectDir,
+      bundle: TEXT_FIRST_BUNDLE,
+      bundleSource: 'built-in:text-first',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(ranNodes).toEqual([
+      'story',
+      'character_image_prompt',
+      'settings_plan',
+      'scene_video_prompt',
+      'character_image',
+      'final',
+    ]);
   });
 });
