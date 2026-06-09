@@ -6,6 +6,7 @@ import {
   type TaskExecutor,
 } from '../../src/server/runners/BackgroundTaskRunner.js';
 import {
+  addLocalResourceStartListener,
   __resetLocalResourceForTesting,
   withLocalResource,
 } from '../../src/dag/localResourceState.js';
@@ -134,6 +135,26 @@ describe('BackgroundTaskRunner — dispatch + state', () => {
     releaseResource?.();
     await once(runner, 'completed');
     expect(runner.getActive()).toBeNull();
+  });
+
+  it('notifies local resource start listeners before entering the resource block', async () => {
+    const events: string[] = [];
+    addLocalResourceStartListener(async (resource) => {
+      events.push(`listener:${resource.kind}:${resource.tool}`);
+    });
+
+    await withLocalResource(
+      {
+        kind: 'local_comfy',
+        tool: 'comfy.ltx_director',
+        nodeId: 'scene_clip',
+      },
+      async () => {
+        events.push('runner');
+      },
+    );
+
+    expect(events).toEqual(['listener:local_comfy:comfy.ltx_director', 'runner']);
   });
 });
 
