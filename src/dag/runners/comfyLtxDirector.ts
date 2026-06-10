@@ -26,7 +26,7 @@ import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { retryTransient } from './transientRetry.js';
 
-interface ShotInput {
+export interface ShotInput {
   shotNumber: number;
   duration: number;
   description?: string;
@@ -79,7 +79,7 @@ import { resolveEndpointUrl } from './endpointResolver.js';
 
 // ── Prompt-shaping helpers (ported verbatim from probe-ltx-director.ts) ──
 
-function stripDialogueParaphrase(description: string): string {
+export function stripDialogueParaphrase(description: string): string {
   const dialogueVerbs =
     /\b(asks?|says?|tells?|told|explains?|dismisses?|deflects?|whispers?|shouts?|speaks?|spoke|states?|declares?|replies|responds?|answers?|emphasi[sz]es?|insists?|argues?|mutters?|comments?|notes?|remarks?|adds?|continues?|sneers?|smirks?|grunts?)\b/i;
   const pronounSubject = /^\s*(?:He|She|They|It|Him|Her|His|Their)\b/i;
@@ -94,7 +94,7 @@ function stripDialogueParaphrase(description: string): string {
     .trim();
 }
 
-function reformatDialogue(audio: string): string {
+export function reformatDialogue(audio: string): string {
   const speakerRe = /\b([A-Z][A-Z0-9_ ]{1,30}):\s*([^.!?]*[.!?])/g;
   const replacements: { full: string; speaker: string; line: string }[] = [];
   let m: RegExpExecArray | null;
@@ -110,7 +110,7 @@ function reformatDialogue(audio: string): string {
   return out;
 }
 
-function buildLocalPrompt(s: ShotInput): string {
+export function buildLocalPrompt(s: ShotInput): string {
   const parts: string[] = [];
   if (s.description) {
     const cleaned = stripDialogueParaphrase(s.description.trim());
@@ -134,7 +134,7 @@ function buildLocalPrompt(s: ShotInput): string {
 
 /** LTX latent alignment: each segment multiple of 8 frames; first segment +1
  *  so (total - 1) % 8 === 0. */
-function alignToLTX(rawFrames: number[]): number[] {
+export function alignToLTX(rawFrames: number[]): number[] {
   const rounded = rawFrames.map((f) => Math.max(8, Math.round(f / 8) * 8));
   rounded[0] = rounded[0]! + 1;
   return rounded;

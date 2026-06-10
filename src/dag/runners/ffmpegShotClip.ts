@@ -57,13 +57,13 @@ interface ShotEntry {
   dialogueLine?: string;
 }
 
-interface PaletteEntry {
+export interface PaletteEntry {
   bg: string;       // hex like 0x123456
   fgA: string;
   fgB: string;
 }
 
-function paletteForStyle(style: string): PaletteEntry {
+export function paletteForStyle(style: string): PaletteEntry {
   const s = style.toLowerCase();
   if (s.includes('noir')) {
     return { bg: '0x0c1320', fgA: '0xc0c5d4', fgB: '0x47506a' };
@@ -99,7 +99,7 @@ function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
  *   - shot 3 (resolution): a single centered box with a horizontal
  *     gradient sweep (sunrise feel)
  */
-function buildFilterComplex(shot: number, palette: PaletteEntry, width: number, height: number, duration: number): string {
+export function buildFilterComplex(shot: number, palette: PaletteEntry, width: number, height: number, duration: number): string {
   const bg = `color=c=${palette.bg}:size=${width}x${height}:duration=${duration}:rate=30`;
 
   const fgABoxW = Math.floor(width * 0.18);

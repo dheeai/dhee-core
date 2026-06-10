@@ -16,7 +16,7 @@ const TIER_REPRESENTATIVE_PURPOSE: Record<LLMAccessTier, LLMPurpose> = {
   light: 'utility.image_review',
 };
 
-function resolvePurpose(opts: LLMGenerateTextOptions): LLMPurpose {
+export function resolvePurpose(opts: LLMGenerateTextOptions): LLMPurpose {
   if (opts.purpose !== undefined) {
     if (!isLLMPurpose(opts.purpose)) {
       throw new Error(`unknown LLM purpose '${opts.purpose}'`);
@@ -26,7 +26,7 @@ function resolvePurpose(opts: LLMGenerateTextOptions): LLMPurpose {
   return TIER_REPRESENTATIVE_PURPOSE[opts.tier ?? 'medium'];
 }
 
-function normalizeMessages(messages: LLMAccessMessage[]): LLMAccessMessage[] {
+export function normalizeMessages(messages: LLMAccessMessage[]): LLMAccessMessage[] {
   return messages.map((m) => ({
     role: m.role,
     content: m.content,
