@@ -24,7 +24,7 @@ import {
   type WorkflowModelRef,
   type MissingNodeClass,
 } from './workflowVerify.js';
-import { readAliases } from './workflowAliases.js';
+import { readAliases, defaultAliasesDir } from './workflowAliases.js';
 
 export interface BundleWorkflowFit {
   /**
@@ -72,12 +72,6 @@ export interface CheckBundleOpts {
   aliasesDir?: string;
 }
 
-function defaultAliasesDir(): string {
-  return (
-    process.env['DHEE_WORKFLOW_ALIASES_DIR'] ||
-    join(process.env['HOME'] ?? '', '.dhee', 'workflow-aliases')
-  );
-}
 
 /**
  * A bundle's ComfyUI workflow files: workflows/*.json, excluding the
