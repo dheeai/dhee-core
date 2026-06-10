@@ -82,6 +82,15 @@ export interface TaskRecord {
   /** Downstream node ids still pending behind the gate (only with `gatedAfter`). */
   pendingAfterGate?: string[];
   /**
+   * Set when the task `completed` because it halted on the project's
+   * budget cap (features.budgetCapUsd) rather than running end-to-end.
+   * Like `gatedAfter`, this lets terminal-event consumers tell an
+   * intentional safety pause apart from a true completion — so the agent
+   * / desktop report "hit your budget cap" instead of treating the run
+   * as finished. Resuming without raising the cap just re-trips it.
+   */
+  budgetExceeded?: { capUsd: number; spentUsd: number; nextNodeId: string; itemId?: string };
+  /**
    * Current local resource held by the active task, when a runner has
    * declared one. This is a live status hint for UI gating; terminal
    * records usually omit it.
@@ -161,6 +170,17 @@ export interface ExecutorGated {
 }
 
 /**
+ * Sentinel an executor returns to signal "the task completed, but only
+ * because it hit the project's budget cap." Twin of ExecutorGated: the
+ * runner records the task as `completed` AND stamps `budgetExceeded`
+ * onto the record so the terminal event carries the cap reason instead
+ * of reading as an end-to-end finish.
+ */
+export interface ExecutorBudgetExceeded {
+  budgetExceeded: { capUsd: number; spentUsd: number; nextNodeId: string; itemId?: string };
+}
+
+/**
  * Executor: actually runs the task. Production wires this to
  * `runExecutor` (for run_to) / `redoNode` (for regen) / etc.;
  * tests inject a stub.
@@ -173,11 +193,13 @@ export interface ExecutorGated {
  *   - Resolve `{ gatedAfter, pendingAfterGate? }` when the run paused
  *     on the stop-after-each-collection gate (a completion, but a gated
  *     one — the runner stamps the reason onto the terminal event)
+ *   - Resolve `{ budgetExceeded }` when the run halted on the project's
+ *     budget cap (a completion, but a paused one — reason stamped on)
  *   - Reject (or throw) on error — the runner records it
  */
 export type TaskExecutor = (
   ctx: TaskExecutionContext,
-) => Promise<void | ExecutorCancelled | ExecutorGated>;
+) => Promise<void | ExecutorCancelled | ExecutorGated | ExecutorBudgetExceeded>;
 
 export interface BackgroundTaskRunnerEvents {
   started: { task: TaskRecord };
@@ -373,6 +395,11 @@ export class BackgroundTaskRunner {
         outcome !== undefined && typeof (outcome as ExecutorGated).gatedAfter === 'string'
           ? (outcome as ExecutorGated)
           : null;
+      const budgetHalt =
+        outcome !== undefined &&
+        (outcome as ExecutorBudgetExceeded).budgetExceeded !== undefined
+          ? (outcome as ExecutorBudgetExceeded)
+          : null;
       if (controller.signal.aborted || cancelledByOutcome) {
         record.status = 'cancelled';
         record.completedAt = Date.now();
@@ -385,6 +412,11 @@ export class BackgroundTaskRunner {
         if (gated) {
           record.gatedAfter = gated.gatedAfter;
           if (gated.pendingAfterGate) record.pendingAfterGate = gated.pendingAfterGate;
+        }
+        // A budget-cap halt is likewise a `completed` task with a reason
+        // stamped on, so consumers don't read it as an end-to-end finish.
+        if (budgetHalt) {
+          record.budgetExceeded = budgetHalt.budgetExceeded;
         }
         record.status = 'completed';
         record.completedAt = Date.now();

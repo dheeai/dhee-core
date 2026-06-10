@@ -103,6 +103,21 @@ interface ProjectJsonLite {
     pendingAfterGate?: string[];
     ts?: number;
   };
+  /**
+   * Durable marker written by runProjectViaBundle when a run paused on
+   * the per-project budget cap (features.budgetCapUsd). Same read-path
+   * rationale as pausedAtGate (issue #133): an idle walkState after a
+   * budget halt looks like a finish, so a polling agent must be able to
+   * tell the difference and NOT resume past it. Cleared on the next walk
+   * that isn't a budget pause.
+   */
+  pausedAtBudget?: {
+    capUsd: number;
+    spentUsd: number;
+    nextNodeId: string;
+    itemId?: string;
+    ts?: number;
+  };
 }
 
 function textResult(text: string, isError = false) {
@@ -305,6 +320,26 @@ export function makeGetStatusTool(deps: GetStatusDeps = {}) {
           `a misconfig (e.g. ComfyUI) — the gate is the reason. Tell the user this batch is ready to review ` +
           `and WAIT for them to say go; resume (dhee_start_run) only when they ask, or they can turn the ` +
           `gate off for an end-to-end run.\n\n`;
+        summary.unshift(banner.trimEnd(), ``);
+      }
+
+      // PAUSED-AT-BUDGET: twin of the gate banner. When idle and a budget
+      // marker is on disk, the run halted on the project's spend cap — a
+      // safety pause, not a finish or a failure. Surface it loudly so a
+      // polling agent reports the cap to the user instead of resuming
+      // (which would just re-trip it) or blaming a misconfig.
+      const budget = project.pausedAtBudget;
+      if (budget && typeof budget.capUsd === 'number' && inProgressKeys.length === 0) {
+        const where = budget.nextNodeId
+          ? ` (the next step was '${budget.nextNodeId}${budget.itemId ? `[${budget.itemId}]` : ''}')`
+          : '';
+        const banner =
+          `⏸ PAUSED AT THE BUDGET CAP — the run stopped because this project's spend reached its ` +
+          `$${budget.capUsd.toFixed(2)} cap (spent ~$${budget.spentUsd.toFixed(2)})${where}. This is an ` +
+          `INTENTIONAL safety pause, NOT a finish and NOT a failure or a misconfig — nothing was charged ` +
+          `for the step that was about to run. Do NOT resume to "continue": it will immediately hit the same ` +
+          `cap. Tell the user they've hit their budget cap and ask whether to raise it (Settings → budget cap) ` +
+          `before continuing.\n\n`;
         summary.unshift(banner.trimEnd(), ``);
       }
 

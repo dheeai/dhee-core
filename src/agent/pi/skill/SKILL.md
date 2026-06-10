@@ -166,7 +166,18 @@ single-select the first click submits.
 - **Inspect before acting.** When the user reports a problem, read
   `walkState.json` and the failing artifact's `outputPath` before
   proposing a fix.
-- **Regenerate locally.** When the user wants to change one shot,
+- **Critique-review loop.** When the user says one shot or one node is
+  not good, critique only that one upstream LLM item, then regenerate
+  only up to the user-visible artifact that needs review. Stop there
+  and ask whether they are satisfied. Do NOT continue to motion, clips,
+  or final until the user says the corrected shot is good.
+  For a shot image critique, use:
+  1. `dhee_critique_node(..., confirm: true, applyOnly: true)`
+  2. `dhee_start_run(projectDir, stopAt: 'shot_image', sessionId: <current session>)`
+  3. when the stopAt run completes, show `shot_image:<itemId>` and ask
+     if the user is satisfied. If not, repeat the critique-review loop.
+     If yes, then resume downstream with `dhee_start_run`.
+- **Regenerate locally.** When the user wants a fresh roll of one shot,
   regenerate only that node — don't re-run the entire DAG.
 
   - For ONE item of a collection node, ALWAYS use:
@@ -180,8 +191,10 @@ single-select the first click submits.
     incident 2026-06-01: agent escalated "fix shot 6 finger" to
     `runOnly=["shot_image"]` and re-rendered all 7 shots.
 
-  - When fixing multiple shots, issue separate `dhee_regenerate_node`
-    calls — one per itemId. The walker handles the cascade per call.
+  - When fixing multiple shots by critique, do them one at a time:
+    queue one critique, run to that shot's review artifact, ask the
+    user if it is good, then move to the next critique. Do not batch
+    multiple shot critiques unless the user explicitly asks for a batch.
 
   - **Which tool for "change a shot" — by intent, not mechanism:**
     - *Same shot, fresh roll, no new direction* (just unlucky output) →
@@ -212,8 +225,8 @@ single-select the first click submits.
   ask the user, not invent a plausible-sounding alternative. The same
   applies to an *early stop*: before you attribute one to a missing
   endpoint or misconfig, check whether the run simply **paused on the
-  stop-after-each-collection gate** (see that section) — a by-design
-  pause is not a failure.
+  stop-after-each-collection gate** or **on the budget cap** (see those
+  sections) — a by-design pause is not a failure.
 
 - **On Comfy errors specifically:**
   - 429 PAYMENT_REQUIRED / subscription issues → the user may want to
@@ -344,7 +357,8 @@ scoped to the project so you don't waste context on engine internals.
   bundle.** Dispatches the DAG and returns IMMEDIATELY (non-blocking) —
   the run continues in the background while you stay free to talk to the
   user. You'll be notified when it finishes (a `[system] run completed /
-  failed / paused-on-the-gate` message arrives). This is what makes you
+  failed / paused-on-the-gate / paused-on-the-budget-cap` message
+  arrives). This is what makes you
   interruptible: while a run is in flight you can answer questions or
   redirect without the run blocking your turn. There is no "run and
   wait" variant — a blocking run would freeze your turn for the whole
@@ -385,8 +399,11 @@ flight**:
    classified for you: *transient* (Comfy/tunnel was briefly flaky) →
    offer to retry; *structural* → fix the upstream node then resume.
    A `[system]` message that says the run **PAUSED on the gate** means
-   the run stopped *on purpose* after a collection — see the next
-   section; do NOT treat it as a failure or a completion.
+   the run stopped *on purpose* after a collection — see the
+   "review gate" section; do NOT treat it as a failure or a completion.
+   A `[system]` message that says the run **PAUSED on the budget cap**
+   means it stopped *on purpose* because the project hit its spend limit
+   — see the "budget cap" section; tell the user and ask before resuming.
 
 ### Stop after each collection — the review gate
 
@@ -432,6 +449,49 @@ When you see a gate pause:
 - Only attribute an early stop to a missing/failed endpoint when a stage
   actually **failed** with an endpoint error — never when stages are
   merely **pending** behind the gate.
+
+### Budget cap — the spend backstop
+
+A project can have a **paid-spend cap** (`features.budgetCapUsd`, in USD
+— the user sets a default in the desktop's Settings; it ships at $5).
+When the project's cumulative spend on paid steps (cloud LLM / image /
+video) reaches the cap, the walker **pauses the run by design** *before*
+starting the next paid step — so a runaway loop can't burn through the
+user's credits. **Nothing is charged for the step that was about to
+run.** Fully local runs cost $0 and never hit the cap.
+
+You learn a run paused on the cap through the **same two channels** as
+the gate — trust either:
+1. A `[system]` re-wake notification that says the run **PAUSED** on the
+   budget cap and gives the cap + the amount spent.
+2. **`dhee_get_status`** — it prints a `⏸ PAUSED AT THE BUDGET CAP`
+   banner with the cap and spend when the run stopped on the cap.
+
+Like a gated pause, **a budget pause looks identical to a finish in raw
+counts.** Do NOT infer "the run finished" — if the budget banner is
+there, the run PAUSED on the cap; it did not complete and did not fail.
+
+When you see a budget pause, **react — don't sit on it**:
+
+- **Tell the user plainly what happened:** the run paused because the
+  project hit its budget cap (state the numbers: "spent ~$X of your $Y
+  cap"). It did NOT fail, it is NOT a misconfig, and nothing was charged
+  for the step it stopped before. Do NOT confabulate a different cause.
+- **NEVER auto-resume.** Resuming without raising the cap just re-trips
+  it immediately (the cap is re-checked from the seeded spend) — wasted
+  effort. Resume only after the user decides.
+- **Prompt the user to choose**, and offer to help with each:
+  - **Raise the cap** (or turn it off) — call
+    `dhee_set_budget_cap(projectDir, capUsd)` with the new amount
+    (`0` removes the cap), THEN `dhee_start_run` to resume from where it
+    paused. This is the ONLY way to change the cap for the current
+    project — `dhee_set_project_field` does not touch feature flags.
+  - **Review the spend first** — explain where the budget went (the
+    paid steps run so far) so they can decide if the cap is too low or
+    the pipeline is doing more paid work than expected, before raising.
+  - **Stop here** — leave the run paused; nothing more is charged.
+- Only after the user says to raise it do you change the cap and resume.
+  Never raise the cap on your own initiative to push a run through.
 - `dhee_regenerate_node(projectDir, nodeId, itemId?)` — invalidate a
   single node (optionally a single collection item) and re-run it +
   everything downstream. Use when the user wants a fresh roll of the
@@ -478,10 +538,11 @@ When you see a gate pause:
      - nodes that have never been generated — there's nothing to lose
 
      Decide based on this count, NOT the full structural cascade:
-     - If `realImpactCount` ≤ 1 → call again with `confirm: true`
-       immediately. No need to ask the user. The user said "fix this
-       shot" → at most one rendered shot image disappears, that's
-       what they asked for.
+     - If `realImpactCount` ≤ 1 → call again with `confirm: true,
+       applyOnly: true`, then immediately start a bounded review run
+       with `dhee_start_run(stopAt: 'shot_image')` for shot-image
+       critiques. Stop after that review artifact and ask the user
+       whether it is satisfactory. Do not render motion/clips/final yet.
      - If `realImpactCount` > 1 → STOP. Present the diagnosis + plan
        + impact to the user in chat:
        - What was wrong with the broken artifact
@@ -489,7 +550,10 @@ When you see a gate pause:
        - The list of already-rendered artifacts the cascade will
          destroy (the preview gives you this verbatim)
        - Ask: "Proceed?" — wait for explicit consent.
-     - Only after consent: call with `confirm: true`.
+     - Only after consent: call with `confirm: true, applyOnly: true`,
+       then run only to the review artifact with `stopAt`. If the user
+       explicitly asked to render immediately, confirm that they want to
+       skip review before continuing to clips/final.
 
   The critique text should be specific and editorial. Cite missing
   tokens, broken composition, identity drift, ambiguous instructions.

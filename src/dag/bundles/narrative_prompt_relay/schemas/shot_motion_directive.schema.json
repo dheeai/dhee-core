@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["description", "cameraWork", "audio", "purpose", "transition"],
+  "properties": {
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cameraWork": {
+      "type": "string",
+      "minLength": 1
+    },
+    "audio": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transition": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

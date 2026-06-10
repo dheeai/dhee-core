@@ -10,8 +10,10 @@ export interface LocalResourceSnapshot {
 }
 
 type LocalResourceSlot = LocalResourceSnapshot & { token: symbol };
+type LocalResourceStartListener = (resource: LocalResourceSnapshot) => void | Promise<void>;
 
 let currentResource: LocalResourceSlot | null = null;
+const localResourceStartListeners = new Set<LocalResourceStartListener>();
 
 export function getCurrentLocalResource(): LocalResourceSnapshot | null {
   if (!currentResource) return null;
@@ -29,10 +31,23 @@ export async function withLocalResource<T>(
   resource: Omit<LocalResourceSnapshot, 'startedAt'> & { startedAt?: number },
   fn: () => Promise<T>,
 ): Promise<T> {
+  const startedAt = resource.startedAt ?? Date.now();
+  const snapshot: LocalResourceSnapshot = {
+    kind: resource.kind,
+    ...(resource.tool !== undefined ? { tool: resource.tool } : {}),
+    ...(resource.nodeId !== undefined ? { nodeId: resource.nodeId } : {}),
+    ...(resource.itemId !== undefined ? { itemId: resource.itemId } : {}),
+    ...(resource.resourceKey !== undefined ? { resourceKey: resource.resourceKey } : {}),
+    startedAt,
+  };
+
+  for (const listener of localResourceStartListeners) {
+    await listener(snapshot);
+  }
+
   const token = Symbol(resource.kind);
   currentResource = {
-    ...resource,
-    startedAt: resource.startedAt ?? Date.now(),
+    ...snapshot,
     token,
   };
 
@@ -45,6 +60,16 @@ export async function withLocalResource<T>(
   }
 }
 
+export function addLocalResourceStartListener(
+  listener: LocalResourceStartListener,
+): () => void {
+  localResourceStartListeners.add(listener);
+  return () => {
+    localResourceStartListeners.delete(listener);
+  };
+}
+
 export function __resetLocalResourceForTesting(): void {
   currentResource = null;
+  localResourceStartListeners.clear();
 }

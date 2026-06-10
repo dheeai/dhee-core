@@ -506,7 +506,8 @@
         "config": {
           "promptTemplate": "prompts/shot_motion_directive.md",
           "tier": "medium",
-          "outputFormat": "json"
+          "outputFormat": "json",
+          "outputSchema": "schemas/shot_motion_directive.schema.json"
         }
       },
       "itemKey": "shots",
@@ -570,8 +571,13 @@
           "scope": "all"
         },
         {
-          "from": "scene_video_prompt",
+          "from": "scenes_plan",
           "usage": "context"
+        },
+        {
+          "from": "scene_video_prompt",
+          "usage": "context",
+          "scope": "all"
         },
         {
           "from": "shot_image_review",

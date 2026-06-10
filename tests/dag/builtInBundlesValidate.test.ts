@@ -34,4 +34,23 @@ describe('built-in narrative bundles', () => {
 
     expect(failures).toEqual({});
   });
+
+  it('motion directive nodes require transition in their output schema', () => {
+    for (const id of BUNDLE_IDS) {
+      const bundle = loadBundle(id);
+      const motionNode = bundle.nodes.find((node) => node.id === 'shot_motion_directive');
+      if (!motionNode) continue;
+
+      const cfg = motionNode.runner.config as Record<string, string | undefined>;
+      expect(cfg.outputSchema, `${id}: shot_motion_directive must declare outputSchema`).toBe(
+        'schemas/shot_motion_directive.schema.json',
+      );
+
+      const schema = JSON.parse(
+        readFileSync(join(BUNDLES_DIR, id, cfg.outputSchema as string), 'utf-8'),
+      ) as { required?: string[]; properties?: Record<string, unknown> };
+      expect(schema.required, `${id}: motion schema must require transition`).toContain('transition');
+      expect(schema.properties?.transition, `${id}: motion schema must define transition`).toBeTruthy();
+    }
+  });
 });
