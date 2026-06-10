@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { openEventLog } from './eventLog/EventLog.js';
+import { computeCostLedger } from './eventLog/projectCost.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
 import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
@@ -198,6 +199,22 @@ export interface WalkerOptions {
    * to the env-configured Comfy `/system_stats` probe.
    */
   probeGpuVramBytes?: () => Promise<number | null>;
+  /**
+   * Paid-spend ceiling in USD for this walk's branch. When set (a finite
+   * number > 0), the walker halts BEFORE dispatching the next paid
+   * (non-cached) instance once cumulative branch spend — seeded from the
+   * event log at walk start, so it carries across resumes — has reached
+   * the cap. A safety backstop against a runaway regeneration loop
+   * burning a user's credits, not a failure: the walk pauses with
+   * `WalkResult.budgetExceeded` set (ok:true), emits a `budget.exceeded`
+   * event, and resumes once the caller raises/clears the cap. Soft
+   * ceiling: a runner only reports cost AFTER it runs, so the check trips
+   * when spend is already at/over the cap — overshoot is bounded by one
+   * instance's cost. Undefined → unbounded (preserves prior behavior).
+   * Local-only walks accrue $0 and never trip it. Normally sourced from
+   * `project.features.budgetCapUsd`; see src/dag/projectFeatures.ts.
+   */
+  budgetCapUsd?: number;
 }
 
 /**
@@ -823,6 +840,15 @@ interface WalkResult {
    * alongside `gatedAfter`.
    */
   pendingAfterGate?: string[];
+  /**
+   * Set when the walk halted on the `budgetCapUsd` backstop instead of
+   * reaching the goal: cumulative branch spend had reached the cap and
+   * the walker declined to dispatch the next paid instance. `ok` stays
+   * true (an intentional pause, not a failure) — raise/clear the cap and
+   * resume to continue. `nextNodeId`/`itemId` name the instance that was
+   * NOT run.
+   */
+  budgetExceeded?: { capUsd: number; spentUsd: number; nextNodeId: string; itemId?: string };
 }
 
 /**
@@ -873,6 +899,11 @@ async function walkBundleWithReviewLoop(
   // judge nodes that would seed critiques, and re-walking would defeat
   // the gate). Resume drives the next pass.
   if (result.gatedAfter) return result;
+
+  // A budget-cap halt is likewise an intentional pause — re-walking
+  // would only trip the same cap again (and burn a review iteration).
+  // Surface it; the caller raises/clears the cap and resumes.
+  if (result.budgetExceeded) return result;
 
   // Semantic: `reviewLoopMax` = TOTAL max walks per dispatch
   // (including the initial). max=1 → no re-walks. max=3 → up to 3
@@ -1169,6 +1200,26 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   // return reports it so callers can message "paused, resume to
   // continue" instead of a misleading completion.
   let gatedAfter: string | undefined;
+  // Budget backstop. When a cap is configured, seed cumulative spend
+  // from the branch's existing ledger so the ceiling carries across
+  // resumes (a runaway regen loop accrues against ONE cap, not a fresh
+  // one each walk). Then track spend in-loop, incrementing after each
+  // node.completed. `budgetExceeded` is set when we halt before the
+  // next paid instance. Seeding reads the on-disk log (the same file
+  // the engine wraps), so it's correct with or without opts.engine.
+  const budgetCapUsd = opts.budgetCapUsd;
+  let spentUsd = 0;
+  if (budgetCapUsd !== undefined) {
+    try {
+      spentUsd = computeCostLedger([...openEventLog(opts.projectDir).read()], {
+        branchId: opts.branchId ?? 'main',
+      }).totalUsd;
+    } catch {
+      // Best-effort seed — an unreadable log just starts the tally at 0.
+      spentUsd = 0;
+    }
+  }
+  let budgetExceeded: { capUsd: number; spentUsd: number; nextNodeId: string; itemId?: string } | undefined;
   // BUG-023: track which nodes had their runner actually invoked in
   // The pre-cascade walker tracked `reRunInThisWalk` to force
   // downstream cache-bypass for any node whose upstream had been
@@ -1258,6 +1309,49 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             continue;
           }
         }
+      }
+
+      // Budget backstop — pre-flight, BEFORE dispatching this instance.
+      // Once cumulative branch spend has reached the cap, halt rather
+      // than start another paid call. Soft ceiling: the runner only
+      // reports cost after it runs, so we stop when already at/over the
+      // cap (overshoot bounded by one instance). Cache-skips above
+      // already `continue`d, so we only get here for real work; a
+      // local-only ($0) walk never reaches the cap and never trips.
+      // Emit a budget.exceeded event for the audit trail / history.
+      if (budgetCapUsd !== undefined && spentUsd >= budgetCapUsd) {
+        budgetExceeded = {
+          capUsd: budgetCapUsd,
+          spentUsd,
+          nextNodeId: node.id,
+          ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+        };
+        stopAtReached = true;
+        log(
+          `walker: budget cap reached ($${spentUsd.toFixed(2)} / $${budgetCapUsd.toFixed(2)}) — ` +
+            `halting before '${node.id}${inst.itemId ? `[${inst.itemId}]` : ''}' (raise the cap to resume).`,
+        );
+        const budgetEvent = {
+          branchId: opts.branchId ?? 'main',
+          actor: 'walker' as const,
+          kind: 'budget.exceeded' as const,
+          payload: {
+            capUsd: budgetCapUsd,
+            spentUsd,
+            nextNodeId: node.id,
+            ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
+          },
+        };
+        if (opts.engine) {
+          opts.engine.appendAndProject(budgetEvent);
+        } else {
+          try {
+            openEventLog(opts.projectDir).append(budgetEvent);
+          } catch {
+            // Best-effort — the budget halt still returns via WalkResult.
+          }
+        }
+        break;
       }
 
       // Honor any agent-recorded runner.swapped events for this
@@ -1666,6 +1760,12 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             // Best-effort — event log write must not block the walk.
           }
         }
+        // Budget backstop: tally real (non-cached) spend so the next
+        // instance's pre-flight check sees up-to-date cumulative spend.
+        // Cached completions cost $0 and don't move the tally.
+        if (budgetCapUsd !== undefined && !cached && typeof costUsd === 'number') {
+          spentUsd += costUsd;
+        }
       }
       log(`✓ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} → ${result.outputPath}`);
     }
@@ -1698,6 +1798,13 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   // error helps direct callers (scripts, runProjectViaBundle).
   if (opts.signal?.aborted) {
     return { ok: false, error: 'walk cancelled (abort signal received)', instances: allInstances };
+  }
+
+  // Budget backstop halt — an intentional pause (ok:true), not a
+  // failure. Checked before the goal/gate cases because a budget halt
+  // means the goal can't be complete; raise/clear the cap and resume.
+  if (budgetExceeded) {
+    return { ok: true, budgetExceeded, instances: allInstances };
   }
 
   // Goal output (only meaningful when the goal node ran).

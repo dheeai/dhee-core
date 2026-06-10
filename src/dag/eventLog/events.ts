@@ -22,7 +22,8 @@ export type EventKind =
   | 'branch.created'
   | 'runner.swap_suggested'
   | 'runner.swapped'
-  | 'critique.added';
+  | 'critique.added'
+  | 'budget.exceeded';
 
 export interface NodeStartedPayload {
   nodeId: string;
@@ -166,6 +167,24 @@ export interface CritiqueAddedPayload {
 }
 
 /**
+ * Emitted by the walker when accumulated paid spend on the branch has
+ * reached the configured `features.budgetCapUsd` and the walk halted
+ * BEFORE dispatching the next paid (non-cached) instance. A safety
+ * backstop, not a failure: the walk paused so the user can raise the
+ * cap (or clear it) and resume. `spentUsd` is the branch's cumulative
+ * spend at the moment of the halt (it never exceeds `capUsd` by more
+ * than the cost of the single in-flight instance, since the check is
+ * a pre-flight one — see walker.ts). `nextNodeId` is the instance the
+ * walk declined to run.
+ */
+export interface BudgetExceededPayload {
+  capUsd: number;
+  spentUsd: number;
+  nextNodeId: string;
+  itemId?: string;
+}
+
+/**
  * Union of payloads, indexed by kind. Each kind keeps its narrow payload
  * shape; consumers can switch over `event.kind` and the type is narrowed.
  */
@@ -183,6 +202,7 @@ export interface PayloadByKind {
   'runner.swap_suggested': RunnerSwapSuggestedPayload;
   'runner.swapped': RunnerSwappedPayload;
   'critique.added': CritiqueAddedPayload;
+  'budget.exceeded': BudgetExceededPayload;
 }
 
 export interface DheeEvent<K extends EventKind = EventKind> {

@@ -299,6 +299,122 @@ describe('runProjectViaBundle', () => {
     expect(proj2.pausedAtGate).toBeUndefined();
   });
 
+  it('reads features.budgetCapUsd, halts on the cap, notifies, and persists pausedAtBudget', async () => {
+    // Cost-stamping fan-out runner: $2 per instance.
+    getGlobalRegistry().register(
+      { tool: 'test.cost', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      {
+        describe: () => ({
+          id: 'test.cost',
+          displayName: 'cost',
+          description: 'test',
+          capabilities: [],
+          modalities: { input: [], output: [] },
+          configSchema: {},
+        }),
+        async run(ctx) {
+          const out = ctx.node.outputs.pattern.replace(/\{\{item_id\}\}/g, ctx.itemId ?? '');
+          const abs = join(ctx.projectDir, out);
+          mkdirSync(join(abs, '..'), { recursive: true });
+          writeFileSync(
+            abs,
+            ctx.node.id === 'upstream'
+              ? JSON.stringify({ items: [{ id: 'a' }, { id: 'b' }] })
+              : 'x',
+          );
+          return { ok: true, outputPath: out, metadata: { costUsd: 2 } };
+        },
+      } as Runner,
+    );
+    makeUserBundle('test_budget', {
+      id: 'test_budget',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      goal: 'final',
+      dependencies: { runners: { 'test.cost': '>=0.1.0' } },
+      nodes: [
+        {
+          id: 'upstream',
+          kind: 'stage',
+          inputs: [],
+          outputs: { format: 'json', pattern: 'upstream.json' },
+          runner: { tool: 'test.cost', config: {} },
+        },
+        {
+          id: 'fanout',
+          kind: 'collection',
+          itemSource: 'upstream',
+          inputs: [{ from: 'upstream', usage: 'input' }],
+          outputs: { format: 'json', pattern: 'fanout/{{item_id}}.json' },
+          runner: { tool: 'test.cost', config: {} },
+        },
+        {
+          id: 'final',
+          kind: 'stage',
+          inputs: [{ from: 'fanout', usage: 'context' }],
+          outputs: { format: 'video', pattern: 'final.mp4' },
+          runner: { tool: 'test.cost', config: {} },
+        },
+      ],
+    });
+    // Gate OFF so it doesn't pre-empt the budget halt; cap = $3.
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({
+        id: 'p',
+        bundleSource: 'user:test_budget',
+        features: { gateAfterCollections: false, budgetCapUsd: 3 },
+      }),
+    );
+
+    const notes: Array<{ level: string; message: string }> = [];
+    const result = await runProjectViaBundle({
+      projectDir,
+      onNotification: (info) => notes.push(info),
+    });
+
+    // Intentional pause, not a failure; goal never produced.
+    expect(result.ok).toBe(true);
+    expect(result.budgetExceeded).toBeDefined();
+    expect(result.budgetExceeded?.capUsd).toBe(3);
+    expect(result.budgetExceeded?.spentUsd).toBe(4);
+    expect(result.budgetExceeded?.nextNodeId).toBe('fanout');
+    expect(result.budgetExceeded?.itemId).toBe('b');
+    expect(result.finalVideoAbs).toBeUndefined();
+
+    // Surfaced as an error notification (the channel the desktop bridges
+    // to a red chat card).
+    const budgetNote = notes.find((n) => n.level === 'error' && /budget cap/i.test(n.message));
+    expect(budgetNote).toBeDefined();
+
+    // Durable marker for the pull path (dhee_get_status); no gate marker.
+    const proj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf-8')) as {
+      pausedAtBudget?: { capUsd: number; spentUsd: number; nextNodeId: string };
+      pausedAtGate?: unknown;
+    };
+    expect(proj.pausedAtBudget?.capUsd).toBe(3);
+    expect(proj.pausedAtBudget?.nextNodeId).toBe('fanout');
+    expect(proj.pausedAtGate).toBeUndefined();
+
+    // Raise the cap and resume: completed work cache-skips, the run
+    // reaches the goal, and the budget marker is cleared.
+    const raised = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    (raised['features'] as Record<string, unknown>)['budgetCapUsd'] = 100;
+    writeFileSync(join(projectDir, 'project.json'), JSON.stringify(raised));
+
+    const resume = await runProjectViaBundle({ projectDir });
+    expect(resume.ok).toBe(true);
+    expect(resume.budgetExceeded).toBeUndefined();
+    expect(resume.finalVideoAbs).toBeDefined();
+    const proj2 = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf-8')) as {
+      pausedAtBudget?: unknown;
+    };
+    expect(proj2.pausedAtBudget).toBeUndefined();
+  });
+
   it('fails clearly when the bundle declares a runner that is not registered', async () => {
     makeUserBundle('test_missing_runner', {
       id: 'test_missing_runner',
