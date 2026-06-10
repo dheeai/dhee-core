@@ -41,6 +41,31 @@ describe('resolveWatermarkPath', () => {
     expect(resolved).not.toBeNull();
     expect(existsSync(resolved!)).toBe(true);
   });
+
+  it('rewrites an app.asar path to its app.asar.unpacked sibling (packaged Electron / Windows final_video fix)', () => {
+    // Mirror a packaged app: the asset really lives under .../app.asar/...,
+    // which Node's fs can stat but the external ffmpeg binary cannot open.
+    // resolveWatermarkPath must hand back the unpacked sibling instead.
+    const base = mkdtempSync(join(tmpdir(), 'wm-asar-'));
+    const asarRoot = join(base, 'resources', 'app.asar', 'node_modules', 'dhee-core');
+    mkdirSync(join(asarRoot, 'assets'), { recursive: true });
+    writeFileSync(join(asarRoot, 'assets', 'watermark_dhee.png'), 'stub');
+
+    const resolved = resolveWatermarkPath(asarRoot);
+    expect(resolved).not.toBeNull();
+    expect(resolved!).toContain('app.asar.unpacked');
+    // No leftover bare-asar segment that ffmpeg would choke on.
+    expect(/app\.asar(?!\.unpacked)/.test(resolved!)).toBe(false);
+  });
+
+  it('does not double-rewrite a path already under app.asar.unpacked', () => {
+    const base = mkdtempSync(join(tmpdir(), 'wm-unpacked-'));
+    const unpackedRoot = join(base, 'resources', 'app.asar.unpacked', 'node_modules', 'dhee-core');
+    mkdirSync(join(unpackedRoot, 'assets'), { recursive: true });
+    const file = join(unpackedRoot, 'assets', 'watermark_dhee.png');
+    writeFileSync(file, 'stub');
+    expect(resolveWatermarkPath(unpackedRoot)).toBe(file);
+  });
 });
 
 describe('buildWatermarkOverlayFilter', () => {

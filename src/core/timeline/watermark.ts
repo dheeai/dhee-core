@@ -30,16 +30,33 @@ function findKshanaCoreRootFromSource(): string | null {
   return null;
 }
 
+/**
+ * In a packaged Electron app the resolved path lands inside `app.asar`
+ * (Node's patched `fs` sees through the archive, so `existsSync` returns
+ * true). But the watermark is consumed by the EXTERNAL ffmpeg binary via
+ * `-i`, and ffmpeg has no idea what an asar is — it would try to open the
+ * literal `app.asar/…/watermark.png` and fail. dhee-core is shipped in the
+ * desktop's `asarUnpack` list, so the real bytes live at the
+ * `app.asar.unpacked` sibling. Rewrite to that path — same trick ffmpegBin()
+ * applies to the installer binaries. Guard against double-rewrite.
+ */
+function toUnpackedPath(p: string): string {
+  if (p.includes('app.asar') && !p.includes('app.asar.unpacked')) {
+    return p.replace('app.asar', 'app.asar.unpacked');
+  }
+  return p;
+}
+
 export function resolveWatermarkPath(cwd: string = process.cwd()): string | null {
   for (const rel of WATERMARK_PNG_CANDIDATES) {
     const abs = join(cwd, rel);
-    if (existsSync(abs)) return abs;
+    if (existsSync(abs)) return toUnpackedPath(abs);
   }
   const repoRoot = findKshanaCoreRootFromSource();
   if (repoRoot) {
     for (const rel of WATERMARK_PNG_CANDIDATES) {
       const abs = resolve(repoRoot, rel);
-      if (existsSync(abs)) return abs;
+      if (existsSync(abs)) return toUnpackedPath(abs);
     }
   }
   return null;
