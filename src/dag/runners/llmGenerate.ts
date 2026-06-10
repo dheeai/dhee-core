@@ -638,6 +638,14 @@ export function createLlmGenerateRunner(opts?: {
     let lastErr: string | undefined;
     let content: string | undefined;
     let parsedJson: unknown = undefined;
+    // Accumulated USD cost across all attempts of this node (a failed
+    // retry still cost tokens). Propagated onto the result metadata so
+    // the walker stamps node.completed.generation.costUsd — the field
+    // computeCostLedger sums and the budget backstop (features.budgetCapUsd)
+    // enforces. Without this the ledger sees $0 for every LLM node and
+    // the cap never trips. Stays undefined when the provider reports no
+    // cost (e.g. a local / non-cost-reporting OpenAI-compatible endpoint).
+    let costUsd: number | undefined;
 
     // Resolve schema path once if applicable.
     let schemaAbs: string | undefined;
@@ -699,6 +707,11 @@ export function createLlmGenerateRunner(opts?: {
         // the originating node/item so the chat-vs-walker spend split and
         // the prefix-cache hit ratio are verifiable from the log.
         if (resp.usage) {
+          if (resp.usage.cost !== undefined) {
+            // Sum across attempts — every real call cost tokens, and the
+            // budget cap should account for the retries it took too.
+            costUsd = (costUsd ?? 0) + resp.usage.cost;
+          }
           recordLlmUsage({
             lane: 'walker',
             model: client.getModel(),
@@ -851,6 +864,7 @@ export function createLlmGenerateRunner(opts?: {
         bytes: toWrite.length,
         cached: false,
         ...(inputsHashForEvent ? { inputsHash: inputsHashForEvent } : {}),
+        ...(costUsd !== undefined ? { costUsd } : {}),
         ...(pendingCritique ? { critiqueApplied: true } : {}),
         ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
       },

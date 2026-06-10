@@ -115,6 +115,84 @@ describe('llm.generate runner', () => {
     });
   });
 
+  describe('cost accounting (budget cap depends on this)', () => {
+    // The walker stamps node.completed.generation.costUsd from
+    // result.metadata.costUsd, which computeCostLedger sums and the
+    // budget backstop enforces. The runner MUST propagate the provider-
+    // reported usage.cost onto its result metadata — not just the
+    // telemetry sink — or the cap sees $0 and never trips.
+    function usageRespond(content: string, cost?: number) {
+      return async () =>
+        ({
+          content,
+          usage: {
+            promptTokens: 100,
+            completionTokens: 50,
+            totalTokens: 150,
+            ...(cost !== undefined ? { cost } : {}),
+          },
+        }) as unknown as { content?: string };
+    }
+
+    it('propagates provider usage.cost onto result.metadata.costUsd', async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), 'Write {{topic}}.');
+      const client = makeStubClient({ respond: usageRespond('# Out\n\nbody', 0.0123) });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+      const result = await runner.run(
+        makeCtx({
+          config: { promptTemplate: 'prompts/p.md', outputPath: 'plans/p.md', tier: 'heavy', outputFormat: 'markdown' },
+          inputs: { topic: 'x' },
+        }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect((result.metadata as { costUsd?: number }).costUsd).toBeCloseTo(0.0123, 6);
+      }
+    });
+
+    it('omits costUsd when the provider reports no cost (e.g. a local endpoint)', async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), 'Write {{topic}}.');
+      const client = makeStubClient({ respond: usageRespond('# Out\n\nbody') }); // no cost
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+      const result = await runner.run(
+        makeCtx({
+          config: { promptTemplate: 'prompts/p.md', outputPath: 'plans/p.md', tier: 'heavy', outputFormat: 'markdown' },
+          inputs: { topic: 'x' },
+        }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect((result.metadata as { costUsd?: number }).costUsd).toBeUndefined();
+      }
+    });
+
+    it('sums cost across retries (a failed empty attempt still cost tokens)', async () => {
+      writeFileSync(join(bundleDir, 'prompts/p.md'), 'Write {{topic}}.');
+      let n = 0;
+      const client = makeStubClient({
+        respond: async () => {
+          n += 1;
+          // First attempt: empty content (triggers a retry) but still reports cost.
+          // Second attempt: real content + cost. Total should be the sum.
+          return (n === 1
+            ? { content: '', usage: { promptTokens: 100, completionTokens: 0, totalTokens: 100, cost: 0.001 } }
+            : { content: '# Out\n\nbody', usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, cost: 0.002 } }) as unknown as { content?: string };
+        },
+      });
+      const runner = createLlmGenerateRunner({ clientFactory: () => client });
+      const result = await runner.run(
+        makeCtx({
+          config: { promptTemplate: 'prompts/p.md', outputPath: 'plans/p.md', tier: 'heavy', outputFormat: 'markdown', maxRetries: 2 },
+          inputs: { topic: 'x' },
+        }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect((result.metadata as { costUsd?: number }).costUsd).toBeCloseTo(0.003, 6);
+      }
+    });
+  });
+
   // Failure mode #1 — timeout + retry
   describe('timeout / failure retry', () => {
     it('retries up to maxRetries before failing, then returns ok:false', async () => {
