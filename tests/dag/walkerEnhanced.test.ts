@@ -512,4 +512,59 @@ describe('runner phase scheduling', () => {
       'final',
     ]);
   });
+
+  it('still drains llm.* first when an llm node has a previousN self-edge (relay/chain bundles)', async () => {
+    const reg = getGlobalRegistry();
+    reg.register(
+      { tool: 'llm.fake', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      makeStubRunner({ ranNodes }),
+    );
+    reg.register(
+      { tool: 'comfy.fake', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      makeStubRunner({ ranNodes }),
+    );
+    reg.register(
+      { tool: 'stub.final', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      makeStubRunner({ ranNodes }),
+    );
+
+    // Same graph as TEXT_FIRST_BUNDLE, but character_image_prompt reads its
+    // own prior outputs via previousN — the relay/chain-bundle pattern
+    // (shot_image_prompt reading shot_image_prompt). Before the self-edge
+    // guard this stalled the Kahn drain, tripped the fallback, and left the
+    // bundle in unprioritized order (media interleaved with llm work).
+    const SELF_EDGE_BUNDLE: DagBundle = {
+      ...TEXT_FIRST_BUNDLE,
+      id: 'text-first-self-edge',
+      nodes: TEXT_FIRST_BUNDLE.nodes.map((n) =>
+        n.id === 'character_image_prompt'
+          ? {
+              ...n,
+              inputs: [
+                ...n.inputs,
+                { from: 'character_image_prompt', usage: 'context', scope: 'previousN', n: 5 },
+              ],
+            }
+          : n,
+      ),
+    };
+
+    const result = await walkBundle({
+      projectDir,
+      bundle: SELF_EDGE_BUNDLE,
+      bundleSource: 'built-in:text-first-self-edge',
+    });
+
+    expect(result.ok).toBe(true);
+    // The media node (character_image) must still come after BOTH downstream
+    // llm nodes — i.e. the optimization engaged despite the self-edge.
+    expect(ranNodes).toEqual([
+      'story',
+      'character_image_prompt',
+      'settings_plan',
+      'scene_video_prompt',
+      'character_image',
+      'final',
+    ]);
+  });
 });

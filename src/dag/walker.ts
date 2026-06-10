@@ -311,6 +311,14 @@ function prioritizeReadyLlmNodes(ordered: NodeDef[]): NodeDef[] {
   }
   for (const node of ordered) {
     for (const inp of node.inputs) {
+      // A `previousN` self-edge (e.g. shot_image_prompt reading its own prior
+      // instances for prompt continuity) is a runtime "read my already-completed
+      // prior items" relationship resolved during materialization — NOT a
+      // node-level ordering edge. Counting it would make the node depend on
+      // itself, stall the Kahn drain, and trip the fallback below so the whole
+      // bundle stays un-reordered (the relay/chain bundles this optimization
+      // most needs). Skip self-edges.
+      if (inp.from === node.id) continue;
       if (!reachable.has(inp.from)) continue;
       indegree.set(node.id, (indegree.get(node.id) ?? 0) + 1);
       downstream.get(inp.from)?.push(node.id);
