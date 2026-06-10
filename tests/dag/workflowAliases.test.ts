@@ -292,6 +292,58 @@ describe('applyAliases', () => {
     expect(out.OTHER!.inputs).toEqual({ seed: 1234, model: ['UNET', 0] });
   });
 
+  it('name_aliases swaps numbered *_name fields (DualCLIPLoader gemma → clip_name1)', () => {
+    // Regression: gemma is the only aliased model that sits on a numbered
+    // field (clip_name1), so the old `endsWith('_name')` filter skipped it
+    // while every plain-`_name` alias applied — "always failing for gemma".
+    const out = applyAliases(
+      wf({
+        CLIP: {
+          class_type: 'DualCLIPLoader',
+          inputs: {
+            clip_name1: 'gemma_3_12B_it_fp8_scaled.safetensors',
+            clip_name2: 'ltx-2.3_text_projection_bf16.safetensors',
+          },
+        },
+      }),
+      {
+        workflowKey: 'ltx_director_local.json',
+        aliases: {
+          name_aliases: {
+            'gemma_3_12B_it_fp8_scaled.safetensors':
+              'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors',
+          },
+        },
+      },
+    );
+    expect((out.CLIP!.inputs as { clip_name1: string }).clip_name1).toBe(
+      'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors',
+    );
+    // clip_name2 has no alias entry → untouched.
+    expect((out.CLIP!.inputs as { clip_name2: string }).clip_name2).toBe(
+      'ltx-2.3_text_projection_bf16.safetensors',
+    );
+  });
+
+  it('name_aliases swap by exact value, regardless of field name (no _name needed)', () => {
+    const out = applyAliases(
+      wf({
+        ENC: {
+          class_type: 'SomeCustomEncoderLoader',
+          inputs: { text_encoder: 'old.safetensors', strength: 1, latent: ['VAE', 0] },
+        },
+      }),
+      {
+        workflowKey: 'x.json',
+        aliases: { name_aliases: { 'old.safetensors': 'new.safetensors' } },
+      },
+    );
+    const inputs = out.ENC!.inputs as { text_encoder: string; strength: number; latent: unknown };
+    expect(inputs.text_encoder).toBe('new.safetensors'); // rewritten despite non-`_name` field
+    expect(inputs.strength).toBe(1); // numbers untouched
+    expect(inputs.latent).toEqual(['VAE', 0]); // wire-arrays untouched
+  });
+
   it('name_aliases targeting a name not in the workflow is a no-op', () => {
     const input = wf({
       UNET: { class_type: 'UNETLoader', inputs: { unet_name: 'qwen.safetensors' } },
@@ -316,6 +368,24 @@ describe('applyAliases', () => {
     expect(out.UNET!.class_type).toBe('UnetLoaderGGUF');
     // Inputs preserved verbatim — only class_type changes.
     expect((out.UNET!.inputs as { unet_name: string }).unet_name).toBe('qwen.gguf');
+  });
+
+  it('class_swaps match across path-separator skew (Windows backslash store ↔ fwd-slash lookup)', () => {
+    // Regression: the store is keyed with backslashes on Windows
+    // (`workflows\ltx_director_local.json`) but runners look up with forward
+    // slashes — a raw object lookup missed, so the swap silently never applied.
+    const out = applyAliases(
+      wf({ '57': { class_type: 'LatentUpscaleModelLoader', inputs: {} } }),
+      {
+        workflowKey: 'workflows/ltx_director_local.json',
+        aliases: {
+          class_swaps: {
+            'workflows\\ltx_director_local.json': { '57': 'LowVRAMLatentUpscaleModelLoader' },
+          },
+        },
+      },
+    );
+    expect(out['57']!.class_type).toBe('LowVRAMLatentUpscaleModelLoader');
   });
 
   it('class_swaps under a different workflowKey are ignored', () => {
