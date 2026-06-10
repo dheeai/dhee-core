@@ -38,6 +38,7 @@ import { getModel, type Model } from '@mariozechner/pi-ai';
 import { DHEE_TOOL_NAMES, registerDheeTools } from './tools/index.js';
 import { registerContextTrim } from './contextTrim.js';
 import { registerUsageTelemetry } from './usageTelemetryExtension.js';
+import { getDheeSystemPrompt } from './dheeSystemPrompt.js';
 
 /** The skill name (from the YAML frontmatter `name:` field) we inject. */
 export const DHEE_SKILL_NAME = 'dhee';
@@ -215,6 +216,12 @@ export async function buildPiSessionConfig(
     cwd,
     agentDir: getAgentDir(),
     skillsOverride: () => packagedSkills,
+    // Deliver the dhee SKILL.md body AS pi's system prompt. Without
+    // this, pi only lists the skill (name/description/path) when the
+    // `read` builtin is allowlisted — which dhee removed — so the
+    // skill body never reached the model and the agent ran on pi's
+    // stock "expert coding assistant" prompt. See dheeSystemPrompt.ts.
+    systemPromptOverride: () => getDheeSystemPrompt(),
     extensionFactories,
   });
   await resourceLoader.reload();
