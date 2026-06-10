@@ -44,9 +44,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The package.json `test` script intentionally restricts to
-      # tests/unit/ for fast local iteration. CI runs the full suite
-      # (workflow / integration / pipeline tests too) via vitest
-      # directly so a regression in any path blocks the merge.
+      # `npm test` runs the full suite (matches this step); use
+      # `npm run test:unit` for fast tests/unit-only local iteration.
+      # CI runs vitest directly so a regression in any path blocks the merge.
       - name: Run full test suite
         run: pnpm exec vitest run

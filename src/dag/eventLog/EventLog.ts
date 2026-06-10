@@ -62,9 +62,7 @@ export interface EventLog {
 export function openEventLog(projectDir: string): EventLog {
   const path = eventLogPath(projectDir);
 
-  function deriveNextSeq(): number {
-    if (!existsSync(path)) return 1;
-    const raw = readFileSync(path, 'utf-8');
+  function deriveSeqFromRaw(raw: string): number {
     if (raw.length === 0) return 1;
     let maxSeq = 0;
     for (const line of raw.split('\n')) {
@@ -79,6 +77,14 @@ export function openEventLog(projectDir: string): EventLog {
     return maxSeq + 1;
   }
 
+  function readRaw(): string {
+    return existsSync(path) ? readFileSync(path, 'utf-8') : '';
+  }
+
+  function deriveNextSeq(): number {
+    return deriveSeqFromRaw(readRaw());
+  }
+
   function ensureDir(): void {
     const dir = dheeDir(projectDir);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -90,17 +96,25 @@ export function openEventLog(projectDir: string): EventLog {
 
   function append<K extends EventKind>(input: EventAppendInput<K>): DheeEvent<K> {
     ensureDir();
-    // Re-derive from disk every append (no cached counter) so two live
-    // handles can't both hand out the same seq. See the openEventLog
-    // doc comment for why.
-    const seq = deriveNextSeq();
+    // Read the file ONCE: re-derive seq from disk every append (no cached
+    // counter) so two live handles can't both hand out the same seq (see
+    // the openEventLog doc comment), and detect a torn final line in the
+    // same pass.
+    const raw = readRaw();
+    const seq = deriveSeqFromRaw(raw);
+    // Heal a torn final line: a crash mid-write can leave the file ending
+    // without a newline. Appending straight on would CONCATENATE the new
+    // event onto that fragment, corrupting both lines. Prepend a newline
+    // so the new event lands on its own line; the unparseable fragment is
+    // then harmlessly skipped on read.
+    const framingPrefix = raw.length > 0 && !raw.endsWith('\n') ? '\n' : '';
     const event: DheeEvent<K> = {
       seq,
       id: nanoid(),
       ts: Date.now(),
       ...input,
     } as DheeEvent<K>;
-    appendFileSync(path, JSON.stringify(event) + '\n');
+    appendFileSync(path, framingPrefix + JSON.stringify(event) + '\n');
     return event;
   }
 
