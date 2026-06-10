@@ -5,7 +5,7 @@
  * true, missing features, non-object project, wrong-type value) → ON.
  */
 import { describe, it, expect } from 'vitest';
-import { isGateAfterCollectionsEnabled } from '../../src/dag/projectFeatures.js';
+import { isGateAfterCollectionsEnabled, getBudgetCapUsd } from '../../src/dag/projectFeatures.js';
 
 describe('isGateAfterCollectionsEnabled (default ON / opt-out)', () => {
   it('ON when explicitly true', () => {
@@ -37,5 +37,33 @@ describe('isGateAfterCollectionsEnabled (default ON / opt-out)', () => {
     expect(isGateAfterCollectionsEnabled(null)).toBe(true);
     expect(isGateAfterCollectionsEnabled(undefined)).toBe(true);
     expect(isGateAfterCollectionsEnabled('project')).toBe(true);
+  });
+});
+
+describe('getBudgetCapUsd (strict opt-in number)', () => {
+  it('returns the cap when a finite number > 0', () => {
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: 5 } })).toBe(5);
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: 0.5 } })).toBe(0.5);
+  });
+
+  it('undefined (no cap) when missing, ≤ 0, or non-finite', () => {
+    expect(getBudgetCapUsd({ features: {} })).toBeUndefined();
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: 0 } })).toBeUndefined();
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: -3 } })).toBeUndefined();
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: Infinity } })).toBeUndefined();
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: NaN } })).toBeUndefined();
+  });
+
+  it('undefined for non-number values (no silent string coercion)', () => {
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: '5' } })).toBeUndefined();
+    expect(getBudgetCapUsd({ features: { budgetCapUsd: null } })).toBeUndefined();
+  });
+
+  it('undefined when features is absent or project is non-object', () => {
+    expect(getBudgetCapUsd({})).toBeUndefined();
+    expect(getBudgetCapUsd({ features: null })).toBeUndefined();
+    expect(getBudgetCapUsd(null)).toBeUndefined();
+    expect(getBudgetCapUsd(undefined)).toBeUndefined();
+    expect(getBudgetCapUsd('project')).toBeUndefined();
   });
 });

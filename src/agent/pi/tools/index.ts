@@ -32,6 +32,7 @@ import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerate
 import { dheeStartRunTool, makeStartRunTool } from './dheeStartRun.js';
 import { dheeStopRunTool, makeStopRunTool } from './dheeStopRun.js';
 import { dheeSetProjectFieldTool, makeSetProjectFieldTool } from './dheeSetProjectField.js';
+import { dheeSetBudgetCapTool, makeSetBudgetCapTool } from './dheeSetBudgetCap.js';
 import { dheeSelectVersionTool, makeSelectVersionTool } from './dheeSelectVersion.js';
 import { dheeShowFileTool, makeShowFileTool } from './dheeShowFile.js';
 import { dheeShowNodeOutputTool, makeShowNodeOutputTool } from './dheeShowNodeOutput.js';
@@ -63,6 +64,7 @@ export const DHEE_TOOL_NAMES = [
   'dhee_write_input',
   'dhee_write_node_content',
   'dhee_set_project_field',
+  'dhee_set_budget_cap',
   'dhee_read',
   'dhee_ls',
   'dhee_grep',
@@ -93,6 +95,7 @@ export {
   dheeWriteInputTool,
   dheeWriteNodeContentTool,
   dheeSetProjectFieldTool,
+  dheeSetBudgetCapTool,
   dheeReadTool,
   dheeLsTool,
   dheeGrepTool,
@@ -120,6 +123,7 @@ export {
   makeWriteInputTool,
   makeWriteNodeContentTool,
   makeSetProjectFieldTool,
+  makeSetBudgetCapTool,
   makeReadTool,
   makeLsTool,
   makeGrepTool,
@@ -155,6 +159,7 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeWriteInputTool);
   pi.registerTool(dheeWriteNodeContentTool);
   pi.registerTool(dheeSetProjectFieldTool);
+  pi.registerTool(dheeSetBudgetCapTool);
   pi.registerTool(dheeReadTool);
   pi.registerTool(dheeLsTool);
   pi.registerTool(dheeGrepTool);

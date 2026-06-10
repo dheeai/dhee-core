@@ -6,6 +6,7 @@ import {
   BackgroundTaskRunner,
   type ExecutorCancelled,
   type ExecutorGated,
+  type ExecutorBudgetExceeded,
   type TaskExecutionContext,
 } from './BackgroundTaskRunner.js';
 import { getProjectsDir } from '../../agent/pi/paths.js';
@@ -21,7 +22,7 @@ function resolveProjectDir(opts: { name: string; basePath: string; projectDir?: 
 
 async function executeRunTo(
   ctx: TaskExecutionContext,
-): Promise<void | ExecutorCancelled | ExecutorGated> {
+): Promise<void | ExecutorCancelled | ExecutorGated | ExecutorBudgetExceeded> {
   const params = ctx.spec.params as {
     projectDir?: string;
     stage?: string;
@@ -56,6 +57,19 @@ async function executeRunTo(
     log: (m) => ctx.hooks.onNotification({ level: 'info', message: m }),
   });
   if (!result.ok) throw new Error(result.error ?? 'bundle run failed');
+  if (result.budgetExceeded) {
+    const { capUsd, spentUsd } = result.budgetExceeded;
+    ctx.hooks.onNotification({
+      level: 'error',
+      message:
+        `⏸ Paused — hit your $${capUsd.toFixed(2)} budget cap for this project ` +
+        `(spent ~$${spentUsd.toFixed(2)}). Nothing was charged for the step that was about to run. ` +
+        `Raise or clear the cap in Settings to continue.`,
+    });
+    // Structured outcome so the runner stamps the cap reason onto the
+    // terminal `completed` event — same rationale as the gate (issue #133).
+    return { budgetExceeded: result.budgetExceeded };
+  }
   if (result.gatedAfter) {
     ctx.hooks.onNotification({
       level: 'info',
