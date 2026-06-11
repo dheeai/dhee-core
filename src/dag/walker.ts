@@ -16,6 +16,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
+import {
+  resolveCharacterReferenceBinding,
+  writeCharacterReferenceBindingOutput,
+} from './projectCharacterReferences.js';
 import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
 import { withLocalResource, type LocalResourceSnapshot } from './localResourceState.js';
@@ -1474,6 +1478,16 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         ...node,
         runner: { tool: effectiveTool, config: cfg },
       };
+      const cfgOutputPath = (cfg as Record<string, unknown>)['outputPath'];
+      const characterReferenceBinding =
+        node.id === 'character_image' &&
+        inst.itemId &&
+        typeof cfgOutputPath === 'string'
+          ? resolveCharacterReferenceBinding({
+              projectDir: opts.projectDir,
+              characterId: inst.itemId,
+            })
+          : null;
 
       // Resolve ctx.inputs from upstream completed nodes. For each
       // declared input, read the upstream's output file (markdown →
@@ -1654,7 +1668,6 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       // preservation events land even when the caller didn't attach
       // a ProjectionEngine — keeps preservation consistent with the
       // other sites (invalidateNodes, dhee_write_node_content).
-      const cfgOutputPath = (cfg as Record<string, unknown>)['outputPath'];
       if (typeof cfgOutputPath === 'string' && cfgOutputPath.length > 0) {
         const canonicalAbs = resolve(opts.projectDir, cfgOutputPath);
         if (existsSync(canonicalAbs)) {
@@ -1693,15 +1706,26 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       nodeDidRealWork = true;
 
       let result: RunnerResult;
-      try {
-        const localResource = classifyLocalResource(effectiveTool, runtimeNode, inst);
-        if (localResource) {
-          result = await withLocalResource(localResource, () => runner.run(ctx));
-        } else {
-          result = await runner.run(ctx);
+      if (characterReferenceBinding && typeof cfgOutputPath === 'string') {
+        log(
+          `  character reference: ${characterReferenceBinding.sourceRel} → ${inst.itemId} (${characterReferenceBinding.strategy})`,
+        );
+        result = writeCharacterReferenceBindingOutput({
+          projectDir: opts.projectDir,
+          outputPath: cfgOutputPath,
+          binding: characterReferenceBinding,
+        });
+      } else {
+        try {
+          const localResource = classifyLocalResource(effectiveTool, runtimeNode, inst);
+          if (localResource) {
+            result = await withLocalResource(localResource, () => runner.run(ctx));
+          } else {
+            result = await runner.run(ctx);
+          }
+        } catch (e) {
+          result = { ok: false, error: (e as Error).message };
         }
-      } catch (e) {
-        result = { ok: false, error: (e as Error).message };
       }
 
       if (!result.ok) {
@@ -1748,6 +1772,9 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         const cached = Boolean(md['cached']);
         const inputsHash = typeof md['inputsHash'] === 'string' ? (md['inputsHash'] as string) : undefined;
         const costUsd = typeof md['costUsd'] === 'number' ? (md['costUsd'] as number) : undefined;
+        const generationTool = typeof md['generationTool'] === 'string'
+          ? (md['generationTool'] as string)
+          : node.runner.tool;
         const versionId = `v${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
         // Dependency source-of-truth: if the runner stamped a precise
         // dep list on metadata.dependencies, prefer it. Otherwise fall
@@ -1784,7 +1811,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             outputPath: result.outputPath,
             artifact: { format: node.outputs.format },
             generation: {
-              tool: node.runner.tool,
+              tool: generationTool,
               toolVersion: '0.1.0',
               cached,
               ...(inputsHash ? { inputsHash } : {}),

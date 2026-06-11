@@ -38,6 +38,7 @@ import { ffmpegBin } from './ffmpegBin.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
+import { getProjectCacheScope } from '../projectIdentity.js';
 
 interface FfmpegShotClipConfig {
   shotNumber: number;
@@ -189,7 +190,13 @@ export function createFfmpegShotClipRunner(): Runner {
       tool: 'ffmpeg.shot_clip',
       toolVersion: '0.1.0',
       inputs: { shot, style },
-      config: { width, height, duration, shotNumber: cfg.shotNumber },
+      config: {
+        projectScope: getProjectCacheScope(ctx.projectDir),
+        width,
+        height,
+        duration,
+        shotNumber: cfg.shotNumber,
+      },
     };
     const casDisabled = process.env['DHEE_DISABLE_CAS'] === '1';
     if (!casDisabled && !cfg.forceRerun) {

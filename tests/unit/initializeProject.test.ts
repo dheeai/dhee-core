@@ -56,6 +56,9 @@ describe('initializeProject', () => {
     });
     expect(result.ok).toBe(true);
     const project = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(project.projectId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
     expect(project.name).toBe('My Cinematic Project');
     expect(project.bundleSource).toBe('built-in:narrative_prompt_relay');
     expect(project.targetDuration).toBe(120);

@@ -28,6 +28,7 @@ import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
 import { resolveEndpointUrl } from './endpointResolver.js';
+import { getProjectCacheScope } from '../projectIdentity.js';
 
 // ── Shared types ───────────────────────────────────────────────────────
 
@@ -266,6 +267,7 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
       ...imageEntries,
     },
     config: {
+      projectScope: getProjectCacheScope(ctx.projectDir),
       width: opts.width,
       height: opts.height,
       durationSeconds: opts.durationSeconds,

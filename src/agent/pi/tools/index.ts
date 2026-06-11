@@ -29,6 +29,7 @@ import { dheeListVersionsTool, makeListVersionsTool } from './dheeListVersions.j
 import { dheePresentBundleChoicesTool, makePresentBundleChoicesTool } from './dheePresentBundleChoices.js';
 import { dheeReadArtifactTool, makeReadArtifactTool } from './dheeReadArtifact.js';
 import { dheeRegenerateNodeTool, makeRegenerateNodeTool } from './dheeRegenerateNode.js';
+import { dheeReplaceCharacterReferenceTool, makeReplaceCharacterReferenceTool } from './dheeReplaceCharacterReference.js';
 import { dheeStartRunTool, makeStartRunTool } from './dheeStartRun.js';
 import { dheeStopRunTool, makeStopRunTool } from './dheeStopRun.js';
 import { dheeSetProjectFieldTool, makeSetProjectFieldTool } from './dheeSetProjectField.js';
@@ -49,6 +50,7 @@ export const DHEE_TOOL_NAMES = [
   'dhee_stop_run',
   'dhee_get_status',
   'dhee_regenerate_node',
+  'dhee_replace_character_reference',
   'dhee_critique_node',
   'dhee_check_resolution',
   'dhee_check_workflow',
@@ -84,6 +86,7 @@ export {
   dheePresentBundleChoicesTool,
   dheeReadArtifactTool,
   dheeRegenerateNodeTool,
+  dheeReplaceCharacterReferenceTool,
   dheeStartRunTool,
   dheeStopRunTool,
   dheeSelectVersionTool,
@@ -111,6 +114,7 @@ export {
   makePresentBundleChoicesTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
+  makeReplaceCharacterReferenceTool,
   makeStartRunTool,
   makeStopRunTool,
   makeSelectVersionTool,
@@ -140,6 +144,7 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeStopRunTool);
   pi.registerTool(dheeGetStatusTool);
   pi.registerTool(dheeRegenerateNodeTool);
+  pi.registerTool(dheeReplaceCharacterReferenceTool);
   pi.registerTool(dheeCritiqueNodeTool);
   pi.registerTool(dheeCheckResolutionTool);
   pi.registerTool(dheeCheckWorkflowTool);

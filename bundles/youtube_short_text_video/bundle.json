@@ -1,0 +1,221 @@
+{
+  "id": "youtube_short_text_video",
+  "version": "0.1.0",
+  "displayName": "YouTube Short",
+  "summary": "Short-form vertical video from a story or idea.",
+  "techLine": "LLM PLAN + FFMPEG VERTICAL MP4",
+  "engineCompat": ">=0.1.0",
+  "description": "A portable Dhee bundle for creating a 30-second YouTube Short. It writes a real vertical MP4 using the existing LLM planning runner and FFmpeg clip/concat runners, so it can run without ComfyUI, GPU setup, or external image/video APIs.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "ffmpeg.shot_clip": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0"
+    }
+  },
+  "inputs": [
+    {
+      "id": "story_input",
+      "kind": "file",
+      "path": "inputs/story.md",
+      "required": true,
+      "label": "Your Short idea",
+      "placeholder": "A creator discovers a simple trick that changes how people make thumbnails...",
+      "multiline": true
+    },
+    {
+      "id": "targetDuration",
+      "kind": "project",
+      "field": "targetDuration",
+      "default": 30,
+      "label": "Duration",
+      "control": "pills",
+      "unit": "seconds",
+      "options": [
+        { "value": 30, "label": "30s" }
+      ]
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "cinematic_short",
+      "label": "Style",
+      "control": "select",
+      "options": [
+        { "value": "cinematic_short", "label": "Cinematic Short" },
+        { "value": "documentary", "label": "Documentary" },
+        { "value": "anime", "label": "Anime" },
+        { "value": "noir", "label": "Film Noir" },
+        { "value": "animation", "label": "Animation" }
+      ]
+    },
+    {
+      "id": "aspect",
+      "kind": "project",
+      "field": "aspect",
+      "default": "9:16",
+      "label": "Aspect",
+      "control": "pills",
+      "options": [
+        { "value": "9:16", "label": "9:16" }
+      ]
+    }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "hook",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": { "format": "md", "pattern": "plans/hook.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/hook.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.7
+        }
+      },
+      "displayCapability": "plot.outline"
+    },
+    {
+      "id": "script",
+      "kind": "stage",
+      "inputs": [{ "from": "hook", "usage": "context" }],
+      "outputs": { "format": "md", "pattern": "plans/script.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/script.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.6
+        }
+      },
+      "displayCapability": "story.prose"
+    },
+    {
+      "id": "scenes_plan",
+      "kind": "stage",
+      "inputs": [
+        { "from": "hook", "usage": "context" },
+        { "from": "script", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/scenes_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scenes_plan.md",
+          "outputSchema": "schemas/scenes_plan.schema.json",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.4
+        }
+      },
+      "displayCapability": "scene.plan"
+    },
+    {
+      "id": "shot_breakdown",
+      "kind": "stage",
+      "inputs": [
+        { "from": "script", "usage": "context" },
+        { "from": "scenes_plan", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/shot_breakdown.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/shot_breakdown.md",
+          "outputSchema": "schemas/shot_breakdown.schema.json",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.45
+        }
+      },
+      "displayCapability": "shot.prompt"
+    },
+    {
+      "id": "shot_1_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_1.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 1, "durationSec": 6, "width": 1080, "height": 1920 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "shot_2_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_2.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 2, "durationSec": 6, "width": 1080, "height": 1920 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "shot_3_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_3.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 3, "durationSec": 6, "width": 1080, "height": 1920 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "shot_4_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_4.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 4, "durationSec": 6, "width": 1080, "height": 1920 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "shot_5_video",
+      "kind": "stage",
+      "inputs": [{ "from": "shot_breakdown", "usage": "input" }],
+      "outputs": { "format": "video", "pattern": "videos/shot_5.mp4" },
+      "runner": {
+        "tool": "ffmpeg.shot_clip",
+        "config": { "shotNumber": 5, "durationSec": 6, "width": 1080, "height": 1920 }
+      },
+      "displayCapability": "shot.video"
+    },
+    {
+      "id": "final_video",
+      "kind": "stage",
+      "inputs": [
+        { "from": "shot_1_video", "usage": "input" },
+        { "from": "shot_2_video", "usage": "input" },
+        { "from": "shot_3_video", "usage": "input" },
+        { "from": "shot_4_video", "usage": "input" },
+        { "from": "shot_5_video", "usage": "input" }
+      ],
+      "outputs": { "format": "video", "pattern": "final/youtube_short.mp4" },
+      "runner": {
+        "tool": "ffmpeg.concat",
+        "config": {}
+      },
+      "displayCapability": "final.video"
+    }
+  ],
+  "display": {
+    "thumbnail": {
+      "from": "final.video",
+      "pick": "latest_completed"
+    },
+    "stats": [
+      { "label": "shots", "source": "scene.plan", "path": "shots.length" }
+    ]
+  }
+}

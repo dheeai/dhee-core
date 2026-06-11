@@ -478,6 +478,137 @@ describe('runOnly (back-compat — now a no-op)', () => {
   });
 });
 
+// ── Project-local character references ────────────────────────────────
+
+describe('project character references', () => {
+  it('uses a setup character reference as the character_image output before invoking Comfy', async () => {
+    const bundle: DagBundle = {
+      id: 'character-ref-bundle',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      goal: 'character_image',
+      nodes: [
+        {
+          id: 'characters_plan',
+          kind: 'stage',
+          inputs: [],
+          outputs: { format: 'json', pattern: 'plans/characters_plan.json' },
+          runner: { tool: 'characters.fake', config: {} },
+        },
+        {
+          id: 'character_image_prompt',
+          kind: 'collection',
+          itemSource: 'characters_plan',
+          itemKey: 'characters',
+          inputs: [{ from: 'characters_plan', usage: 'input' }],
+          outputs: { format: 'json', pattern: 'prompts/character_images/{{item_id}}.json' },
+          runner: { tool: 'llm.fake', config: { name: 'character_image_prompt' } },
+        },
+        {
+          id: 'character_image',
+          kind: 'collection',
+          itemSource: 'character_image_prompt',
+          inputs: [{ from: 'character_image_prompt', usage: 'input', scope: 'matching' }],
+          outputs: { format: 'image', pattern: 'assets/images/characters/{{item_id}}.png' },
+          runner: { tool: 'comfy.fake', config: { name: 'character_image' } },
+        },
+      ],
+    };
+
+    mkdirSync(join(projectDir, 'assets/uploads/characters'), { recursive: true });
+    writeFileSync(join(projectDir, 'assets/uploads/characters/hero.png'), 'uploaded-arjun');
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({
+        inputs: [
+          {
+            id: 'character-ref-1',
+            source: { type: 'local_path', value: 'assets/uploads/characters/hero.png' },
+            mediaType: 'image',
+            purpose: 'character_ref',
+            metadata: {
+              originalFilename: 'hero.png',
+              referenceRole: 'character',
+            },
+            processing: {
+              status: 'completed',
+              localPath: 'assets/uploads/characters/hero.png',
+            },
+          },
+        ],
+      }),
+    );
+
+    const reg = getGlobalRegistry();
+    reg.register(
+      { tool: 'characters.fake', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      {
+        describe: () => ({
+          id: 'characters.fake',
+          displayName: 'characters',
+          description: 'characters',
+          capabilities: [],
+          modalities: { input: [], output: [] },
+          configSchema: {},
+        }),
+        async run(ctx): Promise<RunnerResult> {
+          const outputPath = ctx.node.runner.config['outputPath'] as string;
+          const outAbs = join(ctx.projectDir, outputPath);
+          mkdirSync(join(outAbs, '..'), { recursive: true });
+          writeFileSync(
+            outAbs,
+            JSON.stringify({
+              characters: [
+                { id: 'arjun', name: 'Arjun' },
+              ],
+            }),
+          );
+          return { ok: true, outputPath };
+        },
+      },
+    );
+    reg.register(
+      { tool: 'llm.fake', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      makeStubRunner({ ranNodes }),
+    );
+    reg.register(
+      { tool: 'comfy.fake', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      {
+        describe: () => ({
+          id: 'comfy.fake',
+          displayName: 'comfy',
+          description: 'comfy',
+          capabilities: [],
+          modalities: { input: [], output: [] },
+          configSchema: {},
+        }),
+        async run(): Promise<RunnerResult> {
+          return { ok: false, error: 'comfy.fake should not run for a bound character reference' };
+        },
+      },
+    );
+
+    const result = await walkBundle({
+      projectDir,
+      bundle,
+      bundleSource: 'built-in:character-ref-bundle',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(readFileSync(join(projectDir, 'assets/images/characters/arjun.png'), 'utf8')).toBe('uploaded-arjun');
+    expect(ranNodes).toEqual(['character_image_prompt']);
+    const state = loadWalkState(projectDir);
+    expect(state?.nodes['character_image:arjun']?.metadata).toMatchObject({
+      generationTool: 'project.character_reference',
+      userSupplied: true,
+      characterReference: {
+        sourcePath: 'assets/uploads/characters/hero.png',
+        strategy: 'single_reference_first_character',
+      },
+    });
+  });
+});
+
 // ── Ready-node scheduling ─────────────────────────────────────────────
 
 describe('runner phase scheduling', () => {

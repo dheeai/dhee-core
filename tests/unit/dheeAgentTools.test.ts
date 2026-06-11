@@ -29,8 +29,10 @@ import {
   makeGetStatusTool,
   makeReadArtifactTool,
   makeRegenerateNodeTool,
+  makeReplaceCharacterReferenceTool,
   DHEE_TOOL_NAMES,
 } from '../../src/agent/pi/tools/index.js';
+import type { DagBundle } from '../../src/dag/schema.js';
 
 // paths.ts reads `dhee_PROJECTS_DIR` (lowercase prefix — inconsistent
 // with DHEE_PI_SESSIONS_DIR; tracked as light tech debt). Until it's
@@ -49,6 +51,32 @@ afterEach(() => {
 });
 
 const ctx = {} as never;
+
+function makeReplaceBundle(): DagBundle {
+  return {
+    id: 'replace-test',
+    version: '0.1.0',
+    engineCompat: '>=0.1.0',
+    goal: 'final',
+    nodes: [
+      {
+        id: 'character_image',
+        kind: 'collection',
+        inputs: [],
+        outputs: { format: 'image', pattern: 'assets/characters/{{item_id}}.png' },
+        runner: { tool: 'stub.runner', config: {} },
+      },
+      {
+        id: 'shot_image',
+        kind: 'collection',
+        itemSource: 'character_image',
+        inputs: [{ from: 'character_image', usage: 'reference', scope: 'matching' }],
+        outputs: { format: 'image', pattern: 'assets/shots/{{item_id}}.png' },
+        runner: { tool: 'stub.runner', config: {} },
+      },
+    ],
+  };
+}
 
 /* ─────────────── dhee_create_project ─────────────── */
 
@@ -435,6 +463,93 @@ describe('dhee_ask_question', () => {
   });
 });
 
+/* ─────────────── dhee_replace_character_reference ─────────────── */
+
+describe('dhee_replace_character_reference', () => {
+  it('writes the uploaded project-local image to character_image:itemId', async () => {
+    const projectDir = join(projectsRoot, 'replace-char');
+    mkdirSync(join(projectDir, 'plans'), { recursive: true });
+    mkdirSync(join(projectDir, 'assets/uploads/characters'), { recursive: true });
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({
+        name: 'replace-char',
+        bundleSource: 'built-in:replace-test',
+        walkState: {
+          nodes: {
+            'character_image:emna_aoyama': {
+              status: 'completed',
+              outputPath: 'assets/characters/emna_aoyama.png',
+            },
+            'shot_image:emna_aoyama': {
+              status: 'completed',
+              outputPath: 'assets/shots/emna_aoyama.png',
+            },
+          },
+        },
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      join(projectDir, 'plans/characters_plan.json'),
+      JSON.stringify({ characters: [{ id: 'emna_aoyama', name: 'Emna Aoyama' }] }),
+      'utf8',
+    );
+    writeFileSync(join(projectDir, 'assets/uploads/characters/new-emna.png'), 'new-image');
+    const tool = makeReplaceCharacterReferenceTool({
+      loadBundleForProject: () => makeReplaceBundle(),
+    });
+
+    const out = await tool.execute(
+      'rr-1',
+      {
+        projectDir,
+        characterId: 'emna_aoyama',
+        referencePath: 'assets/uploads/characters/new-emna.png',
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(out.isError).toBeFalsy();
+    expect((out.content[0] as { text: string }).text).toMatch(/Replaced character reference/);
+    expect(readFileSync(join(projectDir, 'assets/characters/emna_aoyama.png'), 'utf8')).toBe('new-image');
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes['character_image:emna_aoyama']).toMatchObject({
+      status: 'completed',
+      outputPath: 'assets/characters/emna_aoyama.png',
+    });
+    expect(after.walkState.nodes['shot_image:emna_aoyama']).toBeUndefined();
+  });
+
+  it('rejects replacement images outside the project', async () => {
+    const projectDir = join(projectsRoot, 'outside-ref');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, 'project.json'),
+      JSON.stringify({ name: 'outside-ref', bundleSource: 'built-in:replace-test' }),
+      'utf8',
+    );
+    const outside = join(projectsRoot, 'outside.png');
+    writeFileSync(outside, 'nope');
+    const tool = makeReplaceCharacterReferenceTool({
+      loadBundleForProject: () => makeReplaceBundle(),
+    });
+
+    const out = await tool.execute(
+      'rr-2',
+      { projectDir, characterId: 'hero', referencePath: outside },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(out.isError).toBe(true);
+    expect((out.content[0] as { text: string }).text).toMatch(/inside the project/i);
+  });
+});
+
 /* ─────────────── registry surface ─────────────── */
 
 describe('DHEE_TOOL_NAMES', () => {
@@ -449,6 +564,7 @@ describe('DHEE_TOOL_NAMES', () => {
       'dhee_stop_run',
       'dhee_get_status',
       'dhee_regenerate_node',
+      'dhee_replace_character_reference',
       'dhee_critique_node',
       'dhee_check_resolution',
       'dhee_check_workflow',

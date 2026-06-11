@@ -25,10 +25,30 @@
  * try/catch noise.
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
 import { openEventLog } from './eventLog/EventLog.js';
 import type { BundleInputDecl, DagBundle, NodeDef } from './schema.js';
+
+export type ProjectReferenceImagePurpose =
+  | 'character_ref'
+  | 'setting_ref'
+  | 'reference_general';
+export type ProjectReferenceImageRole = 'auto' | 'character' | 'setting';
+
+export interface ProjectLocalReferenceImage {
+  name: string;
+  relativePath: string;
+  purpose?: ProjectReferenceImagePurpose;
+  referenceRole?: ProjectReferenceImageRole;
+  sourcePath?: string;
+  originalFilename?: string;
+  mimeType?: string;
+  size?: number;
+  replacementCharacterId?: string;
+  replacementCharacterName?: string;
+}
 
 export interface InitializeProjectParams {
   /** Absolute path of an existing (already-created) project directory. */
@@ -46,6 +66,11 @@ export interface InitializeProjectParams {
    * inputs return an error.
    */
   inputs?: Record<string, unknown>;
+  /**
+   * Already-imported project-local reference images from desktop setup.
+   * They are recorded under project.inputs for later planner/agent use.
+   */
+  referenceImages?: ProjectLocalReferenceImage[];
 }
 
 export type InitializeProjectResult =
@@ -53,7 +78,7 @@ export type InitializeProjectResult =
   | { ok: false; error: string };
 
 export function initializeProject(params: InitializeProjectParams): InitializeProjectResult {
-  const { projectDir, name, bundleId, description, inputs = {} } = params;
+  const { projectDir, name, bundleId, description, inputs = {}, referenceImages = [] } = params;
 
   if (!existsSync(projectDir)) {
     return { ok: false, error: `Project directory '${projectDir}' does not exist.` };
@@ -74,6 +99,7 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
   }
 
   const project: Record<string, unknown> = {
+    projectId: randomUUID(),
     name,
     bundleSource: `built-in:${bundleId}`,
     ...(description ? { description } : {}),
@@ -95,6 +121,8 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     }
   }
 
+  appendReferenceImageInputs(project, referenceImages);
+
   // A file-input can pre-populate a NODE'S OUTPUT (e.g. an "Art direction"
   // style guide → plans/world_style.md, which is the world_style node's
   // output). Mark that node completed so the first walk uses the provided
@@ -108,6 +136,108 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
 
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2), 'utf8');
   return { ok: true, projectDir };
+}
+
+function isReferencePurpose(value: unknown): value is ProjectReferenceImagePurpose {
+  return (
+    value === 'character_ref' ||
+    value === 'setting_ref' ||
+    value === 'reference_general'
+  );
+}
+
+function isReferenceRole(value: unknown): value is ProjectReferenceImageRole {
+  return value === 'auto' || value === 'character' || value === 'setting';
+}
+
+function roleForReferencePurpose(
+  purpose: ProjectReferenceImagePurpose | undefined,
+): ProjectReferenceImageRole {
+  if (purpose === 'character_ref') return 'character';
+  if (purpose === 'setting_ref') return 'setting';
+  return 'auto';
+}
+
+function purposeForReferenceRole(
+  role: ProjectReferenceImageRole,
+): ProjectReferenceImagePurpose {
+  if (role === 'character') return 'character_ref';
+  if (role === 'setting') return 'setting_ref';
+  return 'reference_general';
+}
+
+function normalizeReferenceRole(image: ProjectLocalReferenceImage): ProjectReferenceImageRole {
+  if (isReferenceRole(image.referenceRole)) return image.referenceRole;
+  if (isReferencePurpose(image.purpose)) return roleForReferencePurpose(image.purpose);
+  return 'auto';
+}
+
+function appendReferenceImageInputs(
+  project: Record<string, unknown>,
+  images: ProjectLocalReferenceImage[],
+): void {
+  if (images.length === 0) return;
+  const projectInputs = Array.isArray(project['inputs'])
+    ? (project['inputs'] as Array<Record<string, unknown>>)
+    : [];
+  const existingPaths = new Set(
+    projectInputs
+      .map((input) => {
+        const source = input['source'];
+        const processing = input['processing'];
+        const sourceValue =
+          source && typeof source === 'object'
+            ? (source as Record<string, unknown>)['value']
+            : undefined;
+        const localPath =
+          processing && typeof processing === 'object'
+            ? (processing as Record<string, unknown>)['localPath']
+            : undefined;
+        return typeof sourceValue === 'string'
+          ? sourceValue
+          : typeof localPath === 'string'
+            ? localPath
+            : undefined;
+      })
+      .filter((value): value is string => typeof value === 'string' && value.length > 0),
+  );
+  const now = Date.now();
+
+  for (const [index, image] of images.entries()) {
+    if (!image.relativePath || existingPaths.has(image.relativePath)) continue;
+    const role = normalizeReferenceRole(image);
+    const purpose = isReferencePurpose(image.purpose)
+      ? image.purpose
+      : purposeForReferenceRole(role);
+    projectInputs.push({
+      id: `${purpose === 'character_ref' ? 'character-ref' : purpose === 'setting_ref' ? 'setting-ref' : 'reference-image'}-${now}-${index + 1}`,
+      source: {
+        type: 'local_path',
+        value: image.relativePath,
+        ...(image.sourcePath ? { originalValue: image.sourcePath } : {}),
+      },
+      mediaType: 'image',
+      purpose,
+      metadata: {
+        originalFilename: image.originalFilename ?? image.name,
+        ...(image.mimeType ? { mimeType: image.mimeType } : {}),
+        ...(image.size !== undefined ? { fileSize: image.size } : {}),
+        addedAt: now,
+        processedAt: now,
+        referenceRole: role,
+        ...(image.replacementCharacterId ? { replacementCharacterId: image.replacementCharacterId } : {}),
+        ...(image.replacementCharacterName ? { replacementCharacterName: image.replacementCharacterName } : {}),
+      },
+      processing: {
+        status: 'completed',
+        localPath: image.relativePath,
+      },
+      notes: 'Uploaded from the desktop project setup.',
+    });
+    existingPaths.add(image.relativePath);
+  }
+
+  project['inputs'] = projectInputs;
 }
 
 interface PrePopMatch {
