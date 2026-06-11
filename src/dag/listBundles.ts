@@ -14,12 +14,14 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { getBundleSearchRoots } from './bundleSource.js';
+import { getBundleSearchRootEntries } from './bundleSource.js';
 import type { BundleInputDecl, DagBundle } from './schema.js';
 
 export interface BundleSummary {
   id: string;
   version: string;
+  bundleSource: string;
+  sourceScheme: 'built-in' | 'user';
   displayName: string;
   summary: string;
   techLine?: string;
@@ -36,19 +38,19 @@ export interface BundleSummary {
 }
 
 export function listBundles(): BundleSummary[] {
-  const roots = getBundleSearchRoots();
+  const roots = getBundleSearchRootEntries();
   const out: BundleSummary[] = [];
   const seen = new Set<string>();
   for (const root of roots) {
-    if (!root || !existsSync(root)) continue;
+    if (!root.dir || !existsSync(root.dir)) continue;
     let names: string[];
     try {
-      names = readdirSync(root);
+      names = readdirSync(root.dir);
     } catch {
       continue;
     }
     for (const name of names) {
-      const full = join(root, name);
+      const full = join(root.dir, name);
       let st: ReturnType<typeof statSync>;
       try {
         st = statSync(full);
@@ -63,7 +65,7 @@ export function listBundles(): BundleSummary[] {
         manifestPath = full;
       }
       if (!manifestPath) continue;
-      const summary = readBundleSummary(manifestPath);
+      const summary = readBundleSummary(manifestPath, root.scheme);
       if (!summary) continue;
       if (seen.has(summary.id)) continue;
       seen.add(summary.id);
@@ -74,7 +76,10 @@ export function listBundles(): BundleSummary[] {
   return out;
 }
 
-function readBundleSummary(manifestPath: string): BundleSummary | null {
+function readBundleSummary(
+  manifestPath: string,
+  sourceScheme: BundleSummary['sourceScheme']
+): BundleSummary | null {
   try {
     const raw = readFileSync(manifestPath, 'utf8');
     const parsed = JSON.parse(raw) as Partial<DagBundle>;
@@ -85,16 +90,15 @@ function readBundleSummary(manifestPath: string): BundleSummary | null {
         ? parsed.displayName.trim()
         : null;
     const declaredSummary =
-      typeof parsed.summary === 'string' && parsed.summary.trim()
-        ? parsed.summary.trim()
-        : null;
-    const description =
-      typeof parsed.description === 'string' ? parsed.description : undefined;
+      typeof parsed.summary === 'string' && parsed.summary.trim() ? parsed.summary.trim() : null;
+    const description = typeof parsed.description === 'string' ? parsed.description : undefined;
     const displayName = declaredDisplayName ?? titleize(parsed.id);
     const summary = declaredSummary ?? firstSentence(description ?? '');
     return {
       id: parsed.id,
       version: parsed.version,
+      bundleSource: `${sourceScheme}:${parsed.id}`,
+      sourceScheme,
       displayName,
       summary,
       pickerEligible: declaredDisplayName !== null && declaredSummary !== null,
@@ -112,7 +116,7 @@ function titleize(id: string): string {
   const ACRONYMS = new Set(['ltx', 'zit', 'vlm', 'nbp', 'nb2', 'nb3', 'fl2v']);
   return id
     .split('_')
-    .map((word) => {
+    .map(word => {
       const lower = word.toLowerCase();
       if (ACRONYMS.has(lower)) return word.toUpperCase();
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
