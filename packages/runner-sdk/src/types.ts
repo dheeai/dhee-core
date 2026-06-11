@@ -176,6 +176,30 @@ export interface NodeDef {
    * raw node id. Falls back to a humanized node id when omitted.
    */
   displayName?: string;
+
+  /**
+   * Marks a plan node (e.g. characters_plan, scenes_plan) whose item
+   * array the agent may edit ONE entry at a time via dhee_add_item /
+   * dhee_remove_item — the bottom-up authoring flow (#147). When set:
+   *   - dhee_add_item validates new entries against `itemSchema` and
+   *     appends; dhee_remove_item drops one by itemId.
+   *   - writeNodeContent applies item-aware invalidation (only the
+   *     changed/removed items' downstream cascades; siblings + their
+   *     files survive) and REFUSES a membership change made through the
+   *     raw write_node_content path (callers must use the item tools).
+   * Omitted/false → the node is authored wholesale by its runner
+   * (top-down) and is not item-editable by the agent.
+   */
+  agentEditable?: boolean;
+
+  /**
+   * JSON Schema for ONE item in this node's plan array (the shape of a
+   * single character / setting / shot). dhee_add_item validates the
+   * supplied item against this before appending. Typically the `items`
+   * subschema of the node's full output schema. Only meaningful when
+   * `agentEditable` is true.
+   */
+  itemSchema?: Record<string, unknown>;
 }
 
 export interface BundleDependencies {
@@ -304,6 +328,16 @@ export interface DagBundle {
    */
   techLine?: string;
   description?: string;
+  /**
+   * Markdown guidance injected into the agent's context when a project
+   * on this bundle is opened (#147 bottom-up building). Describes the
+   * authoring loop and conventions the agent can't infer from the node
+   * graph alone — e.g. "characters are keyed by id; reference them in
+   * shot prompts by that id" or "add items with dhee_add_item, then
+   * run-to-stage to render just the new one". Kept short; it rides in
+   * the system prompt alongside the bundle digest.
+   */
+  agentGuide?: string;
   /**
    * Range of kshana engine versions this bundle is known to work
    * against (semver range). Future-facing — the engine doesn't enforce

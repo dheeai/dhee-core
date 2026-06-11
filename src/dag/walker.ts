@@ -17,6 +17,7 @@ import { dirname, relative, resolve } from 'node:path';
 import { openEventLog } from './eventLog/EventLog.js';
 import { computeCostLedger } from './eventLog/projectCost.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
+import { deriveItemId } from './itemId.js';
 import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
 import { withLocalResource, type LocalResourceSnapshot } from './localResourceState.js';
@@ -587,10 +588,7 @@ function materializeCollection(
       }
 
       return items.map((item) => {
-        const itemId =
-          typeof item === 'string'
-            ? item.replace(/\s+/g, '_').toLowerCase()
-            : String(item.id ?? item.name ?? '').replace(/\s+/g, '_').toLowerCase();
+        const itemId = deriveItemId(item);
         if (!itemId) {
           throw new Error(
             `materializeCollection: item in '${node.itemSource}' has no id or name`,

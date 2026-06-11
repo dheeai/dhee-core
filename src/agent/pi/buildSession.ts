@@ -39,6 +39,7 @@ import { DHEE_TOOL_NAMES, registerDheeTools } from './tools/index.js';
 import { registerContextTrim } from './contextTrim.js';
 import { registerUsageTelemetry } from './usageTelemetryExtension.js';
 import { getDheeSystemPrompt } from './dheeSystemPrompt.js';
+import { buildBundleDigest } from './bundleDigest.js';
 
 /** The skill name (from the YAML frontmatter `name:` field) we inject. */
 export const DHEE_SKILL_NAME = 'dhee';
@@ -100,6 +101,16 @@ export interface BuildPiSessionOptions {
    * picks the most recent JSONL or mints a fresh one.
    */
   sessionsDir?: string;
+  /**
+   * #147: the focused project directory. When set, a compact bundle
+   * digest (node list, agent-editable plan nodes + item schemas +
+   * current item counts, the bundle's agentGuide) is computed from the
+   * project's bundle and appended to the system prompt — so the agent
+   * knows, up front, what it can author bottom-up. Best-effort: an
+   * unresolvable bundle just means no digest. Omit for sessions not
+   * bound to a project.
+   */
+  projectDir?: string;
   /**
    * Phase 6.5b: explicit model + API key pair. When provided, pi-ai's
    * auto-discovery is bypassed:
@@ -221,7 +232,14 @@ export async function buildPiSessionConfig(
     // `read` builtin is allowlisted — which dhee removed — so the
     // skill body never reached the model and the agent ran on pi's
     // stock "expert coding assistant" prompt. See dheeSystemPrompt.ts.
-    systemPromptOverride: () => getDheeSystemPrompt(),
+    // #147: when a project is focused, append a compact bundle digest
+    // (agent-editable nodes, item schemas + counts, agentGuide) so the
+    // agent knows what it can author bottom-up without probing.
+    systemPromptOverride: () => {
+      const base = getDheeSystemPrompt();
+      const digest = opts.projectDir ? buildBundleDigest(opts.projectDir) : '';
+      return digest ? `${base}\n\n${digest}` : base;
+    },
     extensionFactories,
   });
   await resourceLoader.reload();

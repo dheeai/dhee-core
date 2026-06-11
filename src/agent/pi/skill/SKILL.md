@@ -153,8 +153,15 @@ the user says to. Never diagnose missing downstream output as a misconfig
   (`nodeId='shot_image_prompt', itemId='scene_1_shot_1'`). This is the
   default for adjustments. Critique only works on `llm.*` nodes — for a
   broken image/video, walk upstream to its prompt node and critique that.
-- **Supply exact finished content** (hand-written file, uploaded image) →
-  `dhee_write_node_content` on that item.
+- **Supply exact finished content** (hand-written file, uploaded image)
+  for an item that ALREADY exists → `dhee_write_node_content` on that
+  item, **always with `itemId`** (e.g. `character_image` + itemId). For a
+  per-item node, omitting itemId is an error — it does NOT mean "the whole
+  collection".
+- **Add or remove an item** (a new character / setting / shot, or dropping
+  one) → `dhee_add_item` / `dhee_remove_item`. This is the ONLY way to
+  change *which items exist*; `dhee_write_node_content` refuses membership
+  changes on a plan node.
 
 **Two rules you must never break (both silently destroy renders the user
 didn't ask to touch):**
@@ -164,10 +171,10 @@ didn't ask to touch):**
   other shots along with it. Use `dhee_regenerate_node(nodeId, itemId)`
   for one item.
 - **NEVER edit `scenes_plan` to change how one shot looks.** It's the
-  whole storyboard — every shot fans out of it, so overwriting it
-  re-renders ALL shots. Target the shot's own `shot_image_prompt`
-  instead. Only touch `scenes_plan` to genuinely add / remove / reorder
-  shots.
+  whole storyboard. Target the shot's own `shot_image_prompt` instead. To
+  add or remove a shot, use `dhee_add_item` / `dhee_remove_item` on
+  `scenes_plan` (item-aware: only the added/removed shot's downstream
+  changes, never every shot).
 
 **Critique-review loop — don't over-render:**
 
@@ -190,6 +197,28 @@ next), not as a batch, unless the user explicitly asks to batch.
 Critique text should be specific and editorial (missing tokens, broken
 composition, identity drift, ambiguous instructions) — describe what's
 wrong; don't write the replacement prompt yourself.
+
+## Building bottom-up — item by item
+
+Some bundles mark plan nodes (`characters_plan`, `settings_plan`,
+`scenes_plan`) **agentEditable** — the per-project digest at the end of
+this prompt lists them with their item fields + current counts. When the
+user builds incrementally ("add a fisherman character", "give me one more
+shot of the harbor") rather than rolling the whole story at once:
+
+1. `dhee_list_assets` to see what exists (reuse existing ids).
+2. `dhee_add_item(nodeId, item)` to add ONE — validated against the
+   node's itemSchema; characters/settings are keyed by `id`
+   (lowercase_snake_case), shots by `scene_<n>_shot_<m>`. Reference an
+   existing character/setting by its id in shot prompts for continuity.
+3. `dhee_start_run(stopAt: <render stage>)` — only the new item
+   materializes; existing siblings stay cached (no wasted renders).
+4. Show it, iterate (`dhee_critique_node`), repeat. `dhee_remove_item`
+   drops one.
+
+You can draft a plan wholesale (LLM) and then refine items, or author
+every item by hand — same bundle either way. Hand-authored plans are
+pinned: an upstream change won't silently regenerate them.
 
 ## Resolution / aspect changes make rendered IMAGES stale
 

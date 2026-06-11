@@ -38,6 +38,8 @@ import { preserveAsVersion } from './preserveAsVersion.js';
 import { loadBundle } from './walker.js';
 import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
 import { cascadeInvalidationKeys, type CascadeTarget } from './cascadeInvalidationKeys.js';
+import { deriveItemId } from './itemId.js';
+import { diffPlanItems, extractPlanItems } from './planItemDiff.js';
 import type { DagBundle, NodeDef } from './schema.js';
 
 const HIGH_BLAST = 3;
@@ -51,6 +53,13 @@ export interface WriteNodeContentInput {
   reason?: string;
   /** Required to proceed on a high-blast-radius write. */
   confirm?: boolean;
+  /**
+   * Set by applyPlanItemEdit (dhee_add_item / dhee_remove_item) — the
+   * sanctioned membership-change path. Bypasses the agentEditable
+   * membership hard-block (which otherwise refuses item add/remove made
+   * through the raw write path). Never set this from a user-facing tool.
+   */
+  viaPlanItemEdit?: boolean;
   /** Test/host seam — defaults to reading project.json's bundleSource. */
   loadBundleForProject?: (projectDir: string) => DagBundle;
 }
@@ -124,7 +133,7 @@ function cascadeDownstreamKeys(
 function structuralCascade(bundle: DagBundle, target: CascadeTarget): CascadeTarget[] {
   const downstreamByNodeId = new Map<string, Set<string>>();
   const kindByNodeId = new Map<string, string>();
-  for (const n of bundle.nodes as NodeDef[]) {
+  for (const n of bundle.nodes) {
     kindByNodeId.set(n.id, n.kind);
     for (const inp of (n.inputs ?? []) as Array<{ from?: string }>) {
       if (!inp.from) continue;
@@ -151,6 +160,91 @@ function structuralCascade(bundle: DagBundle, target: CascadeTarget): CascadeTar
     }
   }
   return out;
+}
+
+interface ItemAwareCascade {
+  /** True when item-aware diffing applied (all items id-keyed + JSON parsed). */
+  applied: boolean;
+  /** Whether the diff added or removed an item (membership change). */
+  membershipChanged: boolean;
+  /** Item-scoped downstream to invalidate (empty for a pure add). */
+  downstream: CascadeTarget[];
+}
+
+/**
+ * Item-aware cascade for a plan-node whole-write (#147). Instead of
+ * invalidating an entire downstream collection when a plan node changes,
+ * diff the prior vs new plan PER fan-out collection (each collection may
+ * fan out over a different array — characters_plan→`characters`,
+ * scenes_plan→`shots`) and invalidate ONLY the changed/removed items'
+ * instances + their transitive downstream. Untouched siblings (and their
+ * generated files) survive.
+ *
+ * Entry point is the COLLECTION instance `C:itemId` — a real node in the
+ * event log with real deps — NOT a synthetic `plan:itemId` (which never
+ * completed and has no edges). Transitivity from C:itemId reaches shot
+ * images, clips, final video, etc.
+ *
+ * Bails (`applied=false`) when either side isn't parseable JSON or any
+ * item in a fanned-out array lacks a derivable id (e.g. a raw scenes_plan
+ * the LLM emitted before normalizeShotIds stamped shot ids) — the caller
+ * falls back to the coarse cascade so invalidation is never silently a
+ * no-op.
+ */
+function computeItemAwareCascade(
+  projectDir: string,
+  bundle: DagBundle,
+  planNodeId: string,
+  fanOutCollections: NodeDef[],
+  priorJson: unknown,
+  newJson: unknown,
+): ItemAwareCascade {
+  const allKeyed = (items: ReturnType<typeof extractPlanItems>): boolean =>
+    items.every((it) => deriveItemId(it) !== '');
+
+  const acc = new Map<string, CascadeTarget>();
+  const put = (t: CascadeTarget) =>
+    acc.set(t.itemId !== undefined ? `${t.nodeId}:${t.itemId}` : t.nodeId, t);
+
+  let membershipChanged = false;
+  for (const col of fanOutCollections) {
+    const itemKey = col.itemKey;
+    const oldItems = extractPlanItems(priorJson, itemKey);
+    const newItems = extractPlanItems(newJson, itemKey);
+    if (!allKeyed(oldItems) || !allKeyed(newItems)) {
+      return { applied: false, membershipChanged: false, downstream: [] };
+    }
+    const d = diffPlanItems(priorJson, newJson, itemKey);
+    if (d.added.length > 0 || d.removed.length > 0) membershipChanged = true;
+    for (const x of [...d.removed, ...d.changed]) {
+      put({ nodeId: col.id, itemId: x });
+      for (const t of cascadeDownstreamKeys(projectDir, bundle, { nodeId: col.id, itemId: x })) {
+        put(t);
+      }
+    }
+  }
+  // Drop the plan node itself if any cascade looped back to it.
+  acc.delete(planNodeId);
+  return { applied: true, membershipChanged, downstream: [...acc.values()] };
+}
+
+/** Parse a Buffer/string as JSON; undefined when not valid JSON. */
+function tryParseJson(content: Buffer): unknown {
+  try {
+    return JSON.parse(content.toString('utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Read + parse a file as JSON; undefined when missing or unparseable. */
+function tryReadJsonFile(absPath: string): unknown {
+  try {
+    if (!existsSync(absPath)) return undefined;
+    return JSON.parse(readFileSync(absPath, 'utf8'));
+  } catch {
+    return undefined;
+  }
 }
 
 interface WalkStateEntry {
@@ -197,17 +291,34 @@ export function writeNodeContent(input: WriteNodeContentInput): WriteNodeContent
   } catch (e) {
     return { ok: false, error: `Failed to load bundle for project: ${e instanceof Error ? e.message : String(e)}` };
   }
-  const nodeDef = (bundle.nodes as NodeDef[]).find((n) => n.id === input.nodeId);
+  const nodeDef = (bundle.nodes).find((n) => n.id === input.nodeId);
   if (!nodeDef) {
-    const known = (bundle.nodes as NodeDef[]).map((n) => n.id).slice(0, 12).join(', ');
+    const known = (bundle.nodes).map((n) => n.id).slice(0, 12).join(', ');
     return {
       ok: false,
-      error: `Unknown nodeId '${input.nodeId}'. Bundle '${bundle.id}' has nodes: ${known}${(bundle.nodes as NodeDef[]).length > 12 ? '…' : ''}.`,
+      error: `Unknown nodeId '${input.nodeId}'. Bundle '${bundle.id}' has nodes: ${known}${(bundle.nodes).length > 12 ? '…' : ''}.`,
     };
   }
 
   // 3. Resolve outputPath via pattern expansion.
   const itemId = input.itemId ?? '';
+
+  // Guard (a): a per-item (collection) node MUST carry an itemId. The
+  // pattern interpolates {{item_id}}/{{scene_id}}/{{shot_id}}; without one
+  // it collapses to a junk path (e.g. 'assets/images/characters/.png')
+  // that nothing reads — yet the write would "succeed" silently. Fail
+  // loud. (This is the concept-car bug: an image written to '.png' while
+  // the real reference was never replaced.)
+  const PER_ITEM_PLACEHOLDER = /\{\{(item_id|scene_id|shot_id)\}\}/;
+  if (!itemId && PER_ITEM_PLACEHOLDER.test(nodeDef.outputs.pattern)) {
+    return {
+      ok: false,
+      error:
+        `Node '${input.nodeId}' is a per-item node — pass itemId for the specific item ` +
+        `(or use dhee_add_item to add a new one). Pattern: '${nodeDef.outputs.pattern}'.`,
+    };
+  }
+
   const outputPath = applyPattern(nodeDef.outputs.pattern, {
     item_id: itemId,
     scene_id: itemId,
@@ -231,17 +342,67 @@ export function writeNodeContent(input: WriteNodeContentInput): WriteNodeContent
 
   const bytes = input.content;
 
-  // 5. Blast-radius gate.
+  // 5. Cascade computation + blast-radius gate.
   const target: CascadeTarget = {
     nodeId: input.nodeId,
     ...(itemId ? { itemId } : {}),
   };
-  const downstreamCascade = cascadeDownstreamKeys(input.projectDir, bundle, target);
-  const fanOutCollections = (bundle.nodes as NodeDef[])
-    .filter((n) => n.itemSource === input.nodeId)
-    .map((n) => n.id);
-  const isFanOutSourceWholeEdit = !itemId && fanOutCollections.length > 0;
-  const highBlast = isFanOutSourceWholeEdit || downstreamCascade.length > HIGH_BLAST;
+  const fanOutCollectionDefs = (bundle.nodes).filter(
+    (n) => n.itemSource === input.nodeId,
+  );
+  const fanOutCollections = fanOutCollectionDefs.map((n) => n.id);
+  const agentEditableIds = new Set(
+    (bundle.nodes).filter((n) => n.agentEditable).map((n) => n.id),
+  );
+  const isFanOutSourceWholeEdit = !itemId && fanOutCollectionDefs.length > 0;
+
+  // Prefer ITEM-AWARE invalidation for a plan-node whole edit: only the
+  // changed/removed items' downstream is invalidated; untouched siblings
+  // (and their files) survive. Falls back to the coarse cascade when the
+  // diff can't be computed (non-JSON, or items without derivable ids).
+  let downstreamCascade: CascadeTarget[];
+  let itemAware = false;
+  if (isFanOutSourceWholeEdit) {
+    const priorJson = tryReadJsonFile(targetAbs);
+    const newJson = tryParseJson(bytes);
+    const ia =
+      priorJson !== undefined && newJson !== undefined
+        ? computeItemAwareCascade(
+            input.projectDir,
+            bundle,
+            input.nodeId,
+            fanOutCollectionDefs,
+            priorJson,
+            newJson,
+          )
+        : { applied: false as const, membershipChanged: false, downstream: [] };
+    if (ia.applied) {
+      itemAware = true;
+      // Guard (b): membership hard-block. Adding/removing items through
+      // the raw write path is refused on an agentEditable plan node —
+      // that's what dhee_add_item / dhee_remove_item are for (they set
+      // viaPlanItemEdit to pass). Editing an existing item's fields is
+      // still allowed (no membership change).
+      if (nodeDef.agentEditable && ia.membershipChanged && !input.viaPlanItemEdit) {
+        return {
+          ok: false,
+          error:
+            `'${input.nodeId}' is agent-editable: use dhee_add_item / dhee_remove_item to change ` +
+            `which items exist. (dhee_write_node_content may only edit an existing item's fields here.)`,
+        };
+      }
+      downstreamCascade = ia.downstream;
+    } else {
+      downstreamCascade = cascadeDownstreamKeys(input.projectDir, bundle, target);
+    }
+  } else {
+    downstreamCascade = cascadeDownstreamKeys(input.projectDir, bundle, target);
+  }
+
+  // With item-aware diffing applied, a fan-out-source edit is no longer
+  // auto-high-blast — a scoped add/remove touches few (or zero) items.
+  const highBlast =
+    (isFanOutSourceWholeEdit && !itemAware) || downstreamCascade.length > HIGH_BLAST;
   if (highBlast && !input.confirm) {
     const downstreamList = downstreamCascade
       .map((k) => (k.itemId !== undefined ? `${k.nodeId}:${k.itemId}` : k.nodeId))
@@ -304,6 +465,14 @@ export function writeNodeContent(input: WriteNodeContentInput): WriteNodeContent
     downstreamNodeIdsSeen.add(dk.nodeId);
     const entry = walkState.nodes[dKey];
     if (!entry) continue;
+    // User-authored plan barrier (#147 Gap 2): never wipe a hand-authored
+    // agentEditable PLAN node (built via dhee_add_item) on an upstream
+    // cascade — that would re-fire its llm.generate and erase the user's
+    // items. Scoped to agentEditable so the prior contract still holds: a
+    // user-pinned SHOT downstream of a character DOES re-render when the
+    // character changes (it isn't agentEditable). Only an explicit
+    // regenerate clears an agentEditable plan node.
+    if (entry.generation?.tool === 'user' && agentEditableIds.has(dk.nodeId)) continue;
     const op = entry.outputPath;
     if (typeof op === 'string' && op.length > 0) {
       const abs = resolve(input.projectDir, op);
