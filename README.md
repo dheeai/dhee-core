@@ -4,6 +4,26 @@ The headless engine behind **dhee** — a local-first generative-media studio. G
 
 `dhee-core` is a headless TypeScript engine (npm package **`dhee-core`**). It is embedded in-process by [`dhee-desktop`](https://github.com/dheeai/dhee-desktop) (the Electron app), driven by an in-process agent, and importable as a library. There is no SaaS backend and no separate server to run — the agent, the engine, and the UI host all live in one process.
 
+## What it looks like
+
+The engine is headless, but here's what it drives in `dhee-desktop`. You give the agent a story idea; it picks a bundle, runs the DAG, and lets you inspect or regenerate any node.
+
+**Your Studio** — drop a story, an idea, or a script; the engine breaks it into scenes, generates the visuals, and stitches the video.
+
+![Your Studio — the project launcher](docs/screenshots/studio-landing.png)
+
+**Production view** — each node's prompt and generated artifact stay together. The agent (docked right) plans the run, walks the bundle, and regenerates individual nodes.
+
+![Production view with the agent panel](docs/screenshots/production-shot-sheets.png)
+
+**Film view** — the shots as a contact sheet during a live run, with the agent making a targeted edit (re-framing shot 2 as an over-the-shoulder shot) and cascading the invalidation downstream.
+
+![Film view — shots grid with a live agent edit](docs/screenshots/film-view-shots.png)
+
+**Live run** — the shot grid fills in scene by scene as the walker traverses the DAG; stage progress runs across the top.
+
+![Live run — shot grid filling in across scenes](docs/screenshots/shots-grid-running.png)
+
 ## How it works
 
 You don't navigate the pipeline by hand. An agent (branded **dhee**; the reference driver lives in `src/agent/pi/`) runs a **bundle** — a versioned DAG of LLM and media-generation steps — against a project directory. The agent picks the bundle that fits, fills its inputs, kicks off the run, and inspects or regenerates individual nodes on your behalf.
