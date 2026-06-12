@@ -105,4 +105,28 @@ describe('decideWsAction — output capture filter (regression-pin)', () => {
       ]);
     }
   });
+
+  it('captures audio outputs (SaveAudio / VibeVoice-style TTS nodes)', () => {
+    // Audio-only workflows emit their output under the `audio` key, not
+    // `images`/`gifs`/`videos`. Before audio was added to the capture
+    // list, such a workflow surfaced zero outputs over the WS path and
+    // failed with "Comfy returned no outputs".
+    const action = decideWsAction(
+      {
+        type: 'executed',
+        data: {
+          prompt_id: OUR,
+          node: '12',
+          output: { audio: [{ filename: 'narration_0.wav', subfolder: 'audio', type: 'output' }] },
+        },
+      },
+      OUR,
+    );
+    expect(action.kind).toBe('capture_output');
+    if (action.kind === 'capture_output') {
+      expect(action.items).toEqual([
+        { filename: 'narration_0.wav', subfolder: 'audio', type: 'output', node_id: '12' },
+      ]);
+    }
+  });
 });
