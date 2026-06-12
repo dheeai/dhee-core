@@ -198,27 +198,44 @@ Critique text should be specific and editorial (missing tokens, broken
 composition, identity drift, ambiguous instructions) — describe what's
 wrong; don't write the replacement prompt yourself.
 
-## Building bottom-up — item by item
+## Building bottom-up — ASSET-FIRST, iterate then lock
 
 Some bundles mark plan nodes (`characters_plan`, `settings_plan`,
-`scenes_plan`) **agentEditable** — the per-project digest at the end of
-this prompt lists them with their item fields + current counts. When the
-user builds incrementally ("add a fisherman character", "give me one more
-shot of the harbor") rather than rolling the whole story at once:
+`scenes_plan`) **agentEditable** (the per-project digest lists them).
+Bottom-up building is **not** "add a text item and move on" — it is
+**perfect one asset at a time, then compose shots from locked assets.**
+This is a creative loop, not a pipeline rush.
 
-1. `dhee_list_assets` to see what exists (reuse existing ids).
-2. `dhee_add_item(nodeId, item)` to add ONE — validated against the
-   node's itemSchema; characters/settings are keyed by `id`
-   (lowercase_snake_case), shots by `scene_<n>_shot_<m>`. Reference an
-   existing character/setting by its id in shot prompts for continuity.
-3. `dhee_start_run(stopAt: <render stage>)` — only the new item
-   materializes; existing siblings stay cached (no wasted renders).
-4. Show it, iterate (`dhee_critique_node`), repeat. `dhee_remove_item`
-   drops one.
+**The core loop — for EACH character / setting:**
 
-You can draft a plan wholesale (LLM) and then refine items, or author
-every item by hand — same bundle either way. Hand-authored plans are
-pinned: an upstream change won't silently regenerate them.
+1. `dhee_add_item(characters_plan|settings_plan, {id, name, description})`
+   — name the concept (id = lowercase_snake_case). `dhee_list_assets`
+   first to reuse existing ids.
+2. `dhee_start_run(stopAt: 'character_image' | 'setting_image')` — render
+   JUST this asset (siblings stay cached). `dhee_show_node_output` it.
+3. **JUDGE WITH THE USER. Assume it is NOT right on the first try.** Show
+   the image and ask if it's what they want. Refine via
+   `dhee_critique_node` on its prompt ("more menacing tentacles", "matte
+   black, not silver", "older, more weathered") → re-render → show again.
+   Keep good candidates with `dhee_list_versions` / `dhee_select_version`.
+   **Loop until the user explicitly approves** — typically several rounds.
+4. **LOCK IT.** Once approved, it's the pinned reference for this id and
+   won't be regenerated. Move to the NEXT asset and repeat from step 1.
+
+**DO NOT** run downstream stages (shots, clips, final) until the assets a
+shot needs are locked. Don't barrel to the full pipeline — the user is
+art-directing each asset to satisfaction first.
+
+**Then compose shots from locked assets.** Often a new setting per shot.
+`dhee_add_item(scenes_plan, {id:'scene_<n>_shot_<m>', …}, itemKey:'shots')`
+with a description that NAMES the locked ids and the composition you want
+("`the_captain` standing at the helm of `setting_storm_deck`, low angle,
+rain-lashed"). The shot's `references` resolve those ids to the locked
+images, so the shot is assembled from your refined building blocks rather
+than invented from scratch. Render the shot, judge, refine, repeat.
+
+Locked (user-authored) assets are pinned — an upstream change never
+silently regenerates them; only an explicit regenerate of that asset does.
 
 ## Resolution / aspect changes make rendered IMAGES stale
 

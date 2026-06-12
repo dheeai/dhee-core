@@ -1,0 +1,1737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dhee production progress mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0806;
+    --bg-2: #120e0a;
+    --panel: #17120d;
+    --panel-2: #1d1711;
+    --line: #33291e;
+    --line-2: #4a3826;
+    --text: #efe6d9;
+    --muted: #ab9b86;
+    --faint: #675948;
+    --amber: #f1a532;
+    --amber-2: #ffd27a;
+    --teal: #5bc8bb;
+    --green: #78bf78;
+    --red: #df6d56;
+    --ink: #060403;
+    --shadow: 0 16px 48px rgba(0, 0, 0, 0.38);
+    --sans: "IBM Plex Sans", sans-serif;
+    --mono: "IBM Plex Mono", monospace;
+    --serif: "Fraunces", Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html,
+  body {
+    min-height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+    letter-spacing: 0;
+  }
+
+  body {
+    overflow: hidden;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.18;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: linear-gradient(180deg, black, transparent 92%);
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.08;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+
+  button {
+    font: inherit;
+  }
+
+  .app {
+    position: relative;
+    z-index: 1;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 54px 58px 1fr;
+    background:
+      linear-gradient(180deg, rgba(241, 165, 50, 0.06), transparent 190px),
+      var(--bg);
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 0 18px 0 24px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(8, 6, 4, 0.92);
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    min-width: 180px;
+  }
+
+  .brand-name {
+    font-family: var(--serif);
+    font-size: 23px;
+    font-weight: 650;
+  }
+
+  .project-name {
+    max-width: 230px;
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .run-progress {
+    flex: 1;
+    min-width: 180px;
+    height: 26px;
+    display: grid;
+    grid-template-columns: minmax(90px, 150px) 1fr minmax(50px, auto);
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .bar {
+    height: 6px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #070504;
+  }
+
+  .bar > span {
+    display: block;
+    width: 61%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--green), var(--teal), var(--amber));
+    transition: width 450ms ease;
+  }
+
+  .view-tabs {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #090705;
+  }
+
+  .view-tabs button {
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 11px;
+    color: var(--muted);
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .view-tabs button.active {
+    color: var(--ink);
+    background: var(--amber);
+    font-weight: 700;
+  }
+
+  .phasebar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(12, 9, 6, 0.78);
+    overflow-x: auto;
+  }
+
+  .stage-pill {
+    position: relative;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0 12px;
+    color: var(--muted);
+    background: var(--panel);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .stage-pill .count {
+    min-width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.08);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .stage-pill.done {
+    color: var(--text);
+    border-color: rgba(120, 191, 120, 0.38);
+  }
+
+  .stage-pill.running {
+    color: var(--amber-2);
+    border-color: rgba(241, 165, 50, 0.75);
+    background: #24180c;
+    box-shadow: 0 0 24px rgba(241, 165, 50, 0.14);
+  }
+
+  .stage-pill.running::before {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border: 1px solid rgba(241, 165, 50, 0.45);
+    border-radius: 10px;
+    animation: radiate 1.8s ease-out infinite;
+  }
+
+  @keyframes radiate {
+    0% { opacity: 0.9; transform: scale(0.98); }
+    75% { opacity: 0; transform: scale(1.13); }
+    100% { opacity: 0; transform: scale(1.13); }
+  }
+
+  .main {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr) 360px;
+  }
+
+  .rail,
+  .latest {
+    min-height: 0;
+    background: rgba(15, 11, 8, 0.82);
+  }
+
+  .rail {
+    border-right: 1px solid var(--line);
+    overflow: auto;
+  }
+
+  .rail-head,
+  .latest-head {
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .eyebrow {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 0 0 rgba(241, 165, 50, 0.65);
+    animation: dotpulse 1.7s infinite;
+  }
+
+  @keyframes dotpulse {
+    0% { box-shadow: 0 0 0 0 rgba(241, 165, 50, 0.55); }
+    70% { box-shadow: 0 0 0 8px rgba(241, 165, 50, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(241, 165, 50, 0); }
+  }
+
+  .queue {
+    padding: 14px;
+  }
+
+  .queue-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    gap: 10px;
+    padding: 11px 0;
+    border-bottom: 1px solid rgba(51, 41, 30, 0.58);
+  }
+
+  .queue-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    color: var(--muted);
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .queue-item.done .queue-icon {
+    color: var(--green);
+    border-color: rgba(120, 191, 120, 0.4);
+  }
+
+  .queue-item.running .queue-icon {
+    color: var(--amber);
+    border-color: rgba(241, 165, 50, 0.55);
+  }
+
+  .queue-title {
+    color: var(--text);
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  .queue-sub {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .queue-time {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .activity {
+    margin: 10px 14px 18px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #100b08;
+    overflow: hidden;
+  }
+
+  .activity h3 {
+    margin: 0;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .activity-row {
+    display: grid;
+    grid-template-columns: 8px 1fr;
+    gap: 9px;
+    padding: 9px 12px;
+    color: var(--muted);
+    font-size: 12px;
+    border-bottom: 1px solid rgba(51, 41, 30, 0.42);
+  }
+
+  .activity-row:last-child {
+    border-bottom: 0;
+  }
+
+  .activity-row::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: var(--faint);
+  }
+
+  .activity-row.new::before {
+    background: var(--amber);
+    box-shadow: 0 0 12px rgba(241, 165, 50, 0.5);
+  }
+
+  .canvas {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .now-strip {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+    background:
+      linear-gradient(90deg, rgba(241, 165, 50, 0.08), rgba(91, 200, 187, 0.035), transparent);
+  }
+
+  .now-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .spinner {
+    width: 17px;
+    height: 17px;
+    border: 2px solid rgba(241, 165, 50, 0.25);
+    border-top-color: var(--amber);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    flex: 0 0 auto;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .now-title b {
+    color: var(--text);
+    font-size: 15px;
+  }
+
+  .now-title span {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .now-metric {
+    min-width: 190px;
+    display: grid;
+    grid-template-columns: 1fr 42px;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .stage-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 24px;
+  }
+
+  .stage-panel {
+    display: none;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  .stage-panel.active {
+    display: block;
+  }
+
+  .section-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    letter-spacing: 0;
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 30px;
+    font-weight: 650;
+    line-height: 1.1;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .subtle {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .script-paper {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 34px 38px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #1a100a;
+    box-shadow: var(--shadow);
+  }
+
+  .script-paper .label {
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  .script-paper p {
+    margin: 20px 0 0;
+    color: #d7caba;
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.72;
+  }
+
+  .script-paper p:first-letter {
+    float: left;
+    margin: 9px 9px 0 0;
+    color: var(--amber);
+    font-size: 64px;
+    line-height: 0.78;
+  }
+
+  .extract-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 18px;
+  }
+
+  .extract-card,
+  .scene-card,
+  .shot-card,
+  .clip-card,
+  .final-row {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+
+  .extract-card {
+    padding: 13px;
+  }
+
+  .extract-card .type {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  .extract-card .value {
+    margin-top: 8px;
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .extract-card p {
+    margin: 7px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .scene-list {
+    display: grid;
+    gap: 14px;
+  }
+
+  .scene-card {
+    display: grid;
+    grid-template-columns: 130px 1fr 210px;
+    gap: 0;
+  }
+
+  .scene-num {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 18px;
+    border-right: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .scene-num strong {
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .scene-num span {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .scene-main {
+    padding: 17px 18px;
+  }
+
+  .scene-main p {
+    margin: 9px 0 0;
+    color: var(--muted);
+  }
+
+  .scene-shots {
+    display: grid;
+    gap: 7px;
+    padding: 14px;
+    border-left: 1px solid var(--line);
+  }
+
+  .shot-chip {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 8px;
+    border: 1px solid rgba(51, 41, 30, 0.8);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .shot-chip b {
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .shots-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+    gap: 14px;
+  }
+
+  .shot-card {
+    position: relative;
+  }
+
+  .shot-card.active {
+    border-color: rgba(241, 165, 50, 0.75);
+    box-shadow: 0 0 0 1px rgba(241, 165, 50, 0.18), 0 14px 36px rgba(0, 0, 0, 0.32);
+  }
+
+  .shot-media {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: #070504;
+  }
+
+  .shot-media img,
+  .clip-card video,
+  .latest-preview img,
+  .latest-preview video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .shot-status {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 7px;
+    border-radius: 6px;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.62);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .shot-body {
+    padding: 12px;
+  }
+
+  .shot-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .shot-title span {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .shot-card p {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .incoming {
+    display: grid;
+    place-items: center;
+    min-height: 128px;
+    background:
+      repeating-linear-gradient(45deg, rgba(241, 165, 50, 0.08) 0 8px, transparent 8px 18px),
+      #0b0705;
+  }
+
+  .incoming span {
+    padding: 7px 10px;
+    border: 1px solid rgba(241, 165, 50, 0.45);
+    border-radius: 8px;
+    color: var(--amber);
+    background: rgba(0, 0, 0, 0.5);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .clip-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+  }
+
+  .clip-card {
+    background: #0f0b08;
+  }
+
+  .clip-media {
+    aspect-ratio: 16 / 9;
+    background: #050403;
+  }
+
+  .clip-card.active {
+    border-color: rgba(91, 200, 187, 0.78);
+    box-shadow: 0 0 0 1px rgba(91, 200, 187, 0.18), 0 18px 42px rgba(0, 0, 0, 0.35);
+  }
+
+  .clip-body {
+    padding: 12px;
+  }
+
+  .clip-body h3 {
+    margin: 0;
+    color: var(--text);
+    font-size: 14px;
+  }
+
+  .clip-body p {
+    margin: 7px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .timeline-strip {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-top: 18px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #0d0906;
+  }
+
+  .timeline-block {
+    height: 42px;
+    border-radius: 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+  }
+
+  .timeline-block.done { background: rgba(120, 191, 120, 0.24); }
+  .timeline-block.current {
+    background: rgba(91, 200, 187, 0.24);
+    border-color: rgba(91, 200, 187, 0.65);
+  }
+
+  .final-stack {
+    display: grid;
+    gap: 12px;
+  }
+
+  .final-row {
+    display: grid;
+    grid-template-columns: 42px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 14px;
+  }
+
+  .final-row .num {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    color: var(--green);
+    border: 1px solid rgba(120, 191, 120, 0.35);
+    font-family: var(--mono);
+  }
+
+  .latest {
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .latest-body {
+    min-height: 0;
+    overflow: auto;
+    padding: 16px;
+  }
+
+  .latest-preview {
+    position: relative;
+    aspect-ratio: 16 / 10;
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #050403;
+    box-shadow: var(--shadow);
+  }
+
+  .latest-preview.pulse {
+    animation: latestpop 680ms ease;
+  }
+
+  @keyframes latestpop {
+    0% { transform: translateY(3px); border-color: rgba(241, 165, 50, 0.2); }
+    100% { transform: translateY(0); border-color: var(--line-2); }
+  }
+
+  .text-preview {
+    height: 100%;
+    padding: 22px;
+    background: #1b100a;
+    color: #dacdbc;
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.58;
+  }
+
+  .text-preview .drop {
+    color: var(--amber);
+    font-size: 48px;
+    float: left;
+    line-height: 0.82;
+    margin: 8px 8px 0 0;
+  }
+
+  .latest-title {
+    margin: 14px 0 0;
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .latest-sub {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: 13px 0 0;
+  }
+
+  .fact {
+    padding: 5px 7px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    color: var(--muted);
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .fact.hot {
+    color: var(--ink);
+    border-color: var(--amber);
+    background: var(--amber);
+  }
+
+  .summary {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .summary h3 {
+    margin: 0 0 7px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .summary p {
+    margin: 0;
+    color: #d3c5b4;
+    font-size: 13px;
+  }
+
+  .field-list {
+    display: grid;
+    gap: 9px;
+    margin-top: 12px;
+  }
+
+  .field {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .field b {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  details.raw {
+    margin-top: 16px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  details.raw summary {
+    padding: 8px 10px;
+    color: var(--faint);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  details.raw pre {
+    margin: 0;
+    max-height: 220px;
+    overflow: auto;
+    padding: 10px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    background: #090605;
+    font-family: var(--mono);
+    font-size: 11px;
+    white-space: pre-wrap;
+  }
+
+  .side-actions {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--line);
+  }
+
+  .icon-action {
+    flex: 1;
+    height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    background: var(--panel);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .icon-action.primary {
+    color: var(--ink);
+    border-color: var(--amber);
+    background: var(--amber);
+    font-weight: 700;
+  }
+
+  @media (max-width: 1180px) {
+    .main {
+      grid-template-columns: 230px minmax(0, 1fr) 330px;
+    }
+
+    .extract-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .scene-card {
+      grid-template-columns: 110px 1fr;
+    }
+
+    .scene-shots {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--line);
+      border-left: 0;
+    }
+  }
+
+  @media (max-width: 900px) {
+    body {
+      overflow: auto;
+    }
+
+    .app {
+      height: auto;
+      min-height: 100vh;
+      grid-template-rows: auto auto auto;
+    }
+
+    .topbar,
+    .now-strip {
+      grid-template-columns: 1fr;
+      flex-wrap: wrap;
+      height: auto;
+      padding: 12px;
+    }
+
+    .run-progress {
+      width: 100%;
+    }
+
+    .main {
+      display: block;
+    }
+
+    .rail {
+      display: none;
+    }
+
+    .canvas,
+    .latest {
+      min-height: auto;
+      border-left: 0;
+    }
+
+    .stage-scroll {
+      overflow: visible;
+      padding: 14px;
+    }
+
+    .latest {
+      border-top: 1px solid var(--line);
+    }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-name">dhee</div>
+      <div class="project-name">Alex And Jordan</div>
+    </div>
+    <div class="run-progress" aria-label="run progress">
+      <span id="phaseLabel">shots running</span>
+      <div class="bar"><span id="runBar"></span></div>
+      <span id="runPct">61%</span>
+    </div>
+    <nav class="view-tabs" aria-label="views">
+      <button class="active">Production</button>
+      <button>Cards</button>
+      <button>Graph</button>
+    </nav>
+  </header>
+
+  <nav class="phasebar" aria-label="production phases">
+    <button class="stage-pill done" data-stage="script"><span>Script</span><span class="count">1</span></button>
+    <button class="stage-pill done" data-stage="characters"><span>Cast</span><span class="count">2</span></button>
+    <button class="stage-pill done" data-stage="scenes"><span>Scenes</span><span class="count">3</span></button>
+    <button class="stage-pill running" data-stage="shots"><span>Shots</span><span class="count">6</span></button>
+    <button class="stage-pill" data-stage="clips"><span>Clips</span><span class="count">2</span></button>
+    <button class="stage-pill" data-stage="final"><span>Final</span><span class="count">0</span></button>
+  </nav>
+
+  <main class="main">
+    <aside class="rail">
+      <div class="rail-head">
+        <span class="eyebrow">Run Queue</span>
+        <span class="live-dot" aria-hidden="true"></span>
+      </div>
+      <div class="queue">
+        <div class="queue-item done">
+          <div class="queue-icon">1</div>
+          <div>
+            <div class="queue-title">Story draft</div>
+            <div class="queue-sub">Loop cafe short extracted to prose</div>
+          </div>
+          <div class="queue-time">12s</div>
+        </div>
+        <div class="queue-item done">
+          <div class="queue-icon">2</div>
+          <div>
+            <div class="queue-title">Scene plan</div>
+            <div class="queue-sub">3 scene beats, 9 planned shots</div>
+          </div>
+          <div class="queue-time">18s</div>
+        </div>
+        <div class="queue-item running" id="queueCurrent">
+          <div class="queue-icon">3</div>
+          <div>
+            <div class="queue-title">Shot image prompt</div>
+            <div class="queue-sub">Scene 1 shot 4, first frame</div>
+          </div>
+          <div class="queue-time">now</div>
+        </div>
+        <div class="queue-item">
+          <div class="queue-icon">4</div>
+          <div>
+            <div class="queue-title">Shot clip render</div>
+            <div class="queue-sub">LTX motion from approved frame</div>
+          </div>
+          <div class="queue-time">next</div>
+        </div>
+      </div>
+
+      <section class="activity">
+        <h3>Data Landed</h3>
+        <div class="activity-row">Story: Alex notices the cafe loop</div>
+        <div class="activity-row">Scene plan: cafe, reset, confession</div>
+        <div class="activity-row new" id="activityNewest">Shot prompt: reaction close-up</div>
+        <div class="activity-row">Frame: Scene 1 shot 3 approved</div>
+      </section>
+    </aside>
+
+    <section class="canvas">
+      <div class="now-strip">
+        <div class="now-title">
+          <span class="spinner" aria-hidden="true"></span>
+          <div>
+            <b id="nowTitle">Producing shot image prompt</b>
+            <span id="nowSub">Scene 1 shot 4 - first frame summary is streaming in</span>
+          </div>
+        </div>
+        <div class="now-metric">
+          <div class="bar"><span id="taskBar" style="width:68%"></span></div>
+          <span id="taskPct">68%</span>
+        </div>
+      </div>
+
+      <div class="stage-scroll">
+        <section class="stage-panel" data-panel="script">
+          <div class="section-head">
+            <div>
+              <h1>Script</h1>
+              <div class="subtle">The readable artifact stays on stage while downstream work begins.</div>
+            </div>
+          </div>
+          <article class="script-paper">
+            <div class="label">Story</div>
+            <h1>Alex And Jordan</h1>
+            <p>The scene opens on Alex and Jordan sitting across from each other at a small table, coffee cups steaming between them. Alex leans forward. The clock has blinked from 2:14 to 2:14 again, and the cafe keeps folding back on itself.</p>
+            <div class="extract-grid">
+              <div class="extract-card">
+                <div class="type">Characters</div>
+                <div class="value">Alex, Jordan</div>
+                <p>Two people testing whether memory can survive the loop.</p>
+              </div>
+              <div class="extract-card">
+                <div class="type">Setting</div>
+                <div class="value">Small cafe at 2:14</div>
+                <p>Steam, clock tick, barista repeating a red-shirt routine.</p>
+              </div>
+              <div class="extract-card">
+                <div class="type">Emotional turn</div>
+                <div class="value">Confession before reset</div>
+                <p>The loop becomes a deadline for saying the real thing.</p>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="stage-panel" data-panel="characters">
+          <div class="section-head">
+            <div>
+              <h1>Cast</h1>
+              <div class="subtle">Character JSON is collapsed into identity, wardrobe, continuity, and role.</div>
+            </div>
+          </div>
+          <div class="extract-grid">
+            <div class="extract-card">
+              <div class="type">Alex</div>
+              <div class="value">Observant, restless, first to notice</div>
+              <p>Leans forward, tracks repeated details, pushes the conversation toward truth.</p>
+            </div>
+            <div class="extract-card">
+              <div class="type">Jordan</div>
+              <div class="value">Skeptical, tender, slowly convinced</div>
+              <p>Starts amused, then sees the clock loop and chooses to stay present.</p>
+            </div>
+            <div class="extract-card">
+              <div class="type">Barista</div>
+              <div class="value">Background loop marker</div>
+              <p>Repeats one gesture with identical timing, proving the anomaly.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="stage-panel" data-panel="scenes">
+          <div class="section-head">
+            <div>
+              <h1>Scenes</h1>
+              <div class="subtle">Scene plan fields become beats, location, shot count, and the dramatic job of each shot.</div>
+            </div>
+          </div>
+          <div class="scene-list">
+            <article class="scene-card">
+              <div class="scene-num">
+                <strong>Scene 1</strong>
+                <span>30 seconds</span>
+              </div>
+              <div class="scene-main">
+                <h2>Cafe loop discovered</h2>
+                <p>Alex points out the repeated clock tick and the barista's identical motion. Jordan stops joking when the clock jumps back.</p>
+              </div>
+              <div class="scene-shots">
+                <div class="shot-chip"><b>1</b><span>establish cafe</span><span>6s</span></div>
+                <div class="shot-chip"><b>2</b><span>Alex points</span><span>7s</span></div>
+                <div class="shot-chip"><b>3</b><span>clock blink</span><span>5s</span></div>
+              </div>
+            </article>
+            <article class="scene-card">
+              <div class="scene-num">
+                <strong>Scene 2</strong>
+                <span>24 seconds</span>
+              </div>
+              <div class="scene-main">
+                <h2>Reset rules emerge</h2>
+                <p>The coffee becomes the trigger. If they finish the cup, the loop resets and the confession vanishes.</p>
+              </div>
+              <div class="scene-shots">
+                <div class="shot-chip"><b>4</b><span>cup close-up</span><span>6s</span></div>
+                <div class="shot-chip"><b>5</b><span>Jordan realizes</span><span>8s</span></div>
+                <div class="shot-chip"><b>6</b><span>hands stop</span><span>5s</span></div>
+              </div>
+            </article>
+            <article class="scene-card">
+              <div class="scene-num">
+                <strong>Scene 3</strong>
+                <span>18 seconds</span>
+              </div>
+              <div class="scene-main">
+                <h2>Say it before the clock</h2>
+                <p>They choose one new sentence before the next reset: simple, direct, and impossible to hide from.</p>
+              </div>
+              <div class="scene-shots">
+                <div class="shot-chip"><b>7</b><span>quiet two-shot</span><span>7s</span></div>
+                <div class="shot-chip"><b>8</b><span>confession</span><span>7s</span></div>
+                <div class="shot-chip"><b>9</b><span>cut to black</span><span>4s</span></div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="stage-panel active" data-panel="shots">
+          <div class="section-head">
+            <div>
+              <h1>Shots</h1>
+              <div class="subtle">The screen follows the first frame work as each shot becomes inspectable.</div>
+            </div>
+          </div>
+          <div class="shots-grid">
+            <article class="shot-card">
+              <div class="shot-media">
+                <img src="../../Chhaya.V3/assets/images/s1shot1_first_frame_klein_CfkNri.png" alt="Generated wide shot of a village">
+                <div class="shot-status">done</div>
+              </div>
+              <div class="shot-body">
+                <div class="shot-title">Shot 1 <span>first frame</span></div>
+                <p>Wide establishing frame, environment locked.</p>
+              </div>
+            </article>
+            <article class="shot-card">
+              <div class="shot-media">
+                <img src="../../Chhaya.V3/assets/images/s2shot2_first_frame_klein_pGFNtd.png" alt="Generated anime frame of a man beside carved stone">
+                <div class="shot-status">done</div>
+              </div>
+              <div class="shot-body">
+                <div class="shot-title">Shot 2 <span>first frame</span></div>
+                <p>Character action frame with setting reference.</p>
+              </div>
+            </article>
+            <article class="shot-card">
+              <div class="shot-media">
+                <img src="../../noir_detective_story_setup-3.kshana/assets/images/s1shot1_first_frame_klein_z3qPpH.png" alt="Generated cinematic frame of a man in a torch-lit room">
+                <div class="shot-status">done</div>
+              </div>
+              <div class="shot-body">
+                <div class="shot-title">Shot 3 <span>first frame</span></div>
+                <p>Approved reference frame available to clip renderer.</p>
+              </div>
+            </article>
+            <article class="shot-card active" id="activeShotCard">
+              <div class="shot-media incoming">
+                <span>streaming prompt...</span>
+              </div>
+              <div class="shot-body">
+                <div class="shot-title">Shot 4 <span>prompt</span></div>
+                <p>Reaction close-up, slow push-in, cup stays untouched.</p>
+              </div>
+            </article>
+            <article class="shot-card">
+              <div class="shot-media incoming">
+                <span>waiting</span>
+              </div>
+              <div class="shot-body">
+                <div class="shot-title">Shot 5 <span>queued</span></div>
+                <p>Jordan realizes the clock has jumped again.</p>
+              </div>
+            </article>
+            <article class="shot-card">
+              <div class="shot-media incoming">
+                <span>waiting</span>
+              </div>
+              <div class="shot-body">
+                <div class="shot-title">Shot 6 <span>queued</span></div>
+                <p>Hands hover above coffee, reset avoided.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="stage-panel" data-panel="clips">
+          <div class="section-head">
+            <div>
+              <h1>Clips</h1>
+              <div class="subtle">When clip generation starts, the canvas becomes a video bin instead of staying on script.</div>
+            </div>
+          </div>
+          <div class="clip-grid">
+            <article class="clip-card active">
+              <div class="clip-media">
+                <video src="../../Chhaya.V3/assets/videos/shots/s1shot1_ltx23_1ZdfuQ.mp4" muted loop autoplay playsinline></video>
+              </div>
+              <div class="clip-body">
+                <h3>Scene 1 shot 1</h3>
+                <p>8s clip rendered from approved first frame.</p>
+              </div>
+            </article>
+            <article class="clip-card">
+              <div class="clip-media">
+                <video src="../../Chhaya.V3/assets/videos/shots/s1shot2_ltx23_4bx7gh.mp4" muted loop autoplay playsinline></video>
+              </div>
+              <div class="clip-body">
+                <h3>Scene 1 shot 2</h3>
+                <p>Motion pass complete, awaiting continuity review.</p>
+              </div>
+            </article>
+            <article class="clip-card">
+              <div class="clip-media incoming">
+                <span>rendering clip...</span>
+              </div>
+              <div class="clip-body">
+                <h3>Scene 1 shot 3</h3>
+                <p>Director workflow is generating camera motion.</p>
+              </div>
+            </article>
+          </div>
+          <div class="timeline-strip" aria-label="clip timeline">
+            <div class="timeline-block done"></div>
+            <div class="timeline-block done"></div>
+            <div class="timeline-block current"></div>
+            <div class="timeline-block"></div>
+            <div class="timeline-block"></div>
+            <div class="timeline-block"></div>
+            <div class="timeline-block"></div>
+            <div class="timeline-block"></div>
+          </div>
+        </section>
+
+        <section class="stage-panel" data-panel="final">
+          <div class="section-head">
+            <div>
+              <h1>Final Assembly</h1>
+              <div class="subtle">Completed clips collapse into a final-cut checklist and timeline.</div>
+            </div>
+          </div>
+          <div class="final-stack">
+            <div class="final-row">
+              <div class="num">1</div>
+              <div>
+                <h2>Collect approved clips</h2>
+                <div class="subtle">2 of 9 clips are ready for assembly.</div>
+              </div>
+              <div class="queue-time">waiting</div>
+            </div>
+            <div class="final-row">
+              <div class="num">2</div>
+              <div>
+                <h2>Normalize transitions</h2>
+                <div class="subtle">Cuts, fades, and black frame timing.</div>
+              </div>
+              <div class="queue-time">queued</div>
+            </div>
+            <div class="final-row">
+              <div class="num">3</div>
+              <div>
+                <h2>Export final video</h2>
+                <div class="subtle">Final MP4 appears here when assembled.</div>
+              </div>
+              <div class="queue-time">queued</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <aside class="latest">
+      <div class="latest-head">
+        <span class="eyebrow">Latest Generated</span>
+        <span class="live-dot" aria-hidden="true"></span>
+      </div>
+      <div class="latest-body">
+        <div class="latest-preview" id="latestPreview"></div>
+        <div class="latest-title" id="latestTitle"></div>
+        <div class="latest-sub" id="latestSub"></div>
+        <div class="facts" id="latestFacts"></div>
+
+        <section class="summary">
+          <h3>What matters</h3>
+          <p id="latestSummary"></p>
+          <div class="field-list" id="latestFields"></div>
+        </section>
+
+        <details class="raw">
+          <summary>Inspect JSON</summary>
+          <pre id="latestRaw"></pre>
+        </details>
+      </div>
+      <div class="side-actions">
+        <button class="icon-action primary" id="autoBtn">Auto</button>
+        <button class="icon-action" id="nextBtn">Next</button>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+  const artifacts = [
+    {
+      stage: "script",
+      kind: "story",
+      progress: 24,
+      title: "Story draft",
+      sub: "Script - Alex And Jordan",
+      preview: "text",
+      text: "The clock blinked from 2:14 to 2:14 again. Alex stopped smiling. Jordan looked at the coffee, then at Alex, and finally understood why neither of them should finish the cup.",
+      facts: ["prose", "2 characters", "1 location"],
+      summary: "The core story is a cafe time loop where the reset trigger is the coffee. The emotional payload is a confession made before memory disappears.",
+      fields: [
+        ["Cast", "Alex, Jordan, barista"],
+        ["Setting", "Small cafe, clock fixed at 2:14"],
+        ["Turn", "Jordan moves from skeptical to convinced"]
+      ],
+      raw: {
+        title: "Alex And Jordan",
+        setting: "small cafe",
+        characters: ["Alex", "Jordan"],
+        dramatic_turn: "Jordan realizes the clock reset is real"
+      }
+    },
+    {
+      stage: "scenes",
+      kind: "scene plan",
+      progress: 46,
+      title: "Scene 1 plan",
+      sub: "3 shots - 30 seconds total",
+      preview: "text",
+      text: "Cafe loop discovered. Alex points out the repeated barista motion, Jordan checks the clock, and the silence lands when the time blinks backward.",
+      facts: ["scene", "3 shots", "30s"],
+      summary: "The plan gives the screen a clear next unit: three short shots that prove the loop visually before the dialogue gets emotional.",
+      fields: [
+        ["Beat", "The loop becomes undeniable"],
+        ["Shot 1", "Wide cafe and repeated barista action"],
+        ["Shot 3", "Clock blink from 2:14 to 2:14"]
+      ],
+      raw: {
+        sceneNumber: 1,
+        settingDescription: "small cafe, late afternoon, visible wall clock",
+        shots: [
+          { shotNumber: 1, duration: 6, purpose: "set_the_world" },
+          { shotNumber: 2, duration: 7, purpose: "show_clue" },
+          { shotNumber: 3, duration: 5, purpose: "show_reaction" }
+        ]
+      }
+    },
+    {
+      stage: "shots",
+      kind: "shot prompt",
+      progress: 68,
+      title: "Shot 4 first frame",
+      sub: "Reaction close-up - prompt generated",
+      preview: "text",
+      text: "Close reaction on Jordan, the coffee cup untouched in the foreground. The clock is soft in the background, still reading 2:14.",
+      facts: ["shot 4", "first frame", "2 refs"],
+      summary: "The useful part of the JSON is the visual intent: Jordan's reaction, the untouched cup, and the clock cue. The exact schema can stay behind Inspect JSON.",
+      fields: [
+        ["Frame", "first_frame"],
+        ["Mode", "image_text_to_image"],
+        ["Camera", "Close-up with shallow depth of field"]
+      ],
+      raw: {
+        shotNumber: 4,
+        generationStrategy: "flfv",
+        frames: {
+          first_frame: {
+            generationMode: "image_text_to_image",
+            imagePrompt: "Close reaction on Jordan, coffee untouched, clock blurred at 2:14",
+            references: [
+              { imageNumber: 1, type: "character", refId: "character:jordan" },
+              { imageNumber: 2, type: "setting", refId: "setting:cafe" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      stage: "shots",
+      kind: "image",
+      progress: 73,
+      title: "Generated frame",
+      sub: "Scene 1 shot 3 - first frame",
+      preview: "image",
+      src: "../../noir_detective_story_setup-3.kshana/assets/images/s1shot1_first_frame_klein_z3qPpH.png",
+      facts: ["image", "approved", "1024px"],
+      summary: "The newest tangible output is visible immediately. The user does not need to scroll below the script to understand that media generation has started.",
+      fields: [
+        ["Node", "shot_image:scene_1_shot_3"],
+        ["Workflow", "Klein image edit"],
+        ["Next", "Use as clip source"]
+      ],
+      raw: {
+        nodeId: "shot_image:scene_1_shot_3",
+        outputPaths: {
+          first_frame: "assets/images/s1shot1_first_frame_klein_z3qPpH.png"
+        },
+        status: "completed"
+      }
+    },
+    {
+      stage: "clips",
+      kind: "clip",
+      progress: 82,
+      title: "Rendered clip",
+      sub: "Scene 1 shot 1 - 8 seconds",
+      preview: "video",
+      src: "../../Chhaya.V3/assets/videos/shots/s1shot1_ltx23_1ZdfuQ.mp4",
+      facts: ["video", "8s", "motion pass"],
+      summary: "When the pipeline reaches clips, the production surface switches to the clip bin and the latest dock shows the moving result, not the old script view.",
+      fields: [
+        ["Node", "shot_video:scene_1_shot_1"],
+        ["Source", "Approved first frame"],
+        ["Motion", "Slow drift with held composition"]
+      ],
+      raw: {
+        nodeId: "shot_video:scene_1_shot_1",
+        outputPath: "assets/videos/shots/s1shot1_ltx23_1ZdfuQ.mp4",
+        durationSec: 8,
+        status: "completed"
+      }
+    }
+  ];
+
+  const stageNames = {
+    script: "script running",
+    characters: "cast running",
+    scenes: "scenes running",
+    shots: "shots running",
+    clips: "clips running",
+    final: "final assembly"
+  };
+
+  const nowTitles = {
+    script: ["Producing script", "Story draft is streaming in"],
+    characters: ["Producing cast cards", "Profiles are being extracted from prose"],
+    scenes: ["Producing scene plan", "Scene beats and shot counts are landing"],
+    shots: ["Producing shot media", "Prompts and first frames are being added"],
+    clips: ["Producing clips", "Video renders are landing in the clip bin"],
+    final: ["Preparing final assembly", "Completed clips will be stitched into a cut"]
+  };
+
+  let index = 2;
+  let auto = true;
+  let timer = null;
+
+  const preview = document.getElementById("latestPreview");
+  const latestTitle = document.getElementById("latestTitle");
+  const latestSub = document.getElementById("latestSub");
+  const latestFacts = document.getElementById("latestFacts");
+  const latestSummary = document.getElementById("latestSummary");
+  const latestFields = document.getElementById("latestFields");
+  const latestRaw = document.getElementById("latestRaw");
+  const runBar = document.getElementById("runBar");
+  const runPct = document.getElementById("runPct");
+  const taskBar = document.getElementById("taskBar");
+  const taskPct = document.getElementById("taskPct");
+  const phaseLabel = document.getElementById("phaseLabel");
+  const nowTitle = document.getElementById("nowTitle");
+  const nowSub = document.getElementById("nowSub");
+  const autoBtn = document.getElementById("autoBtn");
+
+  function renderPreview(artifact) {
+    preview.classList.remove("pulse");
+    void preview.offsetWidth;
+    preview.classList.add("pulse");
+
+    if (artifact.preview === "image") {
+      preview.innerHTML = `<img src="${artifact.src}" alt="${artifact.title}">`;
+      return;
+    }
+
+    if (artifact.preview === "video") {
+      preview.innerHTML = `<video src="${artifact.src}" muted loop autoplay playsinline controls></video>`;
+      return;
+    }
+
+    const first = artifact.text.charAt(0);
+    const rest = artifact.text.slice(1);
+    preview.innerHTML = `<div class="text-preview"><span class="drop">${first}</span>${rest}</div>`;
+  }
+
+  function setStage(stage) {
+    document.querySelectorAll(".stage-pill").forEach((pill) => {
+      const isStage = pill.dataset.stage === stage;
+      pill.classList.toggle("running", isStage);
+      if (isStage) {
+        pill.classList.remove("done");
+      } else if (["script", "characters", "scenes"].includes(pill.dataset.stage) || (stage === "clips" && pill.dataset.stage === "shots") || stage === "final") {
+        pill.classList.add("done");
+      } else {
+        pill.classList.remove("done");
+      }
+    });
+
+    document.querySelectorAll(".stage-panel").forEach((panel) => {
+      panel.classList.toggle("active", panel.dataset.panel === stage);
+    });
+
+    phaseLabel.textContent = stageNames[stage] || "running";
+    const pair = nowTitles[stage] || nowTitles.shots;
+    nowTitle.textContent = pair[0];
+    nowSub.textContent = pair[1];
+  }
+
+  function renderArtifact(nextIndex) {
+    index = (nextIndex + artifacts.length) % artifacts.length;
+    const artifact = artifacts[index];
+    setStage(artifact.stage);
+    renderPreview(artifact);
+
+    latestTitle.textContent = artifact.title;
+    latestSub.textContent = artifact.sub;
+    latestFacts.innerHTML = artifact.facts
+      .map((fact, i) => `<span class="fact ${i === 0 ? "hot" : ""}">${fact}</span>`)
+      .join("");
+    latestSummary.textContent = artifact.summary;
+    latestFields.innerHTML = artifact.fields
+      .map(([label, value]) => `<div class="field"><b>${label}</b><span>${value}</span></div>`)
+      .join("");
+    latestRaw.textContent = JSON.stringify(artifact.raw, null, 2);
+
+    runBar.style.width = `${artifact.progress}%`;
+    runPct.textContent = `${artifact.progress}%`;
+    const taskProgress = Math.min(96, artifact.progress + 7);
+    taskBar.style.width = `${taskProgress}%`;
+    taskPct.textContent = `${taskProgress}%`;
+
+    const queueCurrent = document.getElementById("queueCurrent");
+    queueCurrent.querySelector(".queue-title").textContent = artifact.title;
+    queueCurrent.querySelector(".queue-sub").textContent = artifact.sub;
+    document.getElementById("activityNewest").textContent = `${artifact.kind}: ${artifact.title}`;
+  }
+
+  function nextArtifact() {
+    renderArtifact(index + 1);
+  }
+
+  function startAuto() {
+    stopAuto();
+    auto = true;
+    autoBtn.textContent = "Auto";
+    autoBtn.classList.add("primary");
+    timer = window.setInterval(nextArtifact, 4200);
+  }
+
+  function stopAuto() {
+    auto = false;
+    if (timer) window.clearInterval(timer);
+    timer = null;
+    autoBtn.textContent = "Manual";
+    autoBtn.classList.remove("primary");
+  }
+
+  document.querySelectorAll(".stage-pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      stopAuto();
+      setStage(pill.dataset.stage);
+    });
+  });
+
+  document.getElementById("nextBtn").addEventListener("click", () => {
+    stopAuto();
+    nextArtifact();
+  });
+
+  autoBtn.addEventListener("click", () => {
+    if (auto) stopAuto();
+    else startAuto();
+  });
+
+  renderArtifact(index);
+  startAuto();
+</script>
+</body>
+</html>

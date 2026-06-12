@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dhee — Production View · Entity Sheets Everywhere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,650;1,9..144,400&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ===================================================================
+     ENTITY SHEETS EVERYWHERE — the vision the live app couldn't render yet.
+     The whole pipeline is prompt→media PAIRS per entity, so EVERY fan-out
+     entity (character, location, shot, scene-clip) uses the SAME sheet:
+     media on the LEFT, the prompt/directive that produced it on the RIGHT.
+     Blueprints (story / essence / world / breakdowns) collapse as reference.
+     Cinematic theme: Fraunces + IBM Plex, warm amber on near-black.
+     =================================================================== */
+  :root {
+    --bg:#080604; --bg-2:#0f0a07; --panel:#160f0a; --panel-2:#1d140d; --card:#1a120c; --inset:#0c0805;
+    --line:rgba(255,242,226,.07); --line-2:rgba(255,242,226,.12); --line-3:rgba(255,242,226,.2);
+    --hair-amber:rgba(242,166,46,.22);
+    --text:#efe6d9; --muted:#ad9c86; --faint:#6a5b49; --ghost:#4a3f33;
+    --amber:#f2a62e; --amber-2:#ffd37a; --amber-soft:rgba(242,166,46,.12); --amber-glow:rgba(242,166,46,.42);
+    --green:#82b482; --teal:#68c7b9; --red:#d86a55; --ink:#060403;
+    --r-sm:5px; --r-md:8px; --r-lg:12px; --r-pill:999px;
+    --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",monospace; --serif:"Fraunces",Georgia,serif;
+    --top-h:120px;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; background:var(--bg); }
+  body { margin:0; min-height:100vh; color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    background:radial-gradient(960px 380px at 50% -90px, rgba(242,166,46,.10), transparent 62%), linear-gradient(180deg,#0d0906 0,#080604 280px,#070504 100%); }
+  body::after { content:""; position:fixed; inset:0; z-index:60; pointer-events:none; opacity:.06; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.74' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E"); }
+  ::-webkit-scrollbar { width:11px; height:7px; } ::-webkit-scrollbar-thumb { background:rgba(255,242,226,.12); border-radius:99px; border:3px solid var(--bg); }
+  button { font:inherit; color:inherit; }
+
+  .app { display:grid; grid-template-columns:minmax(0,1fr) 360px; min-height:100vh; }
+  .canvas { min-width:0; display:flex; flex-direction:column; }
+
+  /* ---- top status + pills ---- */
+  .top { position:sticky; top:0; z-index:30; background:rgba(11,7,4,.94); backdrop-filter:blur(16px); border-bottom:1px solid var(--line); }
+  .statusRow { height:60px; display:flex; align-items:center; gap:18px; padding:0 22px; border-bottom:1px solid rgba(255,242,226,.05); }
+  .brand { font-family:var(--serif); font-size:22px; font-weight:650; }
+  .proj { color:var(--muted); font-size:13px; }
+  .runorb { width:11px; height:11px; border-radius:50%; background:var(--red); box-shadow:0 0 0 4px rgba(216,106,85,.14),0 0 16px rgba(216,106,85,.55); animation:pulse 1.6s infinite; }
+  .now { color:var(--muted); font-size:13px; } .now b { color:var(--text); }
+  .spacer { flex:1; }
+  .vtabs { display:flex; gap:3px; padding:3px; border:1px solid var(--line); border-radius:var(--r-md); background:var(--inset); }
+  .vtabs button { border:0; border-radius:var(--r-sm); padding:6px 11px; color:var(--muted); background:none; cursor:pointer; font-size:12.5px; }
+  .vtabs button.on { color:var(--ink); background:var(--amber); font-weight:700; }
+
+  .pillbar { display:flex; gap:9px; padding:9px 22px; overflow-x:auto; }
+  .pill { position:relative; flex:0 0 auto; min-width:112px; display:grid; grid-template-columns:8px 1fr; gap:9px; align-items:center;
+    border:1px solid var(--line); border-radius:var(--r-md); padding:7px 11px 7px 10px; color:var(--muted); background:#0e0a07; cursor:pointer; text-align:left; }
+  .pill:hover { border-color:var(--line-2); color:var(--text); }
+  .pdot { width:8px; height:8px; border-radius:50%; background:var(--ghost); }
+  .pname { display:block; font-size:11px; font-weight:700; white-space:nowrap; }
+  .pcount { display:flex; gap:6px; align-items:baseline; margin-top:4px; font-family:var(--mono); white-space:nowrap; }
+  .pcount strong { color:var(--text); font-size:12px; } .pcount span { color:var(--faint); font-size:9px; letter-spacing:.06em; text-transform:uppercase; }
+  .pill.done { color:var(--text); } .pill.done .pdot { background:var(--green); box-shadow:0 0 7px rgba(130,180,130,.5); }
+  .pill.running { color:var(--amber-2); border-color:rgba(242,166,46,.7); background:#1e1308; box-shadow:0 0 22px rgba(242,166,46,.12); }
+  .pill.running .pdot { background:var(--amber); box-shadow:0 0 10px var(--amber-glow); } .pill.running .pcount strong { color:var(--amber-2); }
+  .pill.running::after { content:""; position:absolute; inset:-5px; border:1px solid rgba(242,166,46,.45); border-radius:11px; animation:radiate 1.8s ease-out infinite; pointer-events:none; }
+
+  /* ---- document ---- */
+  .doc { max-width:1060px; padding:26px 32px 100px; }
+  .section { scroll-margin-top:64px; margin-bottom:30px; }
+  .secHead { display:flex; align-items:center; gap:14px; margin:0 0 16px; }
+  .secNo { font-family:var(--mono); font-size:9.5px; letter-spacing:.24em; text-transform:uppercase; color:var(--faint); }
+  .secNm { font-family:var(--serif); font-size:22px; font-weight:600; }
+  .secRule { flex:1; height:1px; background:linear-gradient(90deg,var(--line-2),transparent); }
+  .secCt { font-family:var(--mono); font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+  .secIntro { margin:0 0 14px; padding:11px 14px; border:1px solid var(--line); border-radius:var(--r-md); background:var(--panel); color:var(--muted); font-size:12.5px; }
+  .secIntro b { color:var(--text); }
+
+  /* ---- the universal entity SHEET ---- */
+  .sheetList { display:grid; gap:13px; }
+  .sheet { border:1px solid var(--line); border-radius:var(--r-lg); background:var(--card); overflow:hidden; transition:border-color .18s; }
+  .sheet:hover { border-color:var(--line-2); }
+  .sheet.running { border-color:rgba(242,166,46,.6); box-shadow:0 0 0 1px rgba(242,166,46,.16),0 18px 44px -22px var(--amber-glow); }
+  .sheetHead { width:100%; display:grid; grid-template-columns:54px 1fr auto; gap:14px; align-items:center; padding:12px 15px; cursor:pointer; background:none; border:0; text-align:left; }
+  .sheetHead .thumb { width:54px; height:34px; border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--line-2); background:var(--inset); }
+  .sheetHead .thumb.portrait { width:30px; height:40px; }
+  .sheetHead .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .sheetHead .slug { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--amber); }
+  .sheetHead .title { margin-top:3px; color:var(--text); font-weight:600; font-size:14.5px; }
+  .sheetRight { display:flex; align-items:center; gap:12px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; padding:4px 9px; border-radius:var(--r-pill); border:1px solid var(--line-2); color:var(--muted); white-space:nowrap; }
+  .chip .cd { width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .chip.done { color:var(--green); border-color:rgba(130,180,130,.4); }
+  .chip.running { color:var(--amber-2); border-color:var(--hair-amber); background:var(--amber-soft); } .chip.running .cd { animation:pulse 1.4s infinite; }
+  .chip.queued { color:var(--faint); }
+  .chev { width:9px; height:9px; border-right:1.5px solid var(--muted); border-bottom:1.5px solid var(--muted); transform:rotate(45deg); transition:transform .22s; }
+  .sheet.open .chev { transform:rotate(-135deg); }
+  .sheetBody { display:none; border-top:1px solid var(--line); }
+  .sheet.open .sheetBody { display:block; animation:reveal .3s ease both; }
+
+  /* a PAIR — media left, the text that produced it right (the whole point) */
+  .pair { display:grid; grid-template-columns:340px 1fr; border-bottom:1px solid var(--line); align-items:stretch; }
+  .pair:last-child { border-bottom:0; }
+  .pairMedia { padding:16px; border-right:1px solid var(--line); background:rgba(255,242,226,.02); }
+  .pairMedia .tag { display:block; margin-bottom:8px; font-family:var(--mono); font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); }
+  .frame { position:relative; aspect-ratio:16/9; border-radius:var(--r-sm); overflow:hidden; background:var(--inset); border:1px solid var(--line-2); }
+  .frame.portrait { aspect-ratio:3/4; max-width:230px; }
+  .frame img, .frame video { width:100%; height:100%; object-fit:cover; display:block; }
+  .frame .pin { position:absolute; inset:0; margin:auto; width:40px; height:40px; border-radius:50%; background:rgba(10,7,4,.5); border:1.5px solid rgba(255,255,255,.6); display:grid; place-items:center; pointer-events:none; }
+  .frame .pin::after { content:""; margin-left:3px; border-left:13px solid #fff; border-top:8px solid transparent; border-bottom:8px solid transparent; }
+  .frame.ph { display:grid; place-items:center; background:repeating-linear-gradient(45deg,rgba(242,166,46,.07) 0 8px,transparent 8px 18px),var(--inset); }
+  .frame.ph.live::after { content:""; position:absolute; inset:0; background:linear-gradient(115deg,transparent 30%,rgba(242,166,46,.28) 50%,transparent 70%); background-size:220% 100%; animation:shimmer 1.4s linear infinite; }
+  .frame .phtag { font-family:var(--mono); font-size:10px; letter-spacing:.1em; color:var(--amber); border:1px solid var(--hair-amber); border-radius:var(--r-sm); padding:6px 10px; background:rgba(0,0,0,.4); }
+
+  .pairText { padding:18px 20px; min-width:0; }
+  .alabel { display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:var(--amber); margin-bottom:11px; }
+  .prose { margin:0; font-family:var(--serif); font-size:15.5px; line-height:1.62; color:#d9ccbb; }
+  .prose.streaming::after { content:""; display:inline-block; width:2px; height:1.05em; background:var(--amber); margin-left:3px; transform:translateY(3px); animation:blink 1s steps(2) infinite; }
+  .pending { font-family:var(--serif); font-style:italic; color:var(--muted); font-size:14px; }
+  .fieldGrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:9px; margin-top:13px; }
+  .field { border:1px solid var(--line); border-radius:var(--r-sm); padding:8px 9px; color:var(--muted); font-size:12px; }
+  .field b { display:block; margin-bottom:3px; font-family:var(--mono); font-size:9px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
+  .refchips { display:inline-flex; flex-wrap:wrap; gap:5px; }
+  .refchip { font-family:var(--mono); font-size:10px; color:var(--text); background:rgba(255,242,226,.08); border:1px solid var(--line); border-radius:var(--r-pill); padding:2px 8px; }
+  .raw { margin-top:14px; border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; }
+  .raw summary { padding:8px 11px; color:var(--muted); cursor:pointer; font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; list-style:none; }
+  .raw summary::-webkit-details-marker { display:none; } .raw summary::before { content:"▸ "; } .raw[open] summary::before { content:"▾ "; }
+  .raw pre { margin:0; padding:12px; border-top:1px solid var(--line); background:#070504; color:var(--muted); font-family:var(--mono); font-size:11px; line-height:1.55; white-space:pre-wrap; }
+  .sheetActs { display:flex; gap:8px; padding:12px 15px; flex-wrap:wrap; }
+  .act { height:30px; padding:0 12px; border-radius:var(--r-sm); cursor:pointer; border:1px solid var(--line-2); background:var(--inset); color:var(--muted); font-family:var(--mono); font-size:11px; }
+  .act:hover { color:var(--amber-2); border-color:var(--amber); }
+
+  /* ---- blueprint (collapsed reference) + prose doc ---- */
+  .blueprint { border:1px solid var(--line); border-radius:var(--r-md); background:rgba(255,242,226,.02); }
+  .blueprint summary { padding:11px 14px; color:var(--muted); cursor:pointer; font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; list-style:none; }
+  .blueprint summary::-webkit-details-marker { display:none; } .blueprint summary::before { content:"▸ "; color:var(--ghost); } .blueprint[open] summary::before { content:"▾ "; }
+  .blueprintBody { padding:4px 16px 16px; }
+  .storyCard { border:1px solid var(--line); border-radius:var(--r-lg); background:linear-gradient(180deg,#1a1108,#130d07); padding:30px 34px; max-width:820px; }
+  .storyCard .k { font-family:var(--mono); font-size:9.5px; letter-spacing:.26em; text-transform:uppercase; color:var(--amber); }
+  .storyCard p { margin:13px 0 0; font-family:var(--serif); font-size:17px; line-height:1.72; color:#d9ccbb; }
+  .storyCard p:first-of-type::first-letter { float:left; margin:8px 11px 0 0; color:var(--amber); font-family:var(--serif); font-weight:600; font-size:54px; line-height:.72; }
+
+  /* ---- chat ---- */
+  .chat { position:sticky; top:0; height:100vh; display:flex; flex-direction:column; border-left:1px solid var(--line); background:var(--bg-2); }
+  .chead { display:flex; align-items:center; gap:9px; padding:13px 16px; border-bottom:1px solid var(--line); }
+  .chead .who { font-family:var(--serif); font-style:italic; font-size:17px; }
+  .chead .st { margin-left:auto; display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--amber); }
+  .chead .pd { width:6px; height:6px; border-radius:50%; background:var(--amber); animation:pulse 1.5s infinite; }
+  .clog { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
+  .msg { display:flex; flex-direction:column; gap:5px; } .msg .from { font-family:var(--mono); font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); }
+  .bubble { border-radius:var(--r-md); padding:9px 12px; font-size:13px; line-height:1.55; color:var(--muted); border:1px solid var(--line); background:var(--panel); }
+  .msg.user { align-items:flex-end; } .msg.user .from { color:var(--amber); } .msg.user .bubble { background:var(--amber-soft); border-color:var(--hair-amber); color:var(--text); max-width:88%; }
+  .bubble b { color:var(--text); }
+  .composer { border-top:1px solid var(--line); padding:12px; } .composer .ipt { background:var(--inset); border:1px solid var(--line); border-radius:var(--r-md); padding:9px 12px; color:var(--faint); font-size:13px; }
+
+  @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(242,166,46,.55); } 70% { box-shadow:0 0 0 7px rgba(242,166,46,0); } 100% { box-shadow:0 0 0 0 rgba(242,166,46,0); } }
+  @keyframes radiate { 0% { opacity:.85; transform:scale(.98); } 78% { opacity:0; transform:scale(1.12); } 100% { opacity:0; transform:scale(1.12); } }
+  @keyframes shimmer { 0% { background-position:120% 0; } 100% { background-position:-120% 0; } }
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+  @keyframes reveal { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+
+  @media (max-width:980px) { .app { grid-template-columns:1fr; } .chat { position:static; height:auto; max-height:420px; border-left:0; border-top:1px solid var(--line); } .pair { grid-template-columns:1fr; } .pairMedia { border-right:0; border-bottom:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="canvas">
+    <div class="top">
+      <div class="statusRow">
+        <span class="runorb"></span>
+        <span class="brand">dhee</span>
+        <span class="proj">Chhaya</span>
+        <span class="now">Now producing: <b>Shot Motion Directive · Scene 1 · Shot 6</b></span>
+        <span class="spacer"></span>
+        <div class="vtabs"><button class="on">Production</button><button>Cards</button><button>Graph</button></div>
+      </div>
+      <nav class="pillbar" id="pillbar">
+        <button class="pill done" data-t="story"><span class="pdot"></span><span><span class="pname">Story</span><span class="pcount"><strong>1/1</strong><span>done</span></span></span></button>
+        <button class="pill done" data-t="essence"><span class="pdot"></span><span><span class="pname">Essence</span><span class="pcount"><strong>1/1</strong><span>done</span></span></span></button>
+        <button class="pill done" data-t="world"><span class="pdot"></span><span><span class="pname">World</span><span class="pcount"><strong>1/1</strong><span>done</span></span></span></button>
+        <button class="pill done" data-t="characters"><span class="pdot"></span><span><span class="pname">Characters</span><span class="pcount"><strong>6/6</strong><span>done</span></span></span></button>
+        <button class="pill done" data-t="locations"><span class="pdot"></span><span><span class="pname">Locations</span><span class="pcount"><strong>6/6</strong><span>done</span></span></span></button>
+        <button class="pill done" data-t="shots"><span class="pdot"></span><span><span class="pname">Shots</span><span class="pcount"><strong>11/11</strong><span>done</span></span></span></button>
+        <button class="pill running" data-t="scenes"><span class="pdot"></span><span><span class="pname">Scenes</span><span class="pcount"><strong>4/11</strong><span>running</span></span></span></button>
+        <button class="pill" data-t="final"><span class="pdot"></span><span><span class="pname">Final Cut</span><span class="pcount"><strong>0/1</strong><span>queued</span></span></span></button>
+      </nav>
+    </div>
+
+    <div class="doc">
+      <!-- Blueprints (collapsed reference) + story prose -->
+      <section class="section" id="story">
+        <div class="secHead"><span class="secNo">No.01</span><span class="secNm">Story</span><span class="secRule"></span><span class="secCt">Markdown</span></div>
+        <article class="storyCard">
+          <div class="k">Story · Draft 1</div>
+          <p>In the village of Kombu Manye, the blacksmith Jan hammers through the dry season while the creek runs low and the construction site swallows the old paths. When a stranger's debt comes due, Jan must choose between the forge that feeds his family and the boy, Yash, who looks to him like a father.</p>
+        </article>
+        <details class="blueprint" style="margin-top:14px"><summary>Cast Breakdown · Location Breakdown · Scene Breakdown (reference)</summary>
+          <div class="blueprintBody" style="color:var(--muted);font-size:13px;padding-top:12px">The planning JSON (cast / locations / scenes) lives here as collapsed reference — the working surfaces below are the entity sheets, where each prompt sits beside the media it produced.</div>
+        </details>
+      </section>
+
+      <!-- CHARACTERS — entity sheets (portrait + image prompt) -->
+      <section class="section" id="characters">
+        <div class="secHead"><span class="secNo">No.04</span><span class="secNm">Characters</span><span class="secRule"></span><span class="secCt">6 characters</span></div>
+        <div class="secIntro">Each character is one sheet — its <b>reference portrait</b> beside the <b>image prompt</b> that generated it. Same shape as shots, settings and scenes.</div>
+        <div class="sheetList" id="charList"></div>
+      </section>
+
+      <!-- LOCATIONS — entity sheets (still + image prompt) -->
+      <section class="section" id="locations">
+        <div class="secHead"><span class="secNo">No.05</span><span class="secNm">Locations</span><span class="secRule"></span><span class="secCt">6 locations</span></div>
+        <div class="secIntro">Every location: its <b>reference still</b> beside the <b>image prompt</b>. The settings breakdown JSON is collapsed up in the blueprint.</div>
+        <div class="sheetList" id="locList"></div>
+      </section>
+
+      <!-- SHOTS — entity sheets (frame+prompt, last frame+prompt, clip+directive) -->
+      <section class="section" id="shots">
+        <div class="secHead"><span class="secNo">No.06</span><span class="secNm">Shots</span><span class="secRule"></span><span class="secCt">11 shots</span></div>
+        <div class="secIntro">A shot holds more pairs — <b>first frame + prompt</b>, <b>last frame + prompt</b> (FLFV), and <b>clip + motion directive</b> — but it's the same sheet.</div>
+        <div class="sheetList" id="shotList"></div>
+      </section>
+
+      <!-- SCENES — entity sheets (clip + clip prompt) -->
+      <section class="section" id="scenes">
+        <div class="secHead"><span class="secNo">No.07</span><span class="secNm">Scenes</span><span class="secRule"></span><span class="secCt">4/11 · running</span></div>
+        <div class="secIntro">When clips render per scene, the scene is a sheet too — the <b>clip</b> beside the <b>clip prompt</b> that drove it. This is where “the clips” live, paired.</div>
+        <div class="sheetList" id="sceneList"></div>
+      </section>
+    </div>
+  </main>
+
+  <aside class="chat">
+    <div class="chead"><span class="who">Dhee</span><span class="st"><span class="pd"></span>Supervising run</span></div>
+    <div class="clog">
+      <div class="msg user"><span class="from">You</span><div class="bubble">Make the Chhaya village story — warm, hand-drawn, a blacksmith and the boy who follows him.</div></div>
+      <div class="msg"><span class="from">Dhee</span><div class="bubble">Cast, locations and all 11 shots are done — open any sheet to see its prompt beside what it made. Now rendering <b>scene clips</b>, 4 of 11.</div></div>
+    </div>
+    <div class="composer"><div class="ipt">Direct the production…</div></div>
+  </aside>
+</div>
+
+<script>
+  const A = '../../Chhaya.V3/assets/';
+  const CHARS = [
+    { id:'jan', name:'Jan', img:'images/CharRef_jan_zimage_OPO1cQ.png', prompt:'A weathered village blacksmith in his fifties, soot-streaked forearms, a leather apron over a faded ochre tunic, grey-flecked beard, deep-set tired eyes. Hand-drawn anime style, warm earthy palette, soft cel shading, neutral standing reference pose, plain background.', refs:[['style','world'],['palette','warm earth']] },
+    { id:'yash', name:'Yash', img:'images/CharRef_yash_zimage_ouFhLe.png', prompt:'A wiry village boy of about twelve, cropped dark hair, oversized hand-me-down shirt, bare feet, bright curious eyes and a half-smile. Hand-drawn anime style, warm palette, soft shading, neutral reference pose, plain background.', refs:[['style','world']] },
+    { id:'kosi', name:'Kosi', img:'images/CharRef_kosi_zimage_6xGQTY.png', prompt:'A sharp-featured woman in her thirties, headscarf in deep indigo, silver nose-ring, watchful expression. Hand-drawn anime style, warm earthy palette, neutral reference pose, plain background.', refs:[['style','world']] },
+    { id:'mati', name:'Mati', img:'images/CharRef_mati_zimage_8-DT8z.png', prompt:'An elderly village elder, stooped, white dhoti, prayer beads, kind crinkled eyes. Hand-drawn anime style, warm palette, soft shading, neutral reference pose, plain background.', refs:[['style','world']] },
+  ];
+  const LOCS = [
+    { id:'janshut', name:"Jan's Hut", img:'images/SettingRef_janshut_zimage_mh4LBg.png', prompt:'A small mud-walled village hut interior, thatched roof, a low cot, clay pots, a single shuttered window throwing a warm shaft of dust-lit light. Hand-drawn anime style, warm earthy palette, lived-in, soft shading.', refs:[['style','world']] },
+    { id:'creek', name:'The Creek', img:'images/SettingRef_creek_zimage_ywBo_m.png', prompt:'A low dry-season creek winding between cracked banks, scattered smooth stones, sparse reeds, midday haze over distant hills. Hand-drawn anime style, warm palette, soft atmospheric depth.', refs:[['style','world']] },
+    { id:'village', name:'Kombu Manye Village', img:'images/SettingRef_kombumanyevillage_zimage_vPG8y6.png', prompt:'A cluster of mud-and-thatch village dwellings along a dusty lane, drying laundry, a communal well, hills behind. Hand-drawn anime style, warm earthy palette, gentle midday light.', refs:[['style','world']] },
+  ];
+  // shot frames: n → first/last; clips
+  const FRAME = (n,kind) => `${A}images/s1shot${n}_${kind}_frame_klein_${({1:{first:'CfkNri',last:'uFQ4Cl'},2:{first:'w1RgD3',last:'gYZLhb'},3:{first:'_75ZhI',last:'v_T_OW'}})[n][kind]}.png`;
+  const CLIP = (n) => `${A}videos/shots/s1shot${n}_ltx23_${({1:'1ZdfuQ',2:'4bx7gh',3:'HrmDe1'})[n]}.mp4`;
+  const SHOTS = [
+    { scene:1, shot:1, flfv:true, clip:1, prompt:'Wide establishing shot of Jan\'s forge at dawn, the blacksmith silhouetted against the glowing coals, sparks drifting up. Hand-drawn anime, warm amber key light, soft haze.', last:'Same forge, the coals dimmer and Jan turned toward the doorway where Yash waits.', motion:'Slow push-in on the forge as sparks rise; Jan lifts the hammer and turns. Hold the warmth.', cam:'push-in', dur:'6s' },
+    { scene:1, shot:2, flfv:true, clip:2, prompt:'Medium shot of Yash in the doorway, morning light behind him, watching Jan work. Hand-drawn anime, warm rim light.', last:'Yash takes a step inside, half-smile fading to concern.', motion:'Subtle handheld drift as Yash steps in; the light shifts across his face.', cam:'handheld', dur:'7s' },
+    { scene:1, shot:3, flfv:true, clip:3, prompt:'Close-up of Jan\'s hands on the hammer and tongs, soot and scars, the metal glowing. Hand-drawn anime, shallow focus, warm.', last:'The hands still; the glow fades to ember red.', motion:'Macro hold; a single bead of sweat falls. The hammer lowers.', cam:'locked', dur:'5s' },
+  ];
+  const SCENES = [
+    { scene:1, clip:1, done:true, prompt:'Scene 1 — the forge at dawn. Establish Jan and the boy; warm, quiet, the rhythm of work. Slow drifts, held compositions, amber light throughout.', cam:'slow drift', audio:'forge ambience', dur:'18s' },
+    { scene:2, clip:2, done:true, prompt:'Scene 2 — the creek at midday. Jan and Yash walk the dry bank; the debt is spoken of. Wider framing, heat haze.', cam:'tracking', audio:'wind, water trickle', dur:'22s' },
+    { scene:3, clip:3, running:true, prompt:'Scene 3 — the village lane. The stranger arrives; the village watches. Static wides, tension in stillness.', cam:'static', audio:'distant voices', dur:'20s' },
+  ];
+
+  const RAW = (o) => JSON.stringify(o,null,2).replace(/</g,'&lt;');
+  const chipRow = (refs) => refs.length ? `<div class="refchips">${refs.map(r=>`<span class="refchip">${r[0]} · ${r[1]}</span>`).join('')}</div>` : '—';
+
+  // a generic sheet: header + pairs[]; each pair = {tag, media(html), label, body(html)}
+  function sheet({slug,title,thumb,portrait,status,pairs,open}) {
+    const chip = status==='running' ? `<span class="chip running"><span class="cd"></span>producing</span>` : status==='queued' ? `<span class="chip queued"><span class="cd"></span>queued</span>` : `<span class="chip done"><span class="cd"></span>complete</span>`;
+    const thumbHtml = thumb ? `<span class="thumb ${portrait?'portrait':''}"><img src="${thumb}" alt=""></span>` : `<span class="thumb"></span>`;
+    return `<article class="sheet ${status==='running'?'running':''} ${open?'open':''}">
+      <button class="sheetHead" onclick="this.parentElement.classList.toggle('open')">
+        ${thumbHtml}
+        <span><span class="slug">${slug}</span><span class="title">${title}</span></span>
+        <span class="sheetRight">${chip}<span class="chev"></span></span>
+      </button>
+      <div class="sheetBody">
+        ${pairs.map(p=>`<div class="pair"><div class="pairMedia"><span class="tag">${p.tag}</span>${p.media}</div><div class="pairText"><div class="alabel">${p.label}</div>${p.body}</div></div>`).join('')}
+        <div class="sheetActs">${pairs.map(p=>`<button class="act">${p.label.replace(/·.*/,'').trim()}</button>`).join('')}</div>
+      </div>
+    </article>`;
+  }
+  const imgMedia = (src,portrait)=>`<div class="frame ${portrait?'portrait':''}"><img src="${src}" alt=""></div>`;
+  const vidMedia = (src)=>`<div class="frame"><video src="${src}" muted loop playsinline preload="metadata" onmouseover="this.play()" onmouseout="this.pause()"></video><span class="pin"></span></div>`;
+  const phMedia = (txt,live)=>`<div class="frame ph ${live?'live':''}"><span class="phtag">${txt}</span></div>`;
+  const promptText = (t,fields)=>`<p class="prose">${t}</p>${fields?`<div class="fieldGrid">${fields}</div>`:''}<details class="raw"><summary>Inspect JSON</summary><pre>${RAW({imagePrompt:t})}</pre></details>`;
+
+  // CHARACTERS
+  document.getElementById('charList').innerHTML = CHARS.map((c,i)=>sheet({
+    slug:'Character', title:c.name, thumb:A+c.img, portrait:true, status:'done', open:i<1,
+    pairs:[{ tag:'reference', media:imgMedia(A+c.img,true), label:'Image prompt',
+      body:promptText(c.prompt, `<div class="field"><b>mode</b>image_text_to_image</div><div class="field"><b>references</b>${chipRow(c.refs)}</div>`) }]
+  })).join('');
+
+  // LOCATIONS
+  document.getElementById('locList').innerHTML = LOCS.map((l,i)=>sheet({
+    slug:'Location', title:l.name, thumb:A+l.img, status:'done', open:i<1,
+    pairs:[{ tag:'reference still', media:imgMedia(A+l.img,false), label:'Image prompt',
+      body:promptText(l.prompt, `<div class="field"><b>mode</b>image_text_to_image</div><div class="field"><b>references</b>${chipRow(l.refs)}</div>`) }]
+  })).join('');
+
+  // SHOTS (multi-pair)
+  document.getElementById('shotList').innerHTML = SHOTS.map((s,i)=>{
+    const pairs = [
+      { tag:'first frame', media:imgMedia(FRAME(s.shot,'first'),false), label:'Image prompt · first frame',
+        body:promptText(s.prompt, `<div class="field"><b>aspect</b>16:9</div><div class="field"><b>mode</b>image_edit</div>`) },
+      { tag:'last frame', media:imgMedia(FRAME(s.shot,'last'),false), label:'Image prompt · last frame',
+        body:promptText(s.last, `<div class="field"><b>from</b>first frame</div>`) },
+      { tag:'clip', media:vidMedia(CLIP(s.clip)), label:'Motion directive · first → last',
+        body:promptText(s.motion, `<div class="field"><b>camera</b>${s.cam}</div><div class="field"><b>duration</b>${s.dur}</div>`) },
+    ];
+    return sheet({ slug:`Scene ${s.scene} · Shot ${s.shot}`, title:'', thumb:FRAME(s.shot,'first'), status:'done', open:i<1, pairs });
+  }).join('');
+
+  // SCENES (clip + clip prompt); scene 3 running (clip not yet)
+  document.getElementById('sceneList').innerHTML = SCENES.map((s,i)=>sheet({
+    slug:`Scene ${s.scene}`, title:'', thumb: s.done?null:null, status: s.running?'running':'done', open:i===2,
+    pairs:[{ tag:'clip', media: s.done?vidMedia(CLIP(s.clip)):phMedia('rendering clip…',true), label:'Clip prompt',
+      body: promptText(s.prompt, `<div class="field"><b>camera</b>${s.cam}</div><div class="field"><b>audio</b>${s.audio}</div><div class="field"><b>duration</b>${s.dur}</div>`) }]
+  })).join('');
+
+  // pill nav
+  document.getElementById('pillbar').addEventListener('click', e=>{
+    const p = e.target.closest('.pill'); if(!p) return;
+    document.getElementById(p.dataset.t)?.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+</script>
+</body>
+</html>
