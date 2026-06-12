@@ -129,6 +129,43 @@ describe('comfy.tti', () => {
     expect(stub.queued[0]!['6']!.inputs['text']).toBe('the chosen prompt');
   });
 
+  it('resolves the prompt from a DECLARED input edge, ignoring incidental global inputs', async () => {
+    // Regression: the walker injects global bundle inputs (brief/style/aspect)
+    // into EVERY node's ctx.inputs. resolvePrompt must use the node's declared
+    // input edges, not grab the first global string (the brief) — otherwise
+    // every item in a collection renders the same thing.
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyTtiRunner({ clientFactory: () => makeStubClient(stub) });
+    const caption = {
+      high_level_description: 'segment panel',
+      compositional_deconstruction: { background: 'white', elements: [] },
+    };
+    const node: NodeDef = {
+      id: 'segment_image',
+      kind: 'collection',
+      itemSource: 'segment_image_prompt',
+      inputs: [{ from: 'segment_image_prompt', usage: 'input', scope: 'matching' }],
+      outputs: { format: 'image', pattern: 'out.png' },
+      runner: { tool: 'comfy.tti', config: cfg() },
+    } as NodeDef;
+    const ctx: RunnerContext = {
+      projectDir,
+      bundleDir,
+      node,
+      itemId: 'seg1',
+      log: () => {},
+      inputs: {
+        brief_input: '# Brief\nA long brief that must NEVER become the image prompt.',
+        style: 'clean_editorial_infographic',
+        segment_image_prompt: caption,
+      },
+    };
+    const result = await runner.run(ctx);
+    expect(result.ok).toBe(true);
+    // The declared per-item caption wins — NOT the global brief string.
+    expect(stub.queued[0]!['6']!.inputs['text']).toBe(JSON.stringify(caption));
+  });
+
   it('fails when the required prompt cannot be resolved', async () => {
     const stub: Stub = { queued: [], uploads: [] };
     const runner = createComfyTtiRunner({ clientFactory: () => makeStubClient(stub) });
