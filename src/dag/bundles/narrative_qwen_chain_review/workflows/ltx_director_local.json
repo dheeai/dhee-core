@@ -505,20 +505,6 @@
       "title": "Load Diffusion Model (LTX 2.3 22B distilled, transformer-only fp8 scaled)"
     }
   },
-  "80": {
-    "inputs": {
-      "lora_name": "ltx2.3-transition.safetensors",
-      "strength_model": 1.0,
-      "model": [
-        "77",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoRA: LTX 2.3 Transition (strength 1.0)"
-    }
-  },
   "84": {
     "inputs": {
       "clip_name1": "gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors",
@@ -536,7 +522,7 @@
       "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
       "strength_model": 0.8,
       "model": [
-        "80",
+        "77",
         0
       ]
     },
