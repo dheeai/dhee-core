@@ -105,6 +105,30 @@ describe('comfy.tti', () => {
     expect(stub.queued[0]!['6']!.inputs['text']).toBe('freckled redhead, soft light');
   });
 
+  it('passes a structured-caption object (no imagePrompt) as minified JSON (Ideogram 4)', async () => {
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyTtiRunner({ clientFactory: () => makeStubClient(stub) });
+    const caption = {
+      high_level_description: 'a solar power infographic',
+      style_description: { medium: 'graphic_design', art_style: 'flat vector', color_palette: ['#0B1F3A'] },
+      compositional_deconstruction: { background: 'white', elements: [{ type: 'text', text: 'SOLAR', desc: 'headline' }] },
+    };
+    const result = await runner.run(makeCtx(cfg(), { segment_image_prompt: caption }));
+    expect(result.ok).toBe(true);
+    // the whole caption object is stringified into the prompt node (node 6 .text)
+    expect(stub.queued[0]!['6']!.inputs['text']).toBe(JSON.stringify(caption));
+  });
+
+  it('still prefers an upstream {imagePrompt} over the structured-caption fallback', async () => {
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyTtiRunner({ clientFactory: () => makeStubClient(stub) });
+    const result = await runner.run(
+      makeCtx(cfg(), { a: { imagePrompt: 'the chosen prompt' }, b: { high_level_description: 'ignored' } }),
+    );
+    expect(result.ok).toBe(true);
+    expect(stub.queued[0]!['6']!.inputs['text']).toBe('the chosen prompt');
+  });
+
   it('fails when the required prompt cannot be resolved', async () => {
     const stub: Stub = { queued: [], uploads: [] };
     const runner = createComfyTtiRunner({ clientFactory: () => makeStubClient(stub) });

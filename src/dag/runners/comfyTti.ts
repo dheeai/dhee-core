@@ -12,7 +12,9 @@ import {
   type ComfyImageClient,
 } from './comfyExecutor.js';
 
-/** Prompt comes from config.prompt, else an upstream {imagePrompt} JSON, else a plain string input. */
+/** Prompt comes from config.prompt, else an upstream {imagePrompt} JSON, else a
+ *  plain string input, else a structured-caption object passed as minified JSON
+ *  (e.g. an Ideogram 4 JSON prompt). */
 function resolvePrompt(ctx: RunnerContext): string | undefined {
   const cfg = ctx.node.runner.config as Record<string, unknown>;
   if (typeof cfg['prompt'] === 'string') return cfg['prompt'] as string;
@@ -23,6 +25,14 @@ function resolvePrompt(ctx: RunnerContext): string | undefined {
   }
   for (const v of Object.values(ctx.inputs)) {
     if (typeof v === 'string' && v.trim().length > 0) return v;
+  }
+  // Structured-caption fallback: an upstream node may emit a structured object
+  // with no `imagePrompt` field (e.g. an Ideogram 4 caption: high_level_description
+  // + style_description + compositional_deconstruction). Pass it as minified JSON.
+  // Only fires when nothing above matched, so existing {imagePrompt}/string inputs
+  // are unaffected.
+  for (const v of Object.values(ctx.inputs)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) return JSON.stringify(v);
   }
   return undefined;
 }
