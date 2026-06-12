@@ -30,7 +30,7 @@
         1
       ],
       "negative": [
-        "90",
+        "26",
         0
       ]
     },
@@ -164,11 +164,11 @@
   "14": {
     "inputs": {
       "positive": [
-        "8",
+        "58",
         0
       ],
       "negative": [
-        "8",
+        "58",
         1
       ],
       "latent": [
@@ -182,26 +182,19 @@
     }
   },
   "15": {
+    "class_type": "VAEDecode",
     "inputs": {
-      "spatial_tiles": 4,
-      "spatial_overlap": 1,
-      "temporal_tile_length": 16,
-      "temporal_overlap": 1,
-      "last_frame_fix": false,
-      "working_device": "auto",
-      "working_dtype": "auto",
+      "samples": [
+        "14",
+        2
+      ],
       "vae": [
         "3",
         0
-      ],
-      "latents": [
-        "14",
-        2
       ]
     },
-    "class_type": "LTXVSpatioTemporalTiledVAEDecode",
     "_meta": {
-      "title": "LTXV Spatio Temporal Tiled VAE Decode"
+      "title": "VAE Decode (video) - ported from LTX Director Fixed V2"
     }
   },
   "16": {
@@ -550,19 +543,6 @@
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "LoRA: OmniNFT-RL (strength 0.8)"
-    }
-  },
-  "90": {
-    "inputs": {
-      "text": "",
-      "clip": [
-        "84",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "Negative Prompt"
     }
   }
 }
