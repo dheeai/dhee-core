@@ -2,16 +2,16 @@
  * pickSceneVideoPrompt — per-scene global prompt matching.
  *
  * When scene_video_prompt is a per-scene COLLECTION, a scene_clip must
- * read its OWN scene's brief (scene_clip:scene_N → scene_video_prompt:
- * scene_N). The old walker took svpInsts[0] unconditionally, so every
- * clip got scene 1's brief — the bug behind the repeating spoken title.
+ * read its OWN scene's brief (scene_clip:scene_N -> scene_video_prompt:
+ * scene_N). The relay runner owns that matching; the walker should not
+ * know about ltx_director-specific inputs.
  *
  * It must also stay backward-compatible: bundles that keep
  * scene_video_prompt as a single `stage` node (one global prompt, no
  * per-scene instances / no sceneNumber) fall back to the first instance.
  */
 import { describe, it, expect } from 'vitest';
-import { pickSceneVideoPrompt } from '../../src/dag/walker.js';
+import { pickSceneVideoPrompt } from '../../src/dag/runners/comfyLtxDirector.js';
 
 type Inst = { itemId?: string; sceneNumber?: number; outputRel?: string };
 

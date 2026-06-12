@@ -30,7 +30,7 @@ const Params = Type.Object({
   stopAt: Type.Optional(
     Type.String({
       description:
-        "Optional node id to stop after (e.g. 'shot_image' to halt before video generation). Useful for staged review.",
+        "Optional node id to stop after (e.g. 'shot_image' to halt after regenerating shot images but before motion/video). Required for shot critique review loops.",
     }),
   ),
   runOnly: Type.Optional(
@@ -92,7 +92,7 @@ export function makeStartRunTool(deps: StartRunDeps = {}) {
     name: 'dhee_start_run',
     label: 'Start run',
     description:
-      'Run the bundle DAG for a project. Dispatches and returns IMMEDIATELY (non-blocking) — the run continues in the background while you stay free to talk to the user: you can answer questions or redirect (dhee_stop_run + fix + dhee_start_run) while it is in flight. You will be notified when the run finishes (completed, failed, or paused on the stop-after-each-collection gate). Pass stopAt to halt early, runOnly to re-run specific nodes (cascades downstream), sessionId so the host can route the completion back to you.',
+      "Run the bundle DAG for a project. Dispatches and returns IMMEDIATELY (non-blocking) — the run continues in the background while you stay free to talk to the user. For shot critique review, call after dhee_critique_node(confirm=true, applyOnly=true) with stopAt='shot_image' so the corrected shot is regenerated and the user can approve it before motion/clips/final continue. You will be notified when it finishes, fails, or pauses. Pass sessionId so the host can route completion back to you.",
     parameters: Params,
     async execute(_id, params): Promise<ReturnType<typeof textResult>> {
       const projectJsonPath = join(params.projectDir, 'project.json');

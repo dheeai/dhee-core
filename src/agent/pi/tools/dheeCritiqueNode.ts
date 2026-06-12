@@ -7,7 +7,14 @@
  *   the critique were applied). DOES NOT mutate. Use this to surface
  *   "this will rebuild N images" before pulling the trigger.
  *
- *   confirm=true: stamps the critique into project.json's
+ *   confirm=true + applyOnly=true: stamps the critique into
+ *   project.json's pendingCritiques map and invalidates the target
+ *   plus downstream consumers, but skips dispatch. This is the normal
+ *   chat UX for shot review: queue exactly one critique, then call
+ *   dhee_start_run(stopAt='shot_image') so the user can approve the
+ *   regenerated shot before motion/clips/final continue.
+ *
+ *   confirm=true without applyOnly: stamps the critique into project.json's
  *   pendingCritiques map, invalidates the target node + walkState
  *   entry (and every transitive consumer via cascade-invalidation),
  *   then dispatches the bundle. Post-cascade-refactor: dispatch
@@ -65,7 +72,7 @@ const Params = Type.Object({
   applyOnly: Type.Optional(
     Type.Boolean({
       description:
-        'BATCH MODE. When true, stamps the critique + invalidates the target but does NOT dispatch the bundle. Use when you have many critiques to apply in a row — each call returns in milliseconds instead of waiting on the full cascade. After the last batched critique, call dhee_start_run ONCE to process every pending critique in a single walker pass. Ignored if confirm is not also true.',
+        "QUEUE MODE. When true, stamps the critique + invalidates the target but does NOT dispatch the bundle. Use this for normal shot critique UX: queue one critique, then call dhee_start_run with stopAt='shot_image' so the user can review the corrected shot before motion/clips/final continue. Ignored if confirm is not also true.",
     }),
   ),
 });
@@ -161,7 +168,7 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
     name: 'dhee_critique_node',
     label: 'Critique LLM node',
     description:
-      "ADJUST or CORRECT what an LLM node produced, by describing the change in plain words — e.g. 'make shot 1 a wide establishing shot of the lighthouse', 'darker, rainier mood', 'wrong character — this is Marcus not Sarah'. NOT just for broken outputs; this is the go-to for ANY per-shot/per-node change you can describe rather than hand-author. The runner prepends your note to the next regeneration; the walker cascades only the true downstream. To change ONE shot, target that shot's own prompt item: nodeId='shot_image_prompt', itemId='scene_1_shot_1' — that re-renders only that shot, never the whole storyboard. Two-phase: call FIRST without confirm to preview the cascade, then confirm=true to apply. Only works on llm.* nodes — for a broken image/video, walk upstream to its prompt node and critique that.",
+      "ADJUST or CORRECT what an LLM node produced, by describing the change in plain words — e.g. 'make shot 1 a wide establishing shot of the lighthouse', 'darker mood', 'wrong character — this is Marcus not Sarah'. NOT just for broken outputs; this is the go-to for ANY per-shot/per-node change you can describe rather than hand-author. To change ONE shot, target that shot's own prompt item: nodeId='shot_image_prompt', itemId='scene_1_shot_1' — that invalidates only that shot's true downstream, never the whole storyboard. Two-phase: call FIRST without confirm to preview, then for normal shot critique call confirm=true and applyOnly=true to queue exactly one fix. Immediately follow with dhee_start_run(stopAt='shot_image') so the corrected shot image is regenerated for user review, then ask whether they are satisfied before continuing to motion/clips/final. Only works on llm.* nodes — for a broken image/video, walk upstream to its prompt node and critique that.",
     parameters: Params,
     async execute(_id, params, signal) {
       const loadRes = loadProjectBundle(params.projectDir);
@@ -240,7 +247,7 @@ export function makeCritiqueNodeTool(deps: CritiqueNodeDeps = {}) {
         );
       }
       const message = params.applyOnly
-        ? `Critique batched for '${target}'. pendingCritique stamped + node invalidated; dispatch SKIPPED (applyOnly). Call dhee_start_run when all batched critiques are queued.`
+        ? `Critique queued for '${target}'. pendingCritique stamped + node invalidated; dispatch SKIPPED (applyOnly). For shot review, call dhee_start_run with stopAt='shot_image', then show the regenerated shot and ask whether the user is satisfied before continuing.`
         : `Critique applied to '${target}'. Pending critique stamped in project.json; node + downstream cascade invalidated via event-derived dep graph; bundle re-dispatched (walker re-runs everything pending).`;
       return textResult(message, {
         applied: true,

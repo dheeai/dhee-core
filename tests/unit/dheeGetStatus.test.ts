@@ -37,6 +37,15 @@ function projectWithGate(
   writeFileSync(join(dir, 'project.json'), JSON.stringify({ walkState: { nodes }, pausedAtGate }), 'utf8');
   return dir;
 }
+function projectWithBudget(
+  nodes: Record<string, { status: string; startedAt?: number }>,
+  pausedAtBudget: { capUsd: number; spentUsd: number; nextNodeId: string; itemId?: string },
+): string {
+  const dir = mkdtempSync(join(tmpdir(), 'getstatus-budget-'));
+  dirs.push(dir);
+  writeFileSync(join(dir, 'project.json'), JSON.stringify({ walkState: { nodes }, pausedAtBudget }), 'utf8');
+  return dir;
+}
 function tool(probe: () => Promise<ActiveRunProbe>): ToolLike {
   return makeGetStatusTool({ probeActiveRun: probe }) as unknown as ToolLike;
 }
@@ -132,5 +141,39 @@ describe('dhee_get_status — gate pause on the PULL path (issue #133)', () => {
     const dir = projectWith({ story: { status: 'completed' }, final_video: { status: 'completed' } });
     const r = await tool(async () => ({ known: true })).execute('t', { projectDir: dir });
     expect(r.content[0]!.text).not.toMatch(/paused at the gate/i);
+  });
+});
+
+describe('dhee_get_status — budget-cap pause on the PULL path', () => {
+  it('surfaces a PAUSED-AT-BUDGET banner when idle with a budget marker', async () => {
+    const dir = projectWithBudget(
+      { upstream: { status: 'completed' }, shot_image: { status: 'completed' } },
+      { capUsd: 3, spentUsd: 4, nextNodeId: 'shot_image', itemId: 'scene_1_shot_2' },
+    );
+    const r = await tool(async () => ({ known: true })).execute('t', { projectDir: dir });
+    const text = r.content[0]!.text;
+    expect(text).toMatch(/paused at the budget cap/i);
+    expect(text).toContain('$3.00');
+    expect(text).toContain('$4.00');
+    // Steers off resume (which would re-trip) and off blaming a misconfig.
+    expect(text).toMatch(/do NOT resume/i);
+    expect(text).toMatch(/intentional/i);
+    expect(text).toMatch(/raise it|Settings/i);
+  });
+
+  it('does NOT show the budget banner while a run is actively in progress', async () => {
+    const dir = projectWithBudget(
+      { upstream: { status: 'in_progress', startedAt: Date.now() - 5000 } },
+      { capUsd: 3, spentUsd: 4, nextNodeId: 'shot_image' },
+    );
+    const projectName = dir.split('/').pop()!;
+    const r = await tool(async () => ({ known: true, activeProjectName: projectName })).execute('t', { projectDir: dir });
+    expect(r.content[0]!.text).not.toMatch(/paused at the budget cap/i);
+  });
+
+  it('no budget banner when there is no pausedAtBudget marker', async () => {
+    const dir = projectWith({ story: { status: 'completed' }, final_video: { status: 'completed' } });
+    const r = await tool(async () => ({ known: true })).execute('t', { projectDir: dir });
+    expect(r.content[0]!.text).not.toMatch(/paused at the budget cap/i);
   });
 });

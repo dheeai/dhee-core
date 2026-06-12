@@ -116,6 +116,49 @@ the current walk anyway.
 
 Landed on the `feat/gate-after-collection-nodes` branch 2026-06-06.
 
+### `budgetCapUsd`
+
+**Default: unset (no cap) in core; the desktop stamps `5` (USD) on new
+projects.**
+
+> **Exception to the strict-boolean rule:** this flag is a **number**,
+> not a boolean. A finite value `> 0` enables the cap; anything else
+> (missing, `0`, negative, non-finite, non-number) means "no cap".
+
+A per-project paid-spend ceiling. When set, the walker tracks
+cumulative paid spend on the branch — seeded from the event log at walk
+start, so it carries across resumes — and halts **before** dispatching
+the next paid (non-cached) instance once spend reaches the cap. A safety
+backstop against a runaway regeneration loop burning a user's credits
+(the 2026-06-04 first-paying-customer incident). It is a **soft
+ceiling**: a runner only reports cost after it runs, so the check trips
+when spend is already at/over the cap — overshoot is bounded by one
+instance's cost. Local-only walks accrue `$0` and never trip it.
+
+A budget halt is an **intentional pause, not a failure**: the walk
+returns `ok:true` with `WalkResult.budgetExceeded`, emits a
+`budget.exceeded` event, fires an error-level notification (red chat
+card), and persists a durable `pausedAtBudget` marker so `dhee_get_status`
+reports the cap on the pull path. Raise or clear the cap and re-run to
+resume (the CAS cache-skips completed work); resuming without raising it
+re-trips immediately at the seed check, so no spend is wasted.
+
+**Read / consumed by:**
+- `getBudgetCapUsd` (`src/dag/projectFeatures.ts`) — the reader.
+- `runProjectViaBundle` (`src/server/runners/runProjectViaBundle.ts`) —
+  forwards it to the walker's `budgetCapUsd`; on a halt fires the
+  notification, persists the marker, emits the `budget_cap_hit`
+  analytics event, and returns `budgetExceeded`.
+- `walkBundle` / `walkBundleOnce` (`src/dag/walker.ts`) — enforcement.
+- `initializeProject` (`src/dag/initializeProject.ts`) — stamps the
+  desktop-supplied default into `features.budgetCapUsd`.
+
+**When to raise it:** a genuinely long premium run that legitimately
+costs more than the default. **When to keep low:** any unattended run on
+a paid backend.
+
+Landed 2026-06-10.
+
 ### `skipHoldingBeatLF`
 
 **Default: `false`**

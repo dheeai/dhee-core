@@ -573,7 +573,8 @@
         "config": {
           "promptTemplate": "prompts/shot_motion_directive.md",
           "tier": "medium",
-          "outputFormat": "json"
+          "outputFormat": "json",
+          "outputSchema": "schemas/shot_motion_directive.schema.json"
         }
       },
       "itemKey": "shots",

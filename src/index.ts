@@ -3,6 +3,11 @@ export * from './dag/walker.js';
 export * from './dag/schema.js';
 export * from './dag/bundleSource.js';
 export {
+  addLocalResourceStartListener,
+  getCurrentLocalResource,
+  type LocalResourceSnapshot,
+} from './dag/localResourceState.js';
+export {
   RunnerRegistry,
   getGlobalRegistry,
   type RunnerManifest,

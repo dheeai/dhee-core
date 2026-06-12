@@ -71,6 +71,16 @@ export interface InitializeProjectParams {
    * They are recorded under project.inputs for later planner/agent use.
    */
   referenceImages?: ProjectLocalReferenceImage[];
+  /**
+   * Per-project paid-spend ceiling in USD, stamped into
+   * `features.budgetCapUsd`. The desktop passes its global default
+   * (ships at $5) here so every new project is protected out of the
+   * box; the user can change it in Settings. Only stamped when a finite
+   * number > 0 — omit / pass undefined (e.g. headless CLI use) to leave
+   * the project uncapped, preserving the pre-feature behavior. See
+   * src/dag/projectFeatures.ts.
+   */
+  budgetCapUsd?: number;
 }
 
 export type InitializeProjectResult =
@@ -78,7 +88,15 @@ export type InitializeProjectResult =
   | { ok: false; error: string };
 
 export function initializeProject(params: InitializeProjectParams): InitializeProjectResult {
-  const { projectDir, name, bundleId, description, inputs = {}, referenceImages = [] } = params;
+  const {
+    projectDir,
+    name,
+    bundleId,
+    description,
+    inputs = {},
+    referenceImages = [],
+    budgetCapUsd,
+  } = params;
 
   if (!existsSync(projectDir)) {
     return { ok: false, error: `Project directory '${projectDir}' does not exist.` };
@@ -111,6 +129,13 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     // seed just makes the default visible/editable.
     features: {
       gateAfterCollections: true,
+      // Budget backstop: stamped only when the caller (desktop) supplies
+      // a valid cap. The reader (getBudgetCapUsd) treats a missing /
+      // ≤0 / non-finite value as "no cap", so omitting it keeps headless
+      // projects uncapped.
+      ...(typeof budgetCapUsd === 'number' && Number.isFinite(budgetCapUsd) && budgetCapUsd > 0
+        ? { budgetCapUsd }
+        : {}),
     },
   };
 
@@ -259,7 +284,7 @@ function prePopulateProvidedOutputs(
     if (decl.kind !== 'file') continue;
     const v = inputs[decl.id];
     if (v === undefined || v === null || v === '') continue;
-    const node = (bundle.nodes as NodeDef[]).find((n) => n.outputs?.pattern === decl.path);
+    const node = bundle.nodes.find((n) => n.outputs?.pattern === decl.path);
     if (node) matches.push({ nodeId: node.id, outputPath: decl.path, format: node.outputs.format });
   }
   if (matches.length === 0) return;

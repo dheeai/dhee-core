@@ -21,11 +21,12 @@ import {
 } from '../../dag/bundleSource.js';
 import { ensureNpmRunnersLoaded } from '../../dag/ecosystem.js';
 import { walkBundle, loadBundle } from '../../dag/walker.js';
-import { isGateAfterCollectionsEnabled } from '../../dag/projectFeatures.js';
+import { isGateAfterCollectionsEnabled, getBudgetCapUsd } from '../../dag/projectFeatures.js';
 import type { DagBundle, NodeDef } from '../../dag/schema.js';
 import type { GenericProjectFile } from './runProjectViaBundle-stubs.js';
 import type { AssetEvent } from './runProjectViaBundle-stubs.js';
 import { openProjectionEngine } from '../../dag/eventLog/ProjectionEngine.js';
+import { captureAnalyticsEvent } from '../posthog.js';
 
 export interface RunProjectViaBundleOpts {
   projectDir: string;
@@ -89,6 +90,14 @@ export interface RunProjectViaBundleResult {
    * cause for the missing output. Only set alongside `gatedAfter`.
    */
   pendingAfterGate?: string[];
+  /**
+   * Set when the walk halted on the per-project budget cap
+   * (`features.budgetCapUsd`) instead of reaching the goal. `ok` stays
+   * true — a safety pause, not a failure. The caller (and the pull path
+   * via the durable `pausedAtBudget` marker) surfaces it so the user can
+   * raise/clear the cap and resume. Only set on a budget halt.
+   */
+  budgetExceeded?: { capUsd: number; spentUsd: number; nextNodeId: string; itemId?: string };
 }
 
 /**
@@ -121,6 +130,42 @@ function persistGateMarker(
       };
     } else if ('pausedAtGate' in proj) {
       delete proj['pausedAtGate'];
+    } else {
+      return; // nothing to clear
+    }
+    writeFileSync(p, JSON.stringify(proj, null, 2));
+  } catch {
+    // Advisory hint only — a failure to persist must not break the run.
+  }
+}
+
+/**
+ * Persist (or clear) a durable `pausedAtBudget` marker on project.json,
+ * the budget-cap twin of `persistGateMarker`. Same rationale (issue
+ * #133): the PULL path — `dhee_get_status` — must be able to tell a
+ * budget-cap pause apart from a finish, since the push notification can
+ * be suppressed mid-poll. Set on a budget halt; cleared on any other
+ * walk outcome so it never goes stale. Best-effort; re-reads fresh
+ * before mutating so it doesn't clobber the walker's walkState write.
+ */
+function persistBudgetMarker(
+  projectDir: string,
+  marker: { capUsd: number; spentUsd: number; nextNodeId: string; itemId?: string } | null,
+): void {
+  const p = join(projectDir, 'project.json');
+  try {
+    if (!existsSync(p)) return;
+    const proj = JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>;
+    if (marker) {
+      proj['pausedAtBudget'] = {
+        capUsd: marker.capUsd,
+        spentUsd: marker.spentUsd,
+        nextNodeId: marker.nextNodeId,
+        ...(marker.itemId !== undefined ? { itemId: marker.itemId } : {}),
+        ts: Date.now(),
+      };
+    } else if ('pausedAtBudget' in proj) {
+      delete proj['pausedAtBudget'];
     } else {
       return; // nothing to clear
     }
@@ -212,6 +257,11 @@ export async function runProjectViaBundle(
   const gateAfterCollections =
     opts.gateAfterCollections === true || isGateAfterCollectionsEnabled(project);
 
+  // Budget backstop: per-project paid-spend ceiling (USD). Undefined →
+  // unbounded. Forwarded to the walker, which halts before the next
+  // paid instance once cumulative branch spend reaches it.
+  const budgetCapUsd = getBudgetCapUsd(project);
+
   // 6. Walk the bundle.
   // The ProjectionEngine writes the event log + the back-compat
   // walkState snapshot under the hood. Opening it is cheap (just
@@ -229,6 +279,7 @@ export async function runProjectViaBundle(
     ...(opts.runOnly !== undefined ? { runOnly: opts.runOnly } : {}),
     ...(opts.signal ? { signal: opts.signal } : {}),
     ...(gateAfterCollections ? { gateAfterCollections: true } : {}),
+    ...(budgetCapUsd !== undefined ? { budgetCapUsd } : {}),
     ...(opts.onTool ? { onTool: opts.onTool } : {}),
     ...(opts.onResult ? { onResult: opts.onResult } : {}),
     ...(opts.onNotification ? { onNotification: opts.onNotification } : {}),
@@ -240,6 +291,29 @@ export async function runProjectViaBundle(
   if (!walkResult.ok) {
     return { ok: false, error: walkResult.error ?? 'bundle walk failed' };
   }
+  if (walkResult.budgetExceeded) {
+    const { capUsd, spentUsd, nextNodeId, itemId } = walkResult.budgetExceeded;
+    const msg =
+      `Paused — hit your $${capUsd.toFixed(2)} budget cap for this project ` +
+      `(spent ~$${spentUsd.toFixed(2)}). Raise or clear the cap in Settings to continue. ` +
+      `Nothing was charged for the step that was about to run.`;
+    log(`runProjectViaBundle: ${msg} (next was '${nextNodeId}${itemId ? `[${itemId}]` : ''}')`);
+    // Surface to the chat as an error card (the channel the desktop bridges).
+    opts.onNotification?.({ level: 'error', message: msg });
+    // Durable marker for the pull path (dhee_get_status). Clear any stale
+    // gate marker — a budget halt is not a collection-gate pause.
+    persistGateMarker(opts.projectDir, null);
+    persistBudgetMarker(opts.projectDir, walkResult.budgetExceeded);
+    // Pricing/credit signal: how often users hit their cap. Token-count-
+    // style structural fields only — no path, no content. No-ops without
+    // a PostHog key.
+    captureAnalyticsEvent(
+      'budget_cap_hit',
+      { cap_usd: capUsd, spent_usd: spentUsd, next_node_id: nextNodeId },
+      { component: 'dhee-core' },
+    );
+    return { ok: true, budgetExceeded: walkResult.budgetExceeded };
+  }
   if (walkResult.gatedAfter) {
     log(
       `runProjectViaBundle: paused after collection '${walkResult.gatedAfter}' ` +
@@ -250,6 +324,8 @@ export async function runProjectViaBundle(
       gatedAfter: walkResult.gatedAfter,
       ...(walkResult.pendingAfterGate ? { pendingAfterGate: walkResult.pendingAfterGate } : {}),
     });
+    // A gate pause is not a budget pause — drop any stale budget marker.
+    persistBudgetMarker(opts.projectDir, null);
     return {
       ok: true,
       gatedAfter: walkResult.gatedAfter,
@@ -257,9 +333,10 @@ export async function runProjectViaBundle(
     };
   }
   // Any non-gated outcome (goal reached / stopAt / runOnly) means there is
-  // no pending gate — clear a stale marker so the pull path doesn't report
-  // a pause that no longer holds.
+  // no pending gate or budget pause — clear stale markers so the pull path
+  // doesn't report a pause that no longer holds.
   persistGateMarker(opts.projectDir, null);
+  persistBudgetMarker(opts.projectDir, null);
   return {
     ok: true,
     ...(walkResult.goal ? { finalVideoAbs: walkResult.goal.outputAbs } : {}),

@@ -195,18 +195,58 @@ export interface ApplyAliasesOpts {
   onClassSwap?: (nodeId: string, from: string, to: string) => void;
 }
 
-const MODEL_EXTS = ['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.gguf', '.onnx', '.sft'];
+/**
+ * Rewrite every string value inside a node's inputs that EXACTLY equals a
+ * name-alias key. We don't care which field holds it — alias keys are full
+ * model filenames (e.g. `gemma_3_12B_it_fp8_scaled.safetensors`), which are
+ * unambiguous and never appear in a workflow except as a model input value.
+ * This replaces the old `<*_name>` field-name heuristic, which silently
+ * skipped numbered fields like DualCLIPLoader.clip_name1 (the gemma encoder)
+ * and any non-`_name` loader field. Exact full-value match is the guard, so
+ * integers / booleans / wire-arrays (`["84", 0]`) are never touched.
+ */
+function rewriteAliasedValues(value: unknown, nameMap: Record<string, string>): unknown {
+  if (typeof value === 'string') return nameMap[value] ?? value;
+  if (Array.isArray(value)) return value.map((v) => rewriteAliasedValues(v, nameMap));
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      (value as Record<string, unknown>)[k] = rewriteAliasedValues(v, nameMap);
+    }
+  }
+  return value;
+}
 
-function looksLikeModelFilename(s: string): boolean {
-  const lower = s.toLowerCase();
-  return MODEL_EXTS.some((ext) => lower.endsWith(ext));
+/**
+ * Look up the class_swaps for a workflow, tolerant of path-separator skew.
+ * The store is keyed by `listBundleWorkflows` (path.join → backslashes on
+ * Windows: `workflows\ltx_director_local.json`) but runtime callers compute
+ * the key with forward slashes (`workflowPath.split('/').slice(-2)...`), so a
+ * raw object lookup silently misses on Windows. Normalize both sides, then
+ * fall back to a basename match (workflow filenames are unique per bundle).
+ */
+function lookupClassSwaps(
+  classSwaps: Record<string, Record<string, string>> | undefined,
+  workflowKey: string,
+): Record<string, string> {
+  if (!classSwaps) return {};
+  if (classSwaps[workflowKey]) return classSwaps[workflowKey];
+  const norm = (k: string): string => k.replace(/\\/g, '/');
+  const base = (k: string): string => norm(k).split('/').pop() ?? k;
+  const wantNorm = norm(workflowKey);
+  const wantBase = base(workflowKey);
+  let baseMatch: Record<string, string> | undefined;
+  for (const [k, v] of Object.entries(classSwaps)) {
+    if (norm(k) === wantNorm) return v; // normalized full-key match wins
+    if (base(k) === wantBase) baseMatch = v; // remember basename fallback
+  }
+  return baseMatch ?? {};
 }
 
 /**
  * Apply name aliases + class swaps to a workflow IN A FRESH COPY.
- * Input is never mutated. The substitution is intentionally narrow:
- * only `inputs.<*_name>` string values get renamed, and only nodes
- * matching `(workflowKey, nodeId)` in class_swaps get reclassed.
+ * Input is never mutated. name_aliases rename any input string value that
+ * exactly equals an alias key (field-name agnostic); class_swaps reclass
+ * only nodes matching `(workflowKey, nodeId)`.
  */
 export function applyAliases(
   workflow: ComfyWorkflow,
@@ -214,7 +254,7 @@ export function applyAliases(
 ): ComfyWorkflow {
   const { workflowKey, aliases } = opts;
   const nameMap = aliases.name_aliases ?? {};
-  const classSwapsForThisWorkflow = aliases.class_swaps?.[workflowKey] ?? {};
+  const classSwapsForThisWorkflow = lookupClassSwaps(aliases.class_swaps, workflowKey);
 
   // Deep clone via JSON to guarantee no mutation of caller's object.
   // Workflows are small JSON; cost is negligible.
@@ -230,19 +270,10 @@ export function applyAliases(
       node.class_type = newClass;
     }
 
-    // Name substitutions on *_name string inputs that look like model
-    // filenames. Strictly limited to that field-name pattern + string
-    // values + extension match — protects against accidentally
-    // rewriting integer / boolean / wire-array inputs.
-    const inputs = node.inputs;
-    if (inputs && typeof inputs === 'object') {
-      for (const [field, value] of Object.entries(inputs)) {
-        if (!field.endsWith('_name')) continue;
-        if (typeof value !== 'string') continue;
-        if (!looksLikeModelFilename(value)) continue;
-        const newName = nameMap[value];
-        if (newName) (inputs as Record<string, unknown>)[field] = newName;
-      }
+    // Name substitutions: rewrite any input value that exactly equals an
+    // alias key, regardless of which field holds it (see rewriteAliasedValues).
+    if (node.inputs && typeof node.inputs === 'object') {
+      rewriteAliasedValues(node.inputs, nameMap);
     }
   }
 

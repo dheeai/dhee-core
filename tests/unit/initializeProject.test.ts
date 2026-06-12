@@ -66,6 +66,47 @@ describe('initializeProject', () => {
     expect(project.aspect).toBe('21:9');
   });
 
+  it('1b. budgetCapUsd is stamped into features only when valid (> 0)', () => {
+    // Valid cap → stamped.
+    const withCap = tmpDir();
+    made.push(withCap);
+    initializeProject({
+      projectDir: withCap,
+      name: 'Capped',
+      bundleId: 'narrative_prompt_relay',
+      inputs: { story_input: 'a' },
+      budgetCapUsd: 5,
+    });
+    const capped = JSON.parse(readFileSync(join(withCap, 'project.json'), 'utf8'));
+    expect(capped.features.budgetCapUsd).toBe(5);
+    expect(capped.features.gateAfterCollections).toBe(true);
+
+    // Omitted → no budgetCapUsd field (headless projects stay uncapped).
+    const noCap = tmpDir();
+    made.push(noCap);
+    initializeProject({
+      projectDir: noCap,
+      name: 'Uncapped',
+      bundleId: 'narrative_prompt_relay',
+      inputs: { story_input: 'a' },
+    });
+    const uncapped = JSON.parse(readFileSync(join(noCap, 'project.json'), 'utf8'));
+    expect(uncapped.features.budgetCapUsd).toBeUndefined();
+
+    // Invalid (≤ 0) → not stamped.
+    const zeroCap = tmpDir();
+    made.push(zeroCap);
+    initializeProject({
+      projectDir: zeroCap,
+      name: 'Zero',
+      bundleId: 'narrative_prompt_relay',
+      inputs: { story_input: 'a' },
+      budgetCapUsd: 0,
+    });
+    const zero = JSON.parse(readFileSync(join(zeroCap, 'project.json'), 'utf8'));
+    expect(zero.features.budgetCapUsd).toBeUndefined();
+  });
+
   it('2. story content written verbatim to bundle.inputs[].path', () => {
     const projectDir = tmpDir();
     made.push(projectDir);
