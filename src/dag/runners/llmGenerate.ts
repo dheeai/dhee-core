@@ -31,6 +31,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileS
 import { dirname, extname, resolve } from 'node:path';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
+import { getProjectCacheScope } from '../projectIdentity.js';
 // ajv / ajv-formats ESM<>CJS interop: verbatimModuleSyntax preserves
 // the default import shape, but ajv's CJS exports the constructor
 // directly. The `* as` form lets us reach `.default` defensively.
@@ -567,6 +568,7 @@ export function createLlmGenerateRunner(opts?: {
           : {}),
       },
       config: {
+        projectScope: getProjectCacheScope(ctx.projectDir),
         model: resolvedModel,
         tier: cfg.tier ?? 'medium',
         ...(cfg.purpose ? { purpose: cfg.purpose } : {}),

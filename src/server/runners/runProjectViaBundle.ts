@@ -61,7 +61,13 @@ export interface RunProjectViaBundleOpts {
    * the chat session's IPC stream without translation.
    */
   onTool?: (info: { toolName: string; nodeId?: string }) => void;
-  onResult?: (info: { filePath?: string; status?: string; nodeId?: string }) => void;
+  onResult?: (info: {
+    toolName: string;
+    filePath?: string;
+    status?: string;
+    error?: string;
+    nodeId?: string;
+  }) => void;
   onNotification?: (info: { level: 'info' | 'warn' | 'error'; message: string }) => void;
   onAsset?: (event: AssetEvent & { toolName?: string; nodeId?: string }) => void;
 }
@@ -172,7 +178,11 @@ function persistBudgetMarker(
 export async function runProjectViaBundle(
   opts: RunProjectViaBundleOpts,
 ): Promise<RunProjectViaBundleResult> {
-  const log = opts.log ?? ((m: string) => console.log(m));
+  const rawLog = opts.log ?? ((m: string) => console.log(m));
+  const log = (message: string): void => {
+    rawLog(message);
+    opts.onNotification?.({ level: 'info', message });
+  };
 
   // 0. Register any npm-published runners (dhee-runner-*) before we
   // validate the bundle's runner dependencies. Best-effort + once-per-
@@ -270,6 +280,10 @@ export async function runProjectViaBundle(
     ...(opts.signal ? { signal: opts.signal } : {}),
     ...(gateAfterCollections ? { gateAfterCollections: true } : {}),
     ...(budgetCapUsd !== undefined ? { budgetCapUsd } : {}),
+    ...(opts.onTool ? { onTool: opts.onTool } : {}),
+    ...(opts.onResult ? { onResult: opts.onResult } : {}),
+    ...(opts.onNotification ? { onNotification: opts.onNotification } : {}),
+    ...(opts.onAsset ? { onAsset: opts.onAsset } : {}),
     cli: { sceneIds },
     log,
   });
