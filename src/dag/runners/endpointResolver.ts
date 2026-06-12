@@ -1,2 +1,2 @@
-/** Re-export shim — the implementation now lives in @dhee/runner-sdk. */
-export { resolveEndpointUrl } from '@dhee/runner-sdk';
+/** Re-export shim — the implementation now lives in @dheeai/runner-sdk. */
+export { resolveEndpointUrl } from '@dheeai/runner-sdk';

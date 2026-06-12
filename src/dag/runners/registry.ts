@@ -17,7 +17,7 @@ import semver from 'semver';
 import type { DagBundle, Runner, RunnerManifest } from '../schema.js';
 
 // `RunnerManifest` (with `permissions`) is now canonically defined in
-// @dhee/runner-sdk and re-exported via ../schema.js. Re-export here too so
+// @dheeai/runner-sdk and re-exported via ../schema.js. Re-export here too so
 // the long-standing `import { RunnerManifest } from './registry.js'` surface
 // keeps working.
 export type { Runner, RunnerManifest } from '../schema.js';

@@ -1,3 +1,3 @@
-/** Re-export shim — the implementation now lives in @dhee/runner-sdk. */
-export { isTransientError, retryTransient } from '@dhee/runner-sdk';
-export type { RetryOpts } from '@dhee/runner-sdk';
+/** Re-export shim — the implementation now lives in @dheeai/runner-sdk. */
+export { isTransientError, retryTransient } from '@dheeai/runner-sdk';
+export type { RetryOpts } from '@dheeai/runner-sdk';
