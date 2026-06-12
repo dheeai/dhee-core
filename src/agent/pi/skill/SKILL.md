@@ -153,8 +153,15 @@ the user says to. Never diagnose missing downstream output as a misconfig
   (`nodeId='shot_image_prompt', itemId='scene_1_shot_1'`). This is the
   default for adjustments. Critique only works on `llm.*` nodes — for a
   broken image/video, walk upstream to its prompt node and critique that.
-- **Supply exact finished content** (hand-written file, uploaded image) →
-  `dhee_write_node_content` on that item.
+- **Supply exact finished content** (hand-written file, uploaded image)
+  for an item that ALREADY exists → `dhee_write_node_content` on that
+  item, **always with `itemId`** (e.g. `character_image` + itemId). For a
+  per-item node, omitting itemId is an error — it does NOT mean "the whole
+  collection".
+- **Add or remove an item** (a new character / setting / shot, or dropping
+  one) → `dhee_add_item` / `dhee_remove_item`. This is the ONLY way to
+  change *which items exist*; `dhee_write_node_content` refuses membership
+  changes on a plan node.
 
 **Two rules you must never break (both silently destroy renders the user
 didn't ask to touch):**
@@ -164,10 +171,10 @@ didn't ask to touch):**
   other shots along with it. Use `dhee_regenerate_node(nodeId, itemId)`
   for one item.
 - **NEVER edit `scenes_plan` to change how one shot looks.** It's the
-  whole storyboard — every shot fans out of it, so overwriting it
-  re-renders ALL shots. Target the shot's own `shot_image_prompt`
-  instead. Only touch `scenes_plan` to genuinely add / remove / reorder
-  shots.
+  whole storyboard. Target the shot's own `shot_image_prompt` instead. To
+  add or remove a shot, use `dhee_add_item` / `dhee_remove_item` on
+  `scenes_plan` (item-aware: only the added/removed shot's downstream
+  changes, never every shot).
 
 **Critique-review loop — don't over-render:**
 
@@ -190,6 +197,45 @@ next), not as a batch, unless the user explicitly asks to batch.
 Critique text should be specific and editorial (missing tokens, broken
 composition, identity drift, ambiguous instructions) — describe what's
 wrong; don't write the replacement prompt yourself.
+
+## Building bottom-up — ASSET-FIRST, iterate then lock
+
+Some bundles mark plan nodes (`characters_plan`, `settings_plan`,
+`scenes_plan`) **agentEditable** (the per-project digest lists them).
+Bottom-up building is **not** "add a text item and move on" — it is
+**perfect one asset at a time, then compose shots from locked assets.**
+This is a creative loop, not a pipeline rush.
+
+**The core loop — for EACH character / setting:**
+
+1. `dhee_add_item(characters_plan|settings_plan, {id, name, description})`
+   — name the concept (id = lowercase_snake_case). `dhee_list_assets`
+   first to reuse existing ids.
+2. `dhee_start_run(stopAt: 'character_image' | 'setting_image')` — render
+   JUST this asset (siblings stay cached). `dhee_show_node_output` it.
+3. **JUDGE WITH THE USER. Assume it is NOT right on the first try.** Show
+   the image and ask if it's what they want. Refine via
+   `dhee_critique_node` on its prompt ("more menacing tentacles", "matte
+   black, not silver", "older, more weathered") → re-render → show again.
+   Keep good candidates with `dhee_list_versions` / `dhee_select_version`.
+   **Loop until the user explicitly approves** — typically several rounds.
+4. **LOCK IT.** Once approved, it's the pinned reference for this id and
+   won't be regenerated. Move to the NEXT asset and repeat from step 1.
+
+**DO NOT** run downstream stages (shots, clips, final) until the assets a
+shot needs are locked. Don't barrel to the full pipeline — the user is
+art-directing each asset to satisfaction first.
+
+**Then compose shots from locked assets.** Often a new setting per shot.
+`dhee_add_item(scenes_plan, {id:'scene_<n>_shot_<m>', …}, itemKey:'shots')`
+with a description that NAMES the locked ids and the composition you want
+("`the_captain` standing at the helm of `setting_storm_deck`, low angle,
+rain-lashed"). The shot's `references` resolve those ids to the locked
+images, so the shot is assembled from your refined building blocks rather
+than invented from scratch. Render the shot, judge, refine, repeat.
+
+Locked (user-authored) assets are pinned — an upstream change never
+silently regenerates them; only an explicit regenerate of that asset does.
 
 ## Resolution / aspect changes make rendered IMAGES stale
 

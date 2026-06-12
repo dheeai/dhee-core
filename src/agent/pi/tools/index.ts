@@ -14,8 +14,11 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 
+import { dheeAddItemTool, makeAddItemTool } from './dheeAddItem.js';
 import { dheeApplyWorkflowAliasesTool, makeApplyWorkflowAliasesTool } from './dheeApplyWorkflowAliases.js';
 import { dheeAskQuestionTool, makeAskQuestionTool } from './dheeAskQuestion.js';
+import { dheeListAssetsTool, makeListAssetsTool } from './dheeListAssets.js';
+import { dheeRemoveItemTool, makeRemoveItemTool } from './dheeRemoveItem.js';
 import { dheeCheckResolutionTool, makeCheckResolutionTool } from './dheeCheckResolution.js';
 import { dheeCheckWorkflowTool, makeCheckWorkflowTool } from './dheeCheckWorkflow.js';
 import { dheeCreateProjectTool, makeCreateProjectTool } from './dheeCreateProject.js';
@@ -63,6 +66,9 @@ export const DHEE_TOOL_NAMES = [
   'dhee_swap_runner',
   'dhee_write_input',
   'dhee_write_node_content',
+  'dhee_add_item',
+  'dhee_remove_item',
+  'dhee_list_assets',
   'dhee_set_project_field',
   'dhee_set_budget_cap',
   'dhee_read',
@@ -72,8 +78,11 @@ export const DHEE_TOOL_NAMES = [
 ] as const;
 
 export {
+  dheeAddItemTool,
   dheeApplyWorkflowAliasesTool,
   dheeAskQuestionTool,
+  dheeListAssetsTool,
+  dheeRemoveItemTool,
   dheeCheckResolutionTool,
   dheeCheckWorkflowTool,
   dheeCreateProjectTool,
@@ -100,8 +109,11 @@ export {
   dheeLsTool,
   dheeGrepTool,
   dheeFindTool,
+  makeAddItemTool,
   makeApplyWorkflowAliasesTool,
   makeAskQuestionTool,
+  makeListAssetsTool,
+  makeRemoveItemTool,
   makeCheckResolutionTool,
   makeCheckWorkflowTool,
   makeCreateProjectTool,
@@ -158,6 +170,9 @@ export function registerDheeTools(pi: ExtensionAPI): void {
   pi.registerTool(dheeSwapRunnerTool);
   pi.registerTool(dheeWriteInputTool);
   pi.registerTool(dheeWriteNodeContentTool);
+  pi.registerTool(dheeAddItemTool);
+  pi.registerTool(dheeRemoveItemTool);
+  pi.registerTool(dheeListAssetsTool);
   pi.registerTool(dheeSetProjectFieldTool);
   pi.registerTool(dheeSetBudgetCapTool);
   pi.registerTool(dheeReadTool);

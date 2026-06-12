@@ -32,6 +32,8 @@ import { cascadeInvalidationKeys, type CascadeTarget } from './cascadeInvalidati
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
 import { isWalkLocked } from './projectWalkLock.js';
+import { loadBundle } from './walker.js';
+import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
 import type {
   RunProjectViaBundleOpts,
   RunProjectViaBundleResult,
@@ -77,6 +79,8 @@ interface NodeEntry {
   outputPath?: string;
   itemId?: string;
   error?: string;
+  /** Who produced the current content; 'user' marks a hand-authored pin. */
+  generation?: { tool?: string; toolVersion?: string };
   [k: string]: unknown;
 }
 
@@ -97,6 +101,29 @@ function readProject(projectDir: string): { ok: true; project: ProjectJson; path
     return { ok: true, project, path };
   } catch (err) {
     return { ok: false, error: `project.json failed to parse: ${(err as Error).message}` };
+  }
+}
+
+/**
+ * Best-effort set of agentEditable node ids for the project's bundle.
+ * Used by the user-authored plan barrier. Returns an empty set when the
+ * bundle can't be resolved/loaded — i.e. no barrier (prior behavior).
+ */
+function loadAgentEditableIds(project: ProjectJson): Set<string> {
+  try {
+    const src = project['bundleSource'];
+    if (typeof src !== 'string') return new Set();
+    const bundleDir = resolveBundleDir(parseBundleSource(src));
+    let manifestPath = bundleDir;
+    try {
+      if (existsSync(join(bundleDir, 'bundle.json'))) manifestPath = join(bundleDir, 'bundle.json');
+    } catch {
+      /* fall through */
+    }
+    const bundle = loadBundle(manifestPath);
+    return new Set((bundle.nodes).filter((n) => n.agentEditable).map((n) => n.id));
+  } catch {
+    return new Set();
   }
 }
 
@@ -125,6 +152,10 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
   const walkState = ensureWalkState(project);
   const invalidated: string[] = [];
   const notFound: string[] = [];
+
+  // agentEditable node ids — used for the user-authored plan barrier
+  // below. Best-effort: a bundle we can't load just means no barrier.
+  const agentEditableIds = loadAgentEditableIds(project);
 
   // Cascade: for each requested target, walk the event-derived
   // dependency graph forward and collect every downstream consumer.
@@ -180,6 +211,21 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
       // silently rather than reporting notFound — they don't need
       // clearing. Only report notFound for keys the CALLER requested.
       if (opts.nodeIds.includes(key)) notFound.push(key);
+      continue;
+    }
+    // User-authored plan barrier (#147 Gap 2): a hand-authored,
+    // agentEditable PLAN node (built via dhee_add_item) is NEVER wiped by
+    // an UPSTREAM cascade — that would re-fire its llm.generate and erase
+    // the user's items. Only an explicit request for THIS exact node
+    // (dhee_regenerate_node, which puts it in opts.nodeIds) clears it.
+    // Scoped to agentEditable so the prior contract holds: a user-pinned
+    // SHOT still re-renders when its character changes upstream.
+    const bareNodeId = key.includes(':') ? (key.split(':')[0] ?? key) : key;
+    if (
+      !opts.nodeIds.includes(key) &&
+      agentEditableIds.has(bareNodeId) &&
+      walkState.nodes![key]?.generation?.tool === 'user'
+    ) {
       continue;
     }
     // Delete the on-disk artifact too — some runners (comfy.klein,

@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dhee production scroll navigator mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080604;
+    --bg-2: #100b07;
+    --panel: #160f0a;
+    --panel-2: #1d140d;
+    --card: #1a120c;
+    --line: #31261b;
+    --line-2: #4a3826;
+    --text: #eee5d8;
+    --muted: #ad9c86;
+    --faint: #675746;
+    --amber: #f2a62e;
+    --amber-2: #ffd37a;
+    --green: #7db77b;
+    --teal: #68c7b9;
+    --red: #d86a55;
+    --ink: #060403;
+    --sans: "IBM Plex Sans", sans-serif;
+    --mono: "IBM Plex Mono", monospace;
+    --serif: "Fraunces", Georgia, serif;
+    --top-h: 122px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+    background: var(--bg);
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+    color: var(--text);
+    background:
+      radial-gradient(900px 360px at 50% -80px, rgba(242, 166, 46, 0.12), transparent 62%),
+      linear-gradient(180deg, #0d0906 0, #080604 260px, #070504 100%);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: 0;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    opacity: 0.075;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='190' height='190'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.7' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.65'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+
+  button {
+    font: inherit;
+  }
+
+  .app-top {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    border-bottom: 1px solid var(--line);
+    background: rgba(12, 8, 5, 0.96);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+  }
+
+  .status-row {
+    height: 62px;
+    display: grid;
+    grid-template-columns: 262px minmax(300px, 1fr) 330px;
+    gap: 18px;
+    align-items: center;
+    padding: 0 20px;
+    border-bottom: 1px solid rgba(49, 38, 27, 0.78);
+  }
+
+  .brand-block {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .run-orb {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 2px solid rgba(242, 166, 46, 0.42);
+    box-shadow: inset 0 0 0 7px rgba(242, 166, 46, 0.08);
+  }
+
+  .run-orb::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 0 4px rgba(216, 106, 85, 0.14), 0 0 18px rgba(216, 106, 85, 0.55);
+  }
+
+  .brand-kicker {
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+  }
+
+  .current-task {
+    min-width: 0;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .current-task b {
+    color: var(--text);
+  }
+
+  .stage-readout {
+    min-width: 0;
+  }
+
+  .readout-head {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 10px;
+    align-items: baseline;
+    margin-bottom: 5px;
+  }
+
+  .readout-number {
+    color: var(--text);
+    font-family: var(--serif);
+    font-size: 29px;
+    line-height: 1;
+  }
+
+  .readout-total {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+  .readout-label {
+    min-width: 0;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  .bar > span {
+    display: block;
+    height: 100%;
+    width: var(--w, 40%);
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--teal), var(--amber));
+  }
+
+  .run-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .build-chip {
+    color: var(--amber-2);
+    border: 1px solid rgba(242, 166, 46, 0.36);
+    border-radius: 999px;
+    padding: 3px 10px;
+    background: rgba(242, 166, 46, 0.08);
+  }
+
+  .clock {
+    color: var(--text);
+    font-size: 16px;
+  }
+
+  .stop {
+    height: 32px;
+    border: 1px solid rgba(216, 106, 85, 0.6);
+    border-radius: 7px;
+    color: var(--text);
+    background: rgba(216, 106, 85, 0.24);
+    padding: 0 13px;
+    cursor: default;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .section-nav {
+    height: 60px;
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    padding: 8px 20px 9px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .section-nav::-webkit-scrollbar {
+    height: 5px;
+  }
+
+  .section-nav::-webkit-scrollbar-thumb {
+    background: var(--line-2);
+    border-radius: 99px;
+  }
+
+  .toc-pill {
+    position: relative;
+    min-width: 118px;
+    display: grid;
+    grid-template-columns: 8px 1fr;
+    gap: 8px;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 9px;
+    color: var(--muted);
+    background: #0e0a07;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .toc-pill:hover {
+    border-color: var(--line-2);
+    color: var(--text);
+  }
+
+  .toc-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--faint);
+  }
+
+  .toc-pill.done .toc-dot {
+    background: var(--green);
+  }
+
+  .toc-pill.running {
+    color: var(--text);
+    border-color: rgba(242, 166, 46, 0.72);
+    background: #1d1208;
+    box-shadow: 0 0 22px rgba(242, 166, 46, 0.1);
+  }
+
+  .toc-pill.running::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border: 1px solid rgba(242, 166, 46, 0.42);
+    border-radius: 10px;
+    animation: radiate 1.8s ease-out infinite;
+  }
+
+  @keyframes radiate {
+    0% { opacity: 0.8; transform: scale(0.98); }
+    78% { opacity: 0; transform: scale(1.1); }
+    100% { opacity: 0; transform: scale(1.1); }
+  }
+
+  .toc-pill.active:not(.running) {
+    border-color: rgba(104, 199, 185, 0.6);
+    color: var(--text);
+  }
+
+  .toc-pill.active:not(.running) .toc-dot {
+    background: var(--teal);
+  }
+
+  .toc-copy {
+    min-width: 0;
+  }
+
+  .toc-name {
+    color: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .toc-count {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    margin-top: 5px;
+    font-family: var(--mono);
+    white-space: nowrap;
+  }
+
+  .toc-count strong {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .toc-count span {
+    color: var(--faint);
+    font-size: 9px;
+    text-transform: uppercase;
+  }
+
+  .toc-pill.emphasis {
+    min-width: 152px;
+  }
+
+  .toc-pill.emphasis .toc-name {
+    font-size: 12px;
+  }
+
+  .toc-pill.emphasis .toc-count strong {
+    color: var(--amber-2);
+    font-size: 15px;
+  }
+
+  .latest-strip {
+    position: sticky;
+    top: var(--top-h);
+    z-index: 12;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: center;
+    padding: 10px 40px;
+    border-bottom: 1px solid rgba(49, 38, 27, 0.82);
+    background: rgba(18, 12, 7, 0.92);
+    backdrop-filter: blur(14px);
+  }
+
+  .latest-title {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 0 0 rgba(242, 166, 46, 0.6);
+    animation: pulse 1.8s infinite;
+  }
+
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(242, 166, 46, 0.55); }
+    70% { box-shadow: 0 0 0 8px rgba(242, 166, 46, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(242, 166, 46, 0); }
+  }
+
+  .latest-title b {
+    color: var(--text);
+  }
+
+  .jump {
+    height: 30px;
+    border: 1px solid rgba(242, 166, 46, 0.5);
+    border-radius: 7px;
+    color: var(--ink);
+    background: var(--amber);
+    padding: 0 12px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  .doc {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 34px 40px 90px;
+  }
+
+  .production-section {
+    scroll-margin-top: calc(var(--top-h) + 58px);
+    margin-bottom: 38px;
+  }
+
+  .section-head {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 16px;
+    align-items: baseline;
+    margin: 0 0 18px;
+  }
+
+  .section-no,
+  .section-format {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+
+  .section-head h2 {
+    margin: 0;
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    color: var(--text);
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 650;
+  }
+
+  .section-head h2::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    background: var(--line);
+    transform: translateY(-4px);
+  }
+
+  .count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    padding: 3px 9px;
+    color: var(--amber-2);
+    background: rgba(242, 166, 46, 0.08);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .prose-card,
+  .summary-card,
+  .shot-row,
+  .directive-row {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(22, 15, 10, 0.8);
+  }
+
+  .prose-card {
+    padding: 30px 34px;
+  }
+
+  .prose-card p {
+    margin: 0;
+    color: #dacdbc;
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.72;
+  }
+
+  .prose-card p + p {
+    margin-top: 18px;
+  }
+
+  .drop::first-letter {
+    float: left;
+    margin: 10px 9px 0 0;
+    color: var(--amber);
+    font-size: 58px;
+    line-height: 0.78;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .summary-card {
+    padding: 14px;
+  }
+
+  .summary-label {
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  .summary-value {
+    margin-top: 8px;
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .summary-card p {
+    margin: 7px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .json-summary {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .location-card {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    overflow: hidden;
+  }
+
+  .location-thumb {
+    min-height: 170px;
+    background:
+      linear-gradient(135deg, rgba(242, 166, 46, 0.18), transparent),
+      url("../../noir_detective_story_setup-3.kshana/assets/images/s1shot1_first_frame_klein_z3qPpH.png") center / cover;
+  }
+
+  .location-body {
+    padding: 17px 18px;
+  }
+
+  .location-body h3 {
+    margin: 0;
+    color: var(--text);
+    font-size: 18px;
+  }
+
+  .location-body p {
+    margin: 9px 0 0;
+    color: var(--muted);
+  }
+
+  .field-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin-top: 13px;
+  }
+
+  .field {
+    border: 1px solid rgba(49, 38, 27, 0.8);
+    border-radius: 7px;
+    padding: 8px 9px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .field b {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  details.raw {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #0b0705;
+    overflow: hidden;
+  }
+
+  details.raw summary {
+    padding: 10px 12px;
+    color: var(--faint);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  details.raw pre {
+    margin: 0;
+    padding: 12px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    background: #050403;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+
+  .scene-plan {
+    display: grid;
+    gap: 11px;
+  }
+
+  .scene-card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--card);
+    overflow: hidden;
+  }
+
+  .scene-card-head {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 13px 15px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .scene-tag {
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .scene-card h3 {
+    margin: 0;
+    color: var(--text);
+  }
+
+  .scene-meta {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .scene-card-body {
+    padding: 13px 15px;
+    color: var(--muted);
+  }
+
+  .mini-shots {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 13px;
+  }
+
+  .mini-shot {
+    border: 1px solid rgba(49, 38, 27, 0.82);
+    border-radius: 7px;
+    padding: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .mini-shot b {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .shot-list,
+  .directive-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .shot-row,
+  .directive-row {
+    display: grid;
+    grid-template-columns: 82px 1fr auto;
+    gap: 14px;
+    align-items: start;
+    padding: 13px 15px;
+  }
+
+  .shot-row.active,
+  .directive-row.active {
+    border-color: rgba(242, 166, 46, 0.76);
+    background: #1e1309;
+    box-shadow: 0 0 0 1px rgba(242, 166, 46, 0.12);
+  }
+
+  .row-index {
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .row-title {
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .row-copy {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .row-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .tag {
+    border: 1px solid rgba(49, 38, 27, 0.9);
+    border-radius: 999px;
+    padding: 3px 7px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .tag.hot {
+    color: var(--ink);
+    border-color: var(--amber);
+    background: var(--amber);
+  }
+
+  .inline-progress {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: center;
+    margin: 0 0 14px;
+    padding: 11px 12px;
+    border: 1px solid rgba(242, 166, 46, 0.3);
+    border-radius: 8px;
+    color: var(--muted);
+    background: rgba(242, 166, 46, 0.055);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .inline-progress strong {
+    color: var(--amber-2);
+  }
+
+  @media (max-width: 980px) {
+    :root { --top-h: 184px; }
+
+    .status-row {
+      height: auto;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .run-meta {
+      justify-content: space-between;
+    }
+
+    .section-nav {
+      height: 74px;
+      padding: 8px 12px;
+    }
+
+    .toc-pill {
+      min-width: 132px;
+    }
+
+    .latest-strip {
+      grid-template-columns: 1fr;
+      padding: 10px 12px;
+    }
+
+    .doc {
+      padding: 24px 12px 70px;
+    }
+
+    .section-head {
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+
+    .section-no {
+      grid-column: 1 / -1;
+    }
+
+    .summary-grid,
+    .field-grid,
+    .mini-shots {
+      grid-template-columns: 1fr;
+    }
+
+    .location-card {
+      grid-template-columns: 1fr;
+    }
+
+    .location-thumb {
+      min-height: 210px;
+    }
+
+    .shot-row,
+    .directive-row {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .row-tags {
+      justify-content: flex-start;
+    }
+  }
+</style>
+</head>
+<body>
+<header class="app-top">
+  <div class="status-row">
+    <div class="brand-block">
+      <div class="run-orb" aria-hidden="true"></div>
+      <div>
+        <div class="brand-kicker">Writing</div>
+        <div class="current-task">Shot Motion Directive: <b>Scene 1 Shot 3</b></div>
+      </div>
+    </div>
+
+    <div class="stage-readout">
+      <div class="readout-head">
+        <span class="readout-number">7</span>
+        <span class="readout-total">/20</span>
+        <span class="readout-label">Shot Motion Directives</span>
+      </div>
+      <div class="bar" aria-label="current stage progress"><span style="--w:35%"></span></div>
+    </div>
+
+    <div class="run-meta">
+      <span>35% stage</span>
+      <span>63% overall</span>
+      <span class="build-chip">18 to build</span>
+      <span class="clock">01:25</span>
+      <button class="stop">Stop</button>
+    </div>
+  </div>
+
+  <nav class="section-nav" aria-label="Production sections">
+    <button class="toc-pill done" data-target="story"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Story</span><span class="toc-count"><strong>1/1</strong><span>done</span></span></span></button>
+    <button class="toc-pill done" data-target="essence"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Essence</span><span class="toc-count"><strong>1/1</strong><span>done</span></span></span></button>
+    <button class="toc-pill done" data-target="world"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">World & Style</span><span class="toc-count"><strong>1/1</strong><span>done</span></span></span></button>
+    <button class="toc-pill done" data-target="cast"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Cast Breakdown</span><span class="toc-count"><strong>2/2</strong><span>done</span></span></span></button>
+    <button class="toc-pill done" data-target="location"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Location Breakdown</span><span class="toc-count"><strong>1/1</strong><span>done</span></span></span></button>
+    <button class="toc-pill done" data-target="scene"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Scene Breakdown</span><span class="toc-count"><strong>1/1</strong><span>done</span></span></span></button>
+    <button class="toc-pill done emphasis" data-target="shot-prompts"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Shot Prompts</span><span class="toc-count"><strong>20/20</strong><span>complete</span></span></span></button>
+    <button class="toc-pill running emphasis" data-target="motion"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Motion Directives</span><span class="toc-count"><strong>7/20</strong><span>running</span></span></span></button>
+    <button class="toc-pill" data-target="clips"><span class="toc-dot"></span><span class="toc-copy"><span class="toc-name">Clips</span><span class="toc-count"><strong>0/20</strong><span>queued</span></span></span></button>
+  </nav>
+</header>
+
+<div class="latest-strip">
+  <div class="latest-title">
+    <span class="pulse-dot" aria-hidden="true"></span>
+    <span>Latest added: <b>Motion Directive 7/20</b> - Scene 1 Shot 3 now has camera motion, subject action, and audio cue.</span>
+  </div>
+  <button class="jump" data-target="motion">Jump to output</button>
+</div>
+
+<main class="doc">
+  <section class="production-section" id="story" data-title="Story">
+    <div class="section-head">
+      <span class="section-no">No. 01</span>
+      <h2>Story <span class="count-badge">1/1</span></h2>
+      <span class="section-format">Prose</span>
+    </div>
+    <article class="prose-card">
+      <p class="drop">The scene opens on Alex and Jordan sitting across from each other at a small table, coffee cups steaming between them. Alex leans forward. The clock has blinked from 2:14 to 2:14 again, and the cafe keeps folding back on itself.</p>
+      <p>Jordan thinks Alex is overreacting until the barista repeats the same smile, the same red-shirt customer stirs the same coffee, and the clock resets with a tiny mechanical click.</p>
+    </article>
+  </section>
+
+  <section class="production-section" id="essence" data-title="Essence">
+    <div class="section-head">
+      <span class="section-no">No. 02</span>
+      <h2>Essence <span class="count-badge">1/1</span></h2>
+      <span class="section-format">Extracted</span>
+    </div>
+    <div class="summary-grid">
+      <article class="summary-card">
+        <div class="summary-label">Premise</div>
+        <div class="summary-value">Cafe time loop</div>
+        <p>Two people realize a casual coffee has become the reset trigger.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">Emotional Engine</div>
+        <div class="summary-value">Say it before reset</div>
+        <p>The time loop forces Alex and Jordan to stop delaying a confession.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">Visual Motif</div>
+        <div class="summary-value">Clock, cup, steam</div>
+        <p>Small repeated objects prove the impossible without exposition.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="production-section" id="world" data-title="World & Style">
+    <div class="section-head">
+      <span class="section-no">No. 03</span>
+      <h2>World & Style <span class="count-badge">1/1</span></h2>
+      <span class="section-format">Readable</span>
+    </div>
+    <div class="summary-grid">
+      <article class="summary-card">
+        <div class="summary-label">Look</div>
+        <div class="summary-value">Warm naturalism</div>
+        <p>Muted amber cafe light, tactile surfaces, shallow focus on hands and faces.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">Camera</div>
+        <div class="summary-value">Controlled close coverage</div>
+        <p>Static two-shots and slow push-ins make the loop feel intimate.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">Continuity</div>
+        <div class="summary-value">Objects must repeat</div>
+        <p>The clock, cups, steam, and red-shirt customer stay visually consistent.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="production-section" id="cast" data-title="Cast Breakdown">
+    <div class="section-head">
+      <span class="section-no">No. 04</span>
+      <h2>Cast Breakdown <span class="count-badge">2/2</span></h2>
+      <span class="section-format">Cards</span>
+    </div>
+    <div class="summary-grid">
+      <article class="summary-card">
+        <div class="summary-label">Alex</div>
+        <div class="summary-value">First to notice</div>
+        <p>Observant, restless, leaning forward, trying to make Jordan see the pattern before the reset.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">Jordan</div>
+        <div class="summary-value">Skeptical, then present</div>
+        <p>Starts amused, becomes unsettled when the clock proves Alex is right.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">Background marker</div>
+        <div class="summary-value">Barista and red shirt</div>
+        <p>The repeating gesture and coffee stir become visual proof of the loop.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="production-section" id="location" data-title="Location Breakdown">
+    <div class="section-head">
+      <span class="section-no">No. 05</span>
+      <h2>Location Breakdown <span class="count-badge">1/1</span></h2>
+      <span class="section-format">JSON hidden</span>
+    </div>
+    <div class="json-summary">
+      <article class="summary-card location-card">
+        <div class="location-thumb" role="img" aria-label="Warm indoor reference frame"></div>
+        <div class="location-body">
+          <h3>Independent coffee shop interior</h3>
+          <p>A compact cafe with mismatched bistro chairs, chalkboard menu, warm pendant fixtures, visible wall clock, and lived-in tactile surfaces. This replaces the raw settings JSON as the default end-user view.</p>
+          <div class="field-grid">
+            <div class="field"><b>Scale</b>Roughly twelve by fifteen feet</div>
+            <div class="field"><b>Lighting</b>Amber practicals, soft window light, steam haze</div>
+            <div class="field"><b>Key Props</b>Clock, coffee cups, barista counter</div>
+            <div class="field"><b>Continuity</b>Red-shirt customer and repeated stir motion</div>
+          </div>
+        </div>
+      </article>
+      <details class="raw">
+        <summary>Inspect JSON</summary>
+        <pre>{
+  "settings": [
+    {
+      "id": "coffee_shop_interior",
+      "name": "Independent Coffee Shop Interior",
+      "description": "A compact, intimate independent coffee shop interior spanning roughly twelve by fifteen feet...",
+      "props": ["retro digital clock", "porcelain mugs", "chalkboard menu"]
+    }
+  ]
+}</pre>
+      </details>
+    </div>
+  </section>
+
+  <section class="production-section" id="scene" data-title="Scene Breakdown">
+    <div class="section-head">
+      <span class="section-no">No. 06</span>
+      <h2>Scene Breakdown <span class="count-badge">1/1</span></h2>
+      <span class="section-format">Cards</span>
+    </div>
+    <div class="scene-plan">
+      <article class="scene-card">
+        <div class="scene-card-head">
+          <span class="scene-tag">Scene 1</span>
+          <h3>The Coffee Loop</h3>
+          <span class="scene-meta">20 shots planned</span>
+        </div>
+        <div class="scene-card-body">
+          Alex and Jordan realize they are trapped in a time loop. The scene uses object repetition before dialogue explains anything.
+          <div class="mini-shots">
+            <div class="mini-shot"><b>Shots 1-4</b>Establish cafe, table, clock, barista repeat.</div>
+            <div class="mini-shot"><b>Shots 5-12</b>Jordan confirms the loop and the coffee trigger.</div>
+            <div class="mini-shot"><b>Shots 13-20</b>Confession, cup refusal, cut to black.</div>
+          </div>
+        </div>
+      </article>
+      <details class="raw">
+        <summary>Inspect JSON</summary>
+        <pre>{
+  "scenes": [{ "id": "scene_1", "title": "The Coffee Loop", "mainSubject": "Alex and Jordan realize they are trapped in a time loop" }],
+  "shots": [{ "shotNumber": 1, "purpose": "set_the_world" }, { "shotNumber": 20, "purpose": "punctuate" }]
+}</pre>
+      </details>
+    </div>
+  </section>
+
+  <section class="production-section" id="shot-prompts" data-title="Shot Prompts">
+    <div class="section-head">
+      <span class="section-no">No. 07</span>
+      <h2>Shot Prompts <span class="count-badge">20/20 complete</span></h2>
+      <span class="section-format">Prompts</span>
+    </div>
+    <div class="inline-progress">
+      <span><strong>Shot Prompts 20/20</strong> are complete and clickable from the top bar. This count should never be hidden in tiny metadata.</span>
+      <span>100%</span>
+    </div>
+    <div class="shot-list">
+      <article class="shot-row">
+        <div class="row-index">Shot 01</div>
+        <div>
+          <div class="row-title">Wide cafe establishing frame</div>
+          <div class="row-copy">A warm independent cafe with Alex and Jordan seated across from each other, wall clock visible, red-shirt customer in background.</div>
+        </div>
+        <div class="row-tags"><span class="tag hot">first frame</span><span class="tag">2 refs</span></div>
+      </article>
+      <article class="shot-row">
+        <div class="row-index">Shot 02</div>
+        <div>
+          <div class="row-title">Alex notices repeated motion</div>
+          <div class="row-copy">Medium close-up of Alex pointing subtly toward the counter while Jordan remains skeptical.</div>
+        </div>
+        <div class="row-tags"><span class="tag">character</span><span class="tag">setting</span></div>
+      </article>
+      <article class="shot-row">
+        <div class="row-index">Shot 03</div>
+        <div>
+          <div class="row-title">Jordan checks the clock</div>
+          <div class="row-copy">Reaction close-up with clock softened in the background, the cup held but not lifted.</div>
+        </div>
+        <div class="row-tags"><span class="tag">reaction</span><span class="tag">clock</span></div>
+      </article>
+      <article class="shot-row">
+        <div class="row-index">...</div>
+        <div>
+          <div class="row-title">17 more prompts completed</div>
+          <div class="row-copy">Collapsed here for the mockup. In the app this stays as the long scrollable production document.</div>
+        </div>
+        <div class="row-tags"><span class="tag hot">20/20</span></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="production-section" id="motion" data-title="Motion Directives">
+    <div class="section-head">
+      <span class="section-no">No. 08</span>
+      <h2>Motion Directives <span class="count-badge">7/20 running</span></h2>
+      <span class="section-format">Active</span>
+    </div>
+    <div class="inline-progress">
+      <span><strong>Motion Directives 7/20</strong> is the current section. The top pill radiates and clicking it lands exactly here.</span>
+      <span>35%</span>
+    </div>
+    <div class="directive-list">
+      <article class="directive-row">
+        <div class="row-index">Motion 01</div>
+        <div>
+          <div class="row-title">Slow establishing drift</div>
+          <div class="row-copy">Camera drifts from the clock to the table while cafe ambience remains steady.</div>
+        </div>
+        <div class="row-tags"><span class="tag hot">done</span><span class="tag">6s</span></div>
+      </article>
+      <article class="directive-row">
+        <div class="row-index">Motion 02</div>
+        <div>
+          <div class="row-title">Alex leans forward</div>
+          <div class="row-copy">Subtle push-in as Alex lowers their voice and points toward the counter.</div>
+        </div>
+        <div class="row-tags"><span class="tag hot">done</span><span class="tag">7s</span></div>
+      </article>
+      <article class="directive-row active">
+        <div class="row-index">Motion 07</div>
+        <div>
+          <div class="row-title">Jordan sees the reset</div>
+          <div class="row-copy">Jordan's expression shifts from amused to unsettled. Steam curls between them. The clock ticks, blinks back to 2:14, and the cup remains untouched.</div>
+        </div>
+        <div class="row-tags"><span class="tag hot">running</span><span class="tag">8s</span><span class="tag">audio cue</span></div>
+      </article>
+      <article class="directive-row">
+        <div class="row-index">Motion 08</div>
+        <div>
+          <div class="row-title">Queued next</div>
+          <div class="row-copy">Confession beat waits for the next directive generation.</div>
+        </div>
+        <div class="row-tags"><span class="tag">queued</span></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="production-section" id="clips" data-title="Clips">
+    <div class="section-head">
+      <span class="section-no">No. 09</span>
+      <h2>Clips <span class="count-badge">0/20 queued</span></h2>
+      <span class="section-format">Next</span>
+    </div>
+    <div class="summary-grid">
+      <article class="summary-card">
+        <div class="summary-label">Next stage</div>
+        <div class="summary-value">Clip generation</div>
+        <p>When this starts, the Clips pill becomes active and clicking it lands here in the same long document.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">Expected count</div>
+        <div class="summary-value">20 clips</div>
+        <p>Each completed motion directive enables one clip render.</p>
+      </article>
+      <article class="summary-card">
+        <div class="summary-label">User signal</div>
+        <div class="summary-value">Latest strip updates</div>
+        <p>The latest generated clip can be jumped to without abandoning the document model.</p>
+      </article>
+    </div>
+  </section>
+</main>
+
+<script>
+  const buttons = [...document.querySelectorAll("[data-target]")];
+  const pills = [...document.querySelectorAll(".toc-pill")];
+  const sections = [...document.querySelectorAll(".production-section")];
+
+  function scrollToTarget(id) {
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => scrollToTarget(button.dataset.target));
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    const visible = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!visible) return;
+    const id = visible.target.id;
+    pills.forEach((pill) => pill.classList.toggle("active", pill.dataset.target === id));
+  }, {
+    rootMargin: "-190px 0px -56% 0px",
+    threshold: [0.08, 0.18, 0.32]
+  });
+
+  sections.forEach((section) => observer.observe(section));
+</script>
+</body>
+</html>
