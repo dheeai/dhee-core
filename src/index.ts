@@ -30,6 +30,12 @@ export {
 } from './server/posthog.js';
 export { loadDevEnv } from './server/loadDevEnv.js';
 export type { LoadDevEnvResult } from './server/loadDevEnv.js';
+export {
+  getOversight,
+  setPiOversight,
+  setVLMJudge,
+  type OversightState,
+} from './server/oversightState.js';
 
 // Per-call LLM usage telemetry (issue #102). Local JSONL sink + summary,
 // plus a cloud-billed-only PostHog forwarder the desktop opts into for

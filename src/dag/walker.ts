@@ -20,6 +20,10 @@ import {
   resolveCharacterReferenceBinding,
   writeCharacterReferenceBindingOutput,
 } from './projectCharacterReferences.js';
+import {
+  resolveSettingReferenceBinding,
+  writeSettingReferenceBindingOutput,
+} from './projectSettingReferences.js';
 import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
 import { withLocalResource, type LocalResourceSnapshot } from './localResourceState.js';
@@ -79,6 +83,10 @@ export type { BundleSource } from './bundleSource.js';
 export type { DagBundle, NodeDef, NodeInput, NodeOutput } from './schema.js';
 export { invalidateNodes, regenerateNode } from './projectRegen.js';
 export { writeNodeContent } from './writeNodeContent.js';
+export {
+  resolveSettingReferenceBinding,
+  writeSettingReferenceBindingOutput,
+} from './projectSettingReferences.js';
 export type { WriteNodeContentInput, WriteNodeContentResult } from './writeNodeContent.js';
 export type {
   InvalidateNodesOpts,
@@ -179,6 +187,22 @@ export interface WalkerOptions {
   bundleDir?: string;
   /** Cooperative cancellation signal — threaded into every runner ctx. */
   signal?: AbortSignal;
+  /** Optional live progress hooks for UI/background-run subscribers. */
+  onTool?: (info: { toolName: string; nodeId?: string }) => void;
+  onResult?: (info: {
+    toolName: string;
+    filePath?: string;
+    status?: string;
+    error?: string;
+    nodeId?: string;
+  }) => void;
+  onNotification?: (info: { level: 'info' | 'warn' | 'error'; message: string }) => void;
+  onAsset?: (info: {
+    kind: 'image' | 'video';
+    filePath: string;
+    toolName?: string;
+    nodeId?: string;
+  }) => void;
   /**
    * Optional projection engine for the event-sourced log. When set,
    * the walker emits node.started/completed/failed events alongside
@@ -242,6 +266,15 @@ interface NodeInstance {
   outputRel?: string;
   /** Runner metadata. */
   metadata?: Record<string, unknown>;
+}
+
+function assetKindForOutput(outputPath: string | undefined, format: string): 'image' | 'video' | null {
+  if (format === 'image') return 'image';
+  if (format === 'video') return 'video';
+  if (!outputPath) return null;
+  if (/\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(outputPath)) return 'image';
+  if (/\.(mp4|webm|mov|m4v)$/i.test(outputPath)) return 'video';
+  return null;
 }
 
 /**
@@ -1488,6 +1521,15 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
               characterId: inst.itemId,
             })
           : null;
+      const settingReferenceBinding =
+        node.id === 'setting_image' &&
+        inst.itemId &&
+        typeof cfgOutputPath === 'string'
+          ? resolveSettingReferenceBinding({
+              projectDir: opts.projectDir,
+              settingId: inst.itemId,
+            })
+          : null;
 
       // Resolve ctx.inputs from upstream completed nodes. For each
       // declared input, read the upstream's output file (markdown →
@@ -1658,6 +1700,10 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       }
 
       log(`→ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} via ${effectiveTool}${effectiveTool !== node.runner.tool ? ` (swapped from ${node.runner.tool})` : ''}`);
+      opts.onTool?.({
+        toolName: effectiveTool,
+        nodeId: stateKey,
+      });
 
       // Non-destructive overwrite: if a canonical artifact already
       // sits at the runner's outputPath, rename it to a versioned
@@ -1715,6 +1761,15 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           outputPath: cfgOutputPath,
           binding: characterReferenceBinding,
         });
+      } else if (settingReferenceBinding && typeof cfgOutputPath === 'string') {
+        log(
+          `  setting reference: ${settingReferenceBinding.sourceRel} → ${inst.itemId} (${settingReferenceBinding.strategy})`,
+        );
+        result = writeSettingReferenceBindingOutput({
+          projectDir: opts.projectDir,
+          outputPath: cfgOutputPath,
+          binding: settingReferenceBinding,
+        });
       } else {
         try {
           const localResource = classifyLocalResource(effectiveTool, runtimeNode, inst);
@@ -1730,6 +1785,13 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
 
       if (!result.ok) {
         log(`✗ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''}: ${result.error}`);
+        opts.onResult?.({
+          toolName: effectiveTool,
+          nodeId: stateKey,
+          status: 'error',
+          ...(typeof cfgOutputPath === 'string' ? { filePath: cfgOutputPath } : {}),
+          ...(result.error ? { error: result.error } : {}),
+        });
         inst.status = 'failed';
         if (state) {
           state.nodes[stateKey] = { status: 'failed', error: result.error };
@@ -1753,6 +1815,21 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       inst.status = 'completed';
       inst.outputRel = result.outputPath;
       inst.outputAbs = resolve(opts.projectDir, result.outputPath);
+      opts.onResult?.({
+        toolName: effectiveTool,
+        nodeId: stateKey,
+        filePath: result.outputPath,
+        status: 'completed',
+      });
+      const assetKind = assetKindForOutput(result.outputPath, node.outputs.format);
+      if (assetKind) {
+        opts.onAsset?.({
+          kind: assetKind,
+          filePath: result.outputPath,
+          toolName: effectiveTool,
+          nodeId: stateKey,
+        });
+      }
       if (result.metadata !== undefined) inst.metadata = result.metadata;
       if (state) {
         state.nodes[stateKey] = {

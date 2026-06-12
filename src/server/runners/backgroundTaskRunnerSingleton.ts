@@ -53,7 +53,10 @@ async function executeRunTo(
     projectDir,
     ...(params.stage ? { stopAt: params.stage } : {}),
     signal: ctx.signal,
-    log: (m) => ctx.hooks.onNotification({ level: 'info', message: m }),
+    onTool: ctx.hooks.onTool,
+    onResult: ctx.hooks.onResult,
+    onNotification: (info) => ctx.hooks.onNotification(info),
+    onAsset: ctx.hooks.onAsset,
   });
   if (!result.ok) throw new Error(result.error ?? 'bundle run failed');
   if (result.gatedAfter) {
