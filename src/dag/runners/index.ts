@@ -18,6 +18,7 @@ import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
+import { continuityVariantsRunner } from './continuityVariants.js';
 import {
   RunnerRegistry,
   getGlobalRegistry,
@@ -170,6 +171,18 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Sends an image to a vision-language model for pass/fail review. On fail, stamps pendingCritiques[refineNode:itemId] so the walker’s review-loop wrapper invalidates the upstream prompt-LLM and re-walks with the critique applied. Verdict JSON is written to outputPath. VLM endpoint resolved from runner config or VLM_PROVIDER/VLM_API_KEY/VLM_MODEL env. Pair with bundle-level reviewLoopMax to bound retry budget per dispatch.',
     },
     runner: vlmJudgeRunner,
+  },
+  {
+    manifest: {
+      tool: 'continuity.state_variants',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Continuity State Variants',
+      description:
+        'Deterministically enumerates the distinct character appearance variants from the continuity ledger that each need a minted reference image (props/posture excluded), enriched with character name + base description. Feeds the variant-minting collection.',
+    },
+    runner: continuityVariantsRunner,
   },
 ];
 

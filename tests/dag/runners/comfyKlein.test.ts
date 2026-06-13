@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { createComfyKleinRunner } from '../../../src/dag/runners/comfyKlein.js';
+import { refKeyForCharacterAtShot } from '../../../src/dag/runners/characterState.js';
 import type { ComfyImageClient } from '../../../src/dag/runners/comfyExecutor.js';
 import { writeAliases } from '../../../src/dag/workflowAliases.js';
 import type { RunnerContext, NodeDef } from '../../../src/dag/schema.js';
@@ -239,5 +240,88 @@ describe('comfy.klein — guards & aliases', () => {
       else process.env['DHEE_WORKFLOW_ALIASES_DIR'] = saved;
       rmSync(aliasesDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('comfy.klein — state-aware character reference resolution', () => {
+  it('uses the state-variant reference when the character has diverged at this shot', async () => {
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyKleinRunner({ clientFactory: () => makeStubClient(stub) });
+    const miraBase = join(projectDir, 'mira.png');
+    const miraVariant = join(projectDir, 'mira_v.png');
+    writeFileSync(miraBase, Buffer.from('mb'));
+    writeFileSync(miraVariant, Buffer.from('mv'));
+    // Mira diverges (muddy) exactly at this shot (scene_1_shot_1).
+    const ledger = {
+      characters: [{ id: 'mira', events: [{ atShot: 'scene_1_shot_1', facets: { condition: 'soaked, muddy' } }] }],
+    };
+    const refKey = refKeyForCharacterAtShot(ledger, 'scene_1_shot_1', 'mira');
+    expect(refKey).not.toBe('base');
+
+    const result = await runner.run(
+      makeCtx(
+        { ...baseConfig(), prompt: undefined },
+        {
+          shot_image_prompt: { imagePrompt: 'mira on the ledge', references: [{ id: 'mira', type: 'character' }] },
+          character_image: { mira: miraBase },
+          character_state_image: { [`mira__${refKey}`]: miraVariant },
+          continuity_plan: ledger,
+        },
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    // base_image (node 76) is the VARIANT, not the clean portrait.
+    expect(stub.queued[0]!['76']!.inputs['image']).toBe('up_mira_v.png');
+  });
+
+  it('falls back to the base portrait when the character is in base state at this shot (counter-test)', async () => {
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyKleinRunner({ clientFactory: () => makeStubClient(stub) });
+    const miraBase = join(projectDir, 'mira.png');
+    const miraVariant = join(projectDir, 'mira_v.png');
+    writeFileSync(miraBase, Buffer.from('mb'));
+    writeFileSync(miraVariant, Buffer.from('mv'));
+    // The change is anchored in the FUTURE (scene_2) → base at scene_1_shot_1.
+    const ledger = {
+      characters: [{ id: 'mira', events: [{ atShot: 'scene_2_shot_1', facets: { condition: 'soaked' } }] }],
+    };
+    const futureKey = refKeyForCharacterAtShot(ledger, 'scene_2_shot_1', 'mira');
+
+    const result = await runner.run(
+      makeCtx(
+        { ...baseConfig(), prompt: undefined },
+        {
+          shot_image_prompt: { imagePrompt: 'mira at dawn', references: [{ id: 'mira', type: 'character' }] },
+          character_image: { mira: miraBase },
+          // The variant image EXISTS, but must not be used at a base-state shot.
+          character_state_image: { [`mira__${futureKey}`]: miraVariant },
+          continuity_plan: ledger,
+        },
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(stub.queued[0]!['76']!.inputs['image']).toBe('up_mira.png');
+  });
+
+  it('without continuity inputs, resolves to the base portrait (backward compatible)', async () => {
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyKleinRunner({ clientFactory: () => makeStubClient(stub) });
+    const miraBase = join(projectDir, 'mira.png');
+    writeFileSync(miraBase, Buffer.from('mb'));
+
+    const result = await runner.run(
+      makeCtx(
+        { ...baseConfig(), prompt: undefined },
+        {
+          shot_image_prompt: { imagePrompt: 'mira', references: [{ id: 'mira', type: 'character' }] },
+          character_image: { mira: miraBase },
+        },
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(stub.queued[0]!['76']!.inputs['image']).toBe('up_mira.png');
   });
 });

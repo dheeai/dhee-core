@@ -47,3 +47,8 @@ Output ONLY the JSON.
 
 <<<DHEE_CACHE_BREAKPOINT>>>
 This call is for shot id: {{item_id}} — find it in the shots array above and write the first-frame prompt for ONLY that shot.
+
+Character continuity state at THIS shot (folded from the continuity plan — this is AUTHORITATIVE for the character's current appearance and OVERRIDES the neutral look in the cast breakdown above):
+{{character_state}}
+
+If a character listed here has a non-base `outfit` / `condition` / `hair` / `posture` / `props`, your imagePrompt MUST reflect that CURRENT state — e.g. the torn mud-streaked jacket, the soaked hair, the bleeding arm, the lit torch in hand — not their clean introduction look. The reference image still anchors their identity (face, build), so describe the changed state in the prompt text. If the list is empty, use the cast breakdown defaults as-is.

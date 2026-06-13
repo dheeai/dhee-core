@@ -20,6 +20,7 @@
  */
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { extractShotReferences } from './extractShotReferences.js';
+import { refKeyForCharacterAtShot } from './characterState.js';
 import {
   executeComfyWorkflow,
   defaultComfyClientFactory,
@@ -120,11 +121,27 @@ function resolveReferences(
         if (!prompt) prompt = p.imagePrompt;
         if (!imageInputs['base_image'] && Array.isArray(p.references) && p.references.length > 0) {
           const charMap = (ctx.inputs['character_image'] as Record<string, string> | undefined) ?? {};
+          const variantMap = (ctx.inputs['character_state_image'] as Record<string, string> | undefined) ?? {};
           const setMap = (ctx.inputs['setting_image'] as Record<string, string> | undefined) ?? {};
+          const ledger = ctx.inputs['continuity_plan'];
+          // Prefer a state-variant reference matching the character's folded
+          // appearance at THIS shot (muddy/wet/bandaged Mira), falling back to
+          // the base portrait. Absent continuity inputs → always base, so
+          // bundles without the continuity layer behave exactly as before.
+          const resolveCharacter = (id: string): string | undefined => {
+            if (ledger !== undefined && ctx.itemId) {
+              const refKey = refKeyForCharacterAtShot(ledger, ctx.itemId, id);
+              if (refKey !== 'base') {
+                const variant = variantMap[`${id}__${refKey}`];
+                if (variant) return variant;
+              }
+            }
+            return charMap[id];
+          };
           const refPaths: string[] = [];
           for (const ref of p.references) {
             const path =
-              ref.type === 'character' ? charMap[ref.id] : ref.type === 'setting' ? setMap[ref.id] : undefined;
+              ref.type === 'character' ? resolveCharacter(ref.id) : ref.type === 'setting' ? setMap[ref.id] : undefined;
             if (path) refPaths.push(path);
           }
           if (refPaths.length > 0) {

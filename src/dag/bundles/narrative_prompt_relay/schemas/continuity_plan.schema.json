@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "required": ["characters"],
+  "properties": {
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "events"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["atShot", "facets"],
+              "properties": {
+                "atShot": { "type": "string", "pattern": "^scene_[0-9]+_shot_[0-9]+$" },
+                "facets": {
+                  "type": "object",
+                  "properties": {
+                    "outfit": { "type": "string" },
+                    "condition": { "type": "string" },
+                    "hair": { "type": "string" },
+                    "posture": { "type": "string" },
+                    "props": { "type": "array", "items": { "type": "string" } }
+                  }
+                },
+                "note": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
