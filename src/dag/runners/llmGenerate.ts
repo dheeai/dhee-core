@@ -47,6 +47,7 @@ import {
   type MotionContextDependency,
   type MotionContextShotPlanShot,
 } from './shotMotionContext.js';
+import { buildCharacterStateContext } from './characterState.js';
 
 // Pull the actual constructor from whichever export shape ajv ships.
 type AjvInstance = { compile: (schema: unknown) => (data: unknown) => boolean; errors?: Array<{ instancePath?: string; message?: string }> | null };
@@ -106,13 +107,15 @@ export interface LlmGenerateConfig {
 
 export interface LlmGenerateDerivedInput {
   id: string;
-  kind: 'shot_motion_context';
-  /** ctx.inputs key containing { shots: [...] }. Default: scenes_plan. */
+  kind: 'shot_motion_context' | 'character_state';
+  /** ctx.inputs key containing { shots: [...] }. Default: scenes_plan. (shot_motion_context) */
   shotsInput?: string;
-  /** Project-relative pattern for per-shot image prompt JSON. */
+  /** Project-relative pattern for per-shot image prompt JSON. (shot_motion_context) */
   imagePromptPattern?: string;
-  /** Project-relative pattern for per-shot motion directive JSON. */
+  /** Project-relative pattern for per-shot motion directive JSON. (shot_motion_context) */
   motionDirectivePattern?: string;
+  /** ctx.inputs key holding the continuity ledger object. Default: continuity_plan. (character_state) */
+  continuityInput?: string;
 }
 
 // ── DI: client factory ─────────────────────────────────────────────────
@@ -309,25 +312,40 @@ function applyDerivedInputs(
     if (!derived.id || typeof derived.id !== 'string') {
       return { ok: false, error: 'llm.generate: derivedInputs entries require a string id' };
     }
-    if (derived.kind !== 'shot_motion_context') {
-      return { ok: false, error: `llm.generate: unsupported derived input kind '${String(derived.kind)}'` };
+    if (derived.kind === 'shot_motion_context') {
+      const shotsInput = derived.shotsInput ?? 'scenes_plan';
+      const plan = recordFromUnknown(vars[shotsInput]);
+      const rawShots = plan?.['shots'];
+      const shots = Array.isArray(rawShots)
+        ? (rawShots as MotionContextShotPlanShot[])
+        : [];
+      const built = buildShotMotionContext({
+        projectDir: ctx.projectDir,
+        ...(ctx.itemId !== undefined ? { itemId: ctx.itemId } : {}),
+        shots,
+        imagePromptPattern: derived.imagePromptPattern ?? 'prompts/shot_image/{{item_id}}.json',
+        motionDirectivePattern: derived.motionDirectivePattern ?? 'prompts/motion/{{item_id}}.json',
+      });
+      vars[derived.id] = built.context;
+      additionalDependencies.push(...built.additionalDependencies);
+      continue;
     }
 
-    const shotsInput = derived.shotsInput ?? 'scenes_plan';
-    const plan = recordFromUnknown(vars[shotsInput]);
-    const rawShots = plan?.['shots'];
-    const shots = Array.isArray(rawShots)
-      ? (rawShots as MotionContextShotPlanShot[])
-      : [];
-    const built = buildShotMotionContext({
-      projectDir: ctx.projectDir,
-      ...(ctx.itemId !== undefined ? { itemId: ctx.itemId } : {}),
-      shots,
-      imagePromptPattern: derived.imagePromptPattern ?? 'prompts/shot_image/{{item_id}}.json',
-      motionDirectivePattern: derived.motionDirectivePattern ?? 'prompts/motion/{{item_id}}.json',
-    });
-    vars[derived.id] = built.context;
-    additionalDependencies.push(...built.additionalDependencies);
+    if (derived.kind === 'character_state') {
+      const continuityInput = derived.continuityInput ?? 'continuity_plan';
+      const built = buildCharacterStateContext({
+        ledger: vars[continuityInput],
+        ...(ctx.itemId !== undefined ? { itemId: ctx.itemId } : {}),
+      });
+      vars[derived.id] = built.context;
+      additionalDependencies.push(...built.additionalDependencies);
+      continue;
+    }
+
+    return {
+      ok: false,
+      error: `llm.generate: unsupported derived input kind '${String((derived as { kind?: unknown }).kind)}'`,
+    };
   }
   return { ok: true, additionalDependencies };
 }

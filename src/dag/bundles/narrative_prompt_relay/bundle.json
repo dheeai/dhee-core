@@ -428,6 +428,44 @@
       "displayCapability": "scene.plan"
     },
     {
+      "id": "continuity_plan",
+      "displayName": "Continuity",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "scenes_plan",
+          "usage": "input"
+        },
+        {
+          "from": "characters_plan",
+          "usage": "context"
+        },
+        {
+          "from": "story_essence",
+          "usage": "context"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/continuity_plan.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/continuity_plan.md",
+          "outputSchema": "schemas/continuity_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json",
+          "maxTokens": 16000
+        }
+      },
+      "displayCapability": "continuity.plan"
+    },
+    {
       "id": "shot_image_prompt",
       "displayName": "Shot Prompts",
       "kind": "collection",
@@ -449,6 +487,10 @@
         {
           "from": "settings_plan",
           "usage": "context"
+        },
+        {
+          "from": "continuity_plan",
+          "usage": "context"
         }
       ],
       "outputs": {
@@ -460,6 +502,13 @@
         "config": {
           "promptTemplate": "prompts/shot_image_prompt.md",
           "outputSchema": "schemas/shot_image_prompt.schema.json",
+          "derivedInputs": [
+            {
+              "id": "character_state",
+              "kind": "character_state",
+              "continuityInput": "continuity_plan"
+            }
+          ],
           "tier": "heavy",
           "outputFormat": "json"
         }
