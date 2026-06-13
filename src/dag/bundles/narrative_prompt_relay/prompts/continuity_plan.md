@@ -41,7 +41,7 @@ character must be DRAWN, and that PERSIST across subsequent shots:
   - outfit: a wardrobe change (changes clothes, puts on/removes a coat,
     dons armor, gets a uniform).
   - condition: a gross physical change to the BODY or CLOTHING that
-    lingers — wet, soaked, muddy, silt-streaked, dust-covered, bloodied,
+    lingers — wet, soaked, muddy, dust-covered, grime-streaked, bloodied,
     a visible wound or bandage, torn clothing, singed, aged after a time
     skip. `condition` describes how they LOOK, never what they are DOING
     or WHERE they stand — NEVER put posture, location, or action words in
@@ -87,14 +87,14 @@ RULES:
     characters who keep their base look for the whole film.
   - Order each character's events by shot.
 
-Example (illustrative — a diver who falls into water then gets hurt):
+Example (illustrative only — invent generic ids/states; do NOT copy these):
 {
   "characters": [
     {
-      "id": "mira",
+      "id": "character_a",
       "events": [
-        { "atShot": "scene_2_shot_3", "facets": { "condition": "soaked, dripping", "hair": "wet, plastered to her face", "props": ["waterproof torch"] }, "note": "dives into the flooded shaft" },
-        { "atShot": "scene_4_shot_1", "facets": { "condition": "soaked, with a bleeding gash on her right forearm" }, "note": "cuts herself on rebar" }
+        { "atShot": "scene_2_shot_4", "facets": { "condition": "uniform caked in mud", "hair": "matted with dirt" }, "note": "crawls through the trench" },
+        { "atShot": "scene_6_shot_2", "facets": { "outfit": "torn, bloodstained uniform", "condition": "a field dressing taped over the left shoulder" }, "note": "wounded, then patched up" }
       ]
     }
   ]
