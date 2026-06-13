@@ -40,9 +40,13 @@ WHAT COUNTS AS A STATE CHANGE — record ONLY things that change how the
 character must be DRAWN, and that PERSIST across subsequent shots:
   - outfit: a wardrobe change (changes clothes, puts on/removes a coat,
     dons armor, gets a uniform).
-  - condition: a gross physical change to their body/appearance that
-    lingers — wet, soaked, muddy, dust-covered, bloodied, a visible
-    wound or bandage, singed, aged/older after a time skip.
+  - condition: a gross physical change to the BODY or CLOTHING that
+    lingers — wet, soaked, muddy, silt-streaked, dust-covered, bloodied,
+    a visible wound or bandage, torn clothing, singed, aged after a time
+    skip. `condition` describes how they LOOK, never what they are DOING
+    or WHERE they stand — NEVER put posture, location, or action words in
+    it ("standing at the edge", "kneeling", "walking into the dark" are
+    posture, NOT condition; leave them out or put them in `posture`).
   - hair: only when it materially changes (gets wet and plastered down,
     is tied up, is cut, comes loose) — not every shot.
   - posture: only a PERSISTENT posture that carries across shots (now
@@ -69,8 +73,16 @@ RULES:
     change, list the ENTIRE current set. Picks up a map while already
     holding a torch → ["lit torch", "map"]. Later drops the torch →
     ["map"].
-  - The character's introduction is their base state — do NOT emit an
-    event for it. A character's first event is their first CHANGE.
+  - DO NOT emit an event for a character's first / introductory
+    appearance, or for any moment they simply look like their default
+    selves. The cast description above ALREADY captures their starting
+    look (clean, dry, dressed as introduced). A character's FIRST event
+    must be their FIRST real change AWAY from that intro look — the first
+    time they get wet, dirty, bloodied, hurt, or change clothes. If the
+    script introduces someone "at the cave mouth, dry, holding her gear",
+    that is the BASE — emit NOTHING for it. NEVER emit an event whose only
+    change is to clean / dry / neutral / default; that is the base, and
+    minting a reference for it just duplicates the intro portrait.
   - Include ONLY characters who visibly change at some point. Omit
     characters who keep their base look for the whole film.
   - Order each character's events by shot.

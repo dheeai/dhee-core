@@ -13,7 +13,8 @@
       "comfy.klein": ">=0.1.0",
       "comfy.tti": ">=0.1.0",
       "comfy.ltx_director": ">=0.1.0",
-      "ffmpeg.concat": ">=0.1.0"
+      "ffmpeg.concat": ">=0.1.0",
+      "continuity.state_variants": ">=0.1.0"
     }
   },
   "inputs": [
@@ -466,6 +467,96 @@
       "displayCapability": "continuity.plan"
     },
     {
+      "id": "character_state_variants",
+      "displayName": "Variant Plan",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "continuity_plan",
+          "usage": "input"
+        },
+        {
+          "from": "characters_plan",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/state_variants.json"
+      },
+      "runner": {
+        "tool": "continuity.state_variants",
+        "config": {}
+      },
+      "displayCapability": "continuity.variants"
+    },
+    {
+      "id": "character_state_image_prompt",
+      "displayName": "Variant Prompts",
+      "kind": "collection",
+      "itemSource": "character_state_variants",
+      "inputs": [
+        {
+          "from": "character_state_variants",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "world_style",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/character_state_images/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/character_state_image.md",
+          "outputSchema": "schemas/shot_image_prompt.schema.json",
+          "tier": "medium",
+          "outputFormat": "json"
+        }
+      },
+      "itemKey": "variants",
+      "displayCapability": "character.state_prompt",
+      "headlineField": "imagePrompt"
+    },
+    {
+      "id": "character_state_image",
+      "displayName": "Character Variants",
+      "kind": "collection",
+      "itemSource": "character_state_image_prompt",
+      "inputs": [
+        {
+          "from": "character_state_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "character_image",
+          "usage": "reference",
+          "scope": "all"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/characters/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.klein",
+        "config": {
+          "workflowPath": "workflows/klein.json",
+          "manifestPath": "workflows/klein.manifest.json",
+          "endpoint": "public.cloud",
+          "width": 1024,
+          "height": 1024
+        }
+      },
+      "displayCapability": "character.state_image"
+    },
+    {
       "id": "shot_image_prompt",
       "displayName": "Shot Prompts",
       "kind": "collection",
@@ -537,6 +628,15 @@
           "from": "setting_image",
           "usage": "reference",
           "scope": "all"
+        },
+        {
+          "from": "character_state_image",
+          "usage": "reference",
+          "scope": "all"
+        },
+        {
+          "from": "continuity_plan",
+          "usage": "context"
         }
       ],
       "outputs": {

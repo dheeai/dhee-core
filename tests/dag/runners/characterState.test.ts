@@ -22,6 +22,9 @@ import { join } from 'node:path';
 import {
   stateAtShot,
   computeStateKey,
+  computeRefKey,
+  enumerateStateVariants,
+  refKeyForCharacterAtShot,
   compareShotIds,
   normalizeLedger,
   buildCharacterStateContext,
@@ -255,6 +258,109 @@ describe('characterState projection', () => {
       expect(buildCharacterStateContext({ ledger: undefined, itemId: 'scene_1_shot_1' }).context.characters).toEqual([]);
       expect(buildCharacterStateContext({ ledger: { junk: 1 }, itemId: 'scene_1_shot_1' }).context.characters).toEqual([]);
     });
+  });
+});
+
+// ── Phase 2 foundation: reference-variant keying + enumeration ───────────
+
+describe('computeRefKey — appearance-only key for reference minting', () => {
+  it('ignores props and posture (a held torch / a pose must NOT mint a new portrait)', () => {
+    const appearanceOnly = computeRefKey({ outfit: 'red coat', condition: 'wet' });
+    const withTransient = computeRefKey({
+      outfit: 'red coat',
+      condition: 'wet',
+      posture: 'seated',
+      props: ['lit torch', 'map'],
+    });
+    expect(withTransient).toBe(appearanceOnly);
+  });
+
+  it('still distinguishes outfit / condition / hair changes', () => {
+    expect(computeRefKey({ condition: 'wet' })).not.toBe(computeRefKey({ condition: 'bloodied' }));
+    expect(computeRefKey({ outfit: 'parka' })).not.toBe(computeRefKey({ outfit: 'tank top' }));
+    expect(computeRefKey({ hair: 'wet' })).not.toBe(computeRefKey({ hair: 'tied up' }));
+  });
+
+  it('is "base" when only props/posture are set (no appearance divergence)', () => {
+    expect(computeRefKey({ props: ['lit torch'] })).toBe('base');
+    expect(computeRefKey({ posture: 'seated' })).toBe('base');
+    expect(computeRefKey({})).toBe('base');
+  });
+});
+
+describe('enumerateStateVariants — distinct references to mint', () => {
+  it('emits one variant per distinct appearance, deduped, with base excluded', () => {
+    const variants = enumerateStateVariants(LEDGER);
+    const laraVariants = variants.filter((v) => v.charId === 'lara_croft');
+    const guideVariants = variants.filter((v) => v.charId === 'guide');
+
+    // lara diverges twice in APPEARANCE: (torn tank + wet) then (torn tank + bleeding).
+    expect(laraVariants).toHaveLength(2);
+    // guide: one outfit change.
+    expect(guideVariants).toHaveLength(1);
+
+    // No base, and item ids namespaced under the character.
+    expect(variants.every((v) => v.refKey !== 'base')).toBe(true);
+    expect(laraVariants.every((v) => v.id.startsWith('lara_croft__'))).toBe(true);
+    expect(laraVariants.every((v) => v.id.endsWith(v.refKey))).toBe(true);
+
+    // The bleeding variant carries the outfit forward from the earlier event...
+    const bleeding = laraVariants.find((v) => v.facets.condition?.includes('bleeding'));
+    expect(bleeding?.facets.outfit).toBe('torn, mud-streaked tank');
+    // ...and appearance facets never carry props/posture.
+    expect(laraVariants.every((v) => !('props' in v.facets) && !('posture' in v.facets))).toBe(true);
+  });
+
+  it('dedupes events that change only props/posture into a single appearance variant', () => {
+    const ledger = {
+      characters: [
+        {
+          id: 'p',
+          events: [
+            { atShot: 'scene_1_shot_1', facets: { outfit: 'coat', props: ['a'] } },
+            { atShot: 'scene_1_shot_3', facets: { props: ['a', 'b'] } },
+            { atShot: 'scene_1_shot_5', facets: { posture: 'kneeling' } },
+          ],
+        },
+      ],
+    };
+    // Appearance (outfit "coat") never changes after shot_1 → ONE variant.
+    expect(enumerateStateVariants(ledger).filter((v) => v.charId === 'p')).toHaveLength(1);
+  });
+
+  it('emits nothing for a character whose only changes are props/posture', () => {
+    const ledger = {
+      characters: [{ id: 'q', events: [{ atShot: 'scene_1_shot_1', facets: { props: ['x'] } }] }],
+    };
+    expect(enumerateStateVariants(ledger)).toEqual([]);
+  });
+
+  it('accepts a raw (unnormalized) ledger object', () => {
+    const variants = enumerateStateVariants({
+      characters: [{ id: 'z', events: [{ atShot: 'scene_1_shot_2', facets: { outfit: 'cloak' } }] }],
+    });
+    expect(variants).toHaveLength(1);
+    expect(variants[0]?.facets.outfit).toBe('cloak');
+  });
+});
+
+describe('refKeyForCharacterAtShot', () => {
+  it('is "base" before the character diverges, the appearance key after', () => {
+    expect(refKeyForCharacterAtShot(LEDGER, 'scene_1_shot_1', 'lara_croft')).toBe('base');
+    const k = refKeyForCharacterAtShot(LEDGER, 'scene_2_shot_4', 'lara_croft');
+    expect(k).not.toBe('base');
+    expect(k).toBe(computeRefKey({ outfit: 'torn, mud-streaked tank', condition: 'wet' }));
+  });
+
+  it('ignores props when keying (the lit torch must not change the reference)', () => {
+    // lara holds a "lit torch" at scene_2_shot_4, but the ref key is appearance-only.
+    expect(refKeyForCharacterAtShot(LEDGER, 'scene_2_shot_4', 'lara_croft')).toBe(
+      computeRefKey({ outfit: 'torn, mud-streaked tank', condition: 'wet' }),
+    );
+  });
+
+  it('is "base" for a character absent from the ledger', () => {
+    expect(refKeyForCharacterAtShot(LEDGER, 'scene_3_shot_1', 'nobody')).toBe('base');
   });
 });
 

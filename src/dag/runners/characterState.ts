@@ -83,6 +83,17 @@ export interface CharacterStateContext {
   characters: CharacterStateAtShot[];
 }
 
+/** A distinct character APPEARANCE that warrants its own minted reference image. */
+export interface StateVariant {
+  /** Collection item id: `${charId}__${refKey}`. */
+  id: string;
+  charId: string;
+  /** Appearance-only key (see computeRefKey). Never "base". */
+  refKey: string;
+  /** The appearance facets that define this variant (outfit / condition / hair only). */
+  facets: { outfit?: string; condition?: string; hair?: string };
+}
+
 /** Derived-input dependency edge (structurally compatible with the walker's edge shape). */
 export interface CharacterStateDependency {
   nodeId: string;
@@ -239,6 +250,31 @@ export function computeStateKey(facets: CharacterStateFacets): string {
   return `${slug}__${hash8}`;
 }
 
+/** The appearance subset a reference image should depict — outfit / condition
+ * / hair. Excludes props (a character sets them down) and posture (per-shot). */
+function pickAppearance(facets: CharacterStateFacets): {
+  outfit?: string;
+  condition?: string;
+  hair?: string;
+} {
+  const out: { outfit?: string; condition?: string; hair?: string } = {};
+  if (typeof facets.outfit === 'string') out.outfit = facets.outfit;
+  if (typeof facets.condition === 'string') out.condition = facets.condition;
+  if (typeof facets.hair === 'string') out.hair = facets.hair;
+  return out;
+}
+
+/**
+ * Key for the reference IMAGE a character needs in a given state — derived
+ * ONLY from persistent appearance (outfit / condition / hair). Held props and
+ * posture are deliberately excluded: they're per-shot (the character picks a
+ * torch up and sets it down; posture is framing), so they belong in the shot
+ * prompt, not in a minted portrait. "base" when appearance matches the intro.
+ */
+export function computeRefKey(facets: CharacterStateFacets): string {
+  return computeStateKey(pickAppearance(facets));
+}
+
 // ── Projection ─────────────────────────────────────────────────────────────
 
 /** Fold every character in the ledger to its current state at `shotId`. */
@@ -255,6 +291,20 @@ export function stateAtShot(ledger: ContinuityLedger, shotId: string): Character
     return entry;
   });
   return { itemId: shotId, characters };
+}
+
+/**
+ * The reference-image key for ONE character at a given shot: fold that
+ * character's ledger events up to the shot, then reduce to the appearance
+ * key. "base" when the character hasn't visually diverged (or isn't in the
+ * ledger at all). The shot renderer uses this to pick a state-variant
+ * reference (`${charId}__${refKey}`) over the base portrait.
+ */
+export function refKeyForCharacterAtShot(ledgerInput: unknown, shotId: string, charId: string): string {
+  const ledger = normalizeLedger(ledgerInput);
+  const char = ledger.characters.find((c) => c.id === charId);
+  if (!char) return 'base';
+  return computeRefKey(foldFacets(char.events, shotId).facets);
 }
 
 export interface BuildCharacterStateContextOptions {
@@ -292,4 +342,29 @@ export function buildCharacterStateContext(
     context: { itemId: opts.itemId, characters: diverged },
     additionalDependencies: [],
   };
+}
+
+/**
+ * The distinct reference variants to mint for a production. For each
+ * character, fold the ledger at every event anchor, collect the distinct
+ * non-base APPEARANCE states (deduped by refKey), and return one StateVariant
+ * each. Events that change only props/posture collapse to no new variant, so
+ * the number of minted references is bounded by appearance changes — not by
+ * shot count or every event.
+ */
+export function enumerateStateVariants(ledgerInput: unknown): StateVariant[] {
+  const ledger = normalizeLedger(ledgerInput);
+  const variants: StateVariant[] = [];
+  for (const c of ledger.characters) {
+    const anchors = c.events.map((e) => e.atShot).sort((a, b) => compareShotIds(a, b));
+    const seen = new Set<string>();
+    for (const anchor of anchors) {
+      const { facets } = foldFacets(c.events, anchor);
+      const refKey = computeRefKey(facets);
+      if (refKey === 'base' || seen.has(refKey)) continue;
+      seen.add(refKey);
+      variants.push({ id: `${c.id}__${refKey}`, charId: c.id, refKey, facets: pickAppearance(facets) });
+    }
+  }
+  return variants;
 }
