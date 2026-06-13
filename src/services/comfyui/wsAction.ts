@@ -25,6 +25,7 @@ export interface ComfyWsMessage {
       images?: Array<{ filename?: string; subfolder?: string; type?: string }>;
       gifs?: Array<{ filename?: string; subfolder?: string; type?: string }>;
       videos?: Array<{ filename?: string; subfolder?: string; type?: string }>;
+      audio?: Array<{ filename?: string; subfolder?: string; type?: string }>;
     };
     value?: number;
     max?: number;
@@ -87,7 +88,9 @@ export function decideWsAction(msg: ComfyWsMessage, ourPromptId: string): WsActi
       return { kind: 'ignore_foreign_output', eventPromptId: eventPromptId! };
     }
     const items: CapturedOutputItem[] = [];
-    for (const key of ['images', 'gifs', 'videos'] as const) {
+    // 'audio' covers SaveAudio / VibeVoice-style TTS nodes — without it,
+    // an audio-only workflow surfaces zero outputs over the WS path.
+    for (const key of ['images', 'gifs', 'videos', 'audio'] as const) {
       const list = data.output[key];
       if (Array.isArray(list)) {
         for (const item of list) {

@@ -21,9 +21,11 @@
  */
 import 'dotenv/config';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join, basename, resolve } from 'node:path';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
+import { ffprobeBin } from './ffmpegBin.js';
 import { retryTransient } from './transientRetry.js';
 import { resolveRelayInputs } from '../projectResolvers.js';
 import { REPO_ROOT } from '../../agent/pi/paths.js';
@@ -72,6 +74,51 @@ export interface LtxDirectorConfig {
    * backwards-compatibility with bundles authored before this field.
    */
   endpoint?: string;
+  /**
+   * OPT-IN audio-driven mode. Name of the resolved input (e.g. 'segment_audio')
+   * holding the per-item audio file path. When set AND a matching audio path is
+   * present in ctx.inputs, the runner:
+   *   - uploads the audio to Comfy's input dir,
+   *   - builds a timeline_data.audioSegments entry + sets use_custom_audio=true,
+   *   - repoints CreateVideo.audio to the LTXDirector combined_audio output (slot 6).
+   * Absent → unchanged legacy behavior (generated audio, use_custom_audio=false).
+   */
+  audioInput?: string;
+  /**
+   * OPT-IN model-chain lora override. Rebuilds the lora chain
+   * (base model → lora1 → … → loraN → LTXDirector.model) from this list.
+   * Absent → the workflow's baked-in loras are left untouched.
+   * Independent of audio: set per node (e.g. character-dialogue nodes use
+   * talking-head + dual-character + id loras; narration nodes may set none).
+   */
+  loras?: Array<{ name: string; strength?: number }>;
+  /**
+   * OPT-IN lip-sync prompt augmentation. When true, appends explicit
+   * facial-synchronization phrasing to each segment's prompt (and mirrors it
+   * into timeline_data segments[].prompt). Pairs with audioInput + the
+   * talking-head lora. Absent → prompts unchanged.
+   */
+  lipSync?: boolean;
+  /**
+   * OPT-IN single-still mode. Name of the resolved input (e.g. 'segment_image')
+   * holding THIS item's still-image path. When set AND no scenes_plan is
+   * available, the runner animates that one still into a single clip — sized to
+   * the narration audio (audioInput) when present, else `duration` (default 5s).
+   * For non-narrative bundles (infographics, slideshows) with no scenes_plan.
+   * The motion prompt comes from `globalPrompt`.
+   */
+  imageInput?: string;
+  /** Fallback clip length (seconds) for single-still mode when no audio sizes it. Default 5. */
+  duration?: number;
+  /** Single-still mode: name of an upstream input holding a PER-ITEM motion
+   *  directive (string). When set, it becomes the segment's motion prompt
+   *  (with `globalPrompt` appended as a shared style suffix), so each scene
+   *  animates differently. Absent → `globalPrompt` alone. */
+  promptInput?: string;
+  /** LTX guide_strength (0..1). Lower = looser adherence to the still = MORE
+   *  motion; higher (1.0) = clings to the still = minimal motion. Default 1.0.
+   *  For lively cartoon motion, ~0.5–0.7. */
+  guideStrength?: number;
 }
 
 /**
@@ -116,6 +163,45 @@ export function reformatDialogue(audio: string): string {
     out = out.replace(r.full, `${name} says: "${r.line.trim()}".`);
   }
   return out;
+}
+
+/** Appended to a segment prompt when cfg.lipSync is set — the phrasing
+ *  (from the working LTX Director example) that actually drives mouth motion. */
+export const LIP_SYNC_SUFFIX =
+  ' Their lips, jaws, cheeks, and subtle facial muscles move naturally in perfect synchronization with the spoken audio dialogue; they blink realistically with subtle head movements and gentle micro-expressions.';
+
+type LtxWfNodes = Record<string, { inputs: Record<string, unknown>; class_type: string }>;
+
+/**
+ * Rebuild the model→lora chain from a lora list. Walks back from
+ * LTXDirector(46).model through any LoraLoaderModelOnly nodes to the base
+ * (non-lora) model source, removes those lora nodes, then re-creates one
+ * LoraLoaderModelOnly per configured lora: base → lora0 → … → loraN →
+ * 46.model. An empty list points 46.model straight at the base (no loras).
+ * Exported for testing.
+ */
+export function rebuildLoraChain(wf: LtxWfNodes, loras: Array<{ name: string; strength?: number }>): void {
+  const director = wf['46'];
+  if (!director) return;
+  let ref = director.inputs['model'] as [string, number] | undefined;
+  const oldLoraIds: string[] = [];
+  while (Array.isArray(ref) && wf[ref[0]] && wf[ref[0]]!.class_type === 'LoraLoaderModelOnly') {
+    oldLoraIds.push(ref[0]);
+    ref = wf[ref[0]]!.inputs['model'] as [string, number] | undefined;
+  }
+  const baseRef = ref;
+  if (!baseRef) return;
+  for (const id of oldLoraIds) delete wf[id];
+  let prev: [string, number] = baseRef;
+  loras.forEach((l, i) => {
+    const id = `ltxlora_${i}`;
+    wf[id] = {
+      class_type: 'LoraLoaderModelOnly',
+      inputs: { lora_name: l.name, strength_model: l.strength ?? 0.8, model: prev },
+    };
+    prev = [id, 0];
+  });
+  director.inputs['model'] = prev;
 }
 
 export function buildLocalPrompt(s: ShotInput): string {
@@ -164,6 +250,26 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Duration (seconds) of an audio/video file, via ffprobe — content-based, so
+ * it works for FLAC/WAV/mp4 regardless of file extension (Qwen3-TTS emits FLAC
+ * even when the artifact is named .wav). Returns null if ffprobe is unavailable
+ * or the file is unreadable; the caller then falls back to a config duration.
+ */
+function mediaDurationSeconds(path: string): number | null {
+  try {
+    const out = execFileSync(
+      ffprobeBin(),
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', path],
+      { encoding: 'utf-8' },
+    ).trim();
+    const d = parseFloat(out);
+    return Number.isFinite(d) && d > 0 ? d : null;
+  } catch {
+    return null;
+  }
 }
 
 function asStringMap(value: unknown): Record<string, string> | undefined {
@@ -246,6 +352,54 @@ export function resolveLtxDirectorConfigFromInputs(
         firstFrames: cfg.firstFrames,
         globalPrompt: cfg.globalPrompt,
         outputPath: cfg.outputPath,
+      },
+    };
+  }
+
+  // Single-still mode: one image (+ optional audio) → one clip. For bundles
+  // with no scenes_plan (e.g. infographics, slideshows). Sized to the narration
+  // audio when audioInput resolves, else cfg.duration (default 5s).
+  if (cfg.imageInput) {
+    const imgVal = ctx.inputs[cfg.imageInput];
+    const imagePath = typeof imgVal === 'string' ? imgVal : undefined;
+    if (!imagePath || !existsSync(imagePath)) {
+      return {
+        ok: false,
+        error: `comfy.ltx_director: imageInput '${cfg.imageInput}' resolved no image path (got ${JSON.stringify(imgVal)})`,
+      };
+    }
+    const fps = cfg.fps ?? 24;
+    let duration = cfg.duration ?? 5;
+    if (cfg.audioInput) {
+      const aVal = ctx.inputs[cfg.audioInput];
+      const aPath = typeof aVal === 'string' ? aVal : undefined;
+      if (aPath && existsSync(aPath)) {
+        const d = mediaDurationSeconds(aPath);
+        if (d && d > 0) {
+          // Cap so totalFrames stays under the LTX 1000-frame audio-latent ceiling.
+          const maxSec = Math.floor((1000 - 16) / fps);
+          duration = Math.min(Math.max(d, 2), maxSec);
+        }
+      }
+    }
+    // Per-item motion directive (if wired) + globalPrompt as a shared style suffix.
+    const motionVal = cfg.promptInput ? ctx.inputs[cfg.promptInput] : undefined;
+    const motionPrompt = typeof motionVal === 'string' && motionVal.trim().length > 0 ? motionVal.trim() : undefined;
+    const prompt =
+      [motionPrompt, cfg.globalPrompt].filter(Boolean).join(' ') ||
+      'Subtle, elegant motion: a slow cinematic push-in with gentle parallax and a soft light shimmer; the composition stays crisp and readable.';
+    const deps: ResolvedLtxDirectorConfig['dependencies'] = [{ nodeId: cfg.imageInput, role: 'input' }];
+    if (motionPrompt && cfg.promptInput) deps.push({ nodeId: cfg.promptInput, role: 'input' });
+    return {
+      ok: true,
+      cfg: {
+        ...cfg,
+        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        shots: [{ shotNumber: 1, duration, description: prompt }],
+        firstFrames: [imagePath],
+        globalPrompt: prompt,
+        outputPath: cfg.outputPath,
+        dependencies: deps,
       },
     };
   }
@@ -459,13 +613,47 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     uploadedNames.push(u.name);
   }
 
+  // ── OPT-IN custom audio (audio-driven / lip-sync). Absent → legacy path. ──
+  const audioSegments: unknown[] = [];
+  let useCustomAudio = false;
+  if (cfg.audioInput) {
+    const audioVal = ctx.inputs[cfg.audioInput];
+    const audioPath = typeof audioVal === 'string' ? audioVal : undefined;
+    if (audioPath && existsSync(audioPath)) {
+      const ua = await retryTransient(() => client.uploadImage(audioPath, 'input', true), {
+        signal: ctx.signal,
+        log: ctx.log,
+        label: 'comfy.ltx_director upload audio',
+      });
+      ctx.log(`comfy.ltx_director: custom audio ${basename(audioPath)} → ${ua.name} (use_custom_audio=true)`);
+      audioSegments.push({
+        id: 'seg_audio_0',
+        type: 'audio',
+        start: 0,
+        length: totalFrames,
+        trimStart: 0,
+        audioDurationFrames: totalFrames,
+        audioFile: ua.name,
+        fileName: basename(audioPath),
+        waveformPeaks: [],
+      });
+      useCustomAudio = true;
+    } else {
+      ctx.log(
+        `comfy.ltx_director: audioInput '${cfg.audioInput}' set but no audio path resolved — using generated audio`,
+      );
+    }
+  }
+
   const timelineData = {
     segments: cfg.shots.map((_, i) => ({
       type: 'image',
       imageFile: uploadedNames[i]!,
       start: segmentStarts[i]!,
+      // lip-sync: carry the (augmented) prompt INSIDE the segment too.
+      ...(cfg.lipSync ? { prompt: localPrompts[i]! + LIP_SYNC_SUFFIX } : {}),
     })),
-    audioSegments: [] as unknown[],
+    audioSegments,
   };
 
   const baseWorkflow = JSON.parse(readFileSync(cfg.workflowPath, 'utf-8')) as Record<
@@ -504,16 +692,35 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   director.inputs['duration_frames'] = totalFrames;
   director.inputs['duration_seconds'] = totalFrames / fps;
   director.inputs['timeline_data'] = JSON.stringify(timelineData);
-  director.inputs['local_prompts'] = localPrompts.join(' | ');
+  director.inputs['local_prompts'] = (cfg.lipSync ? localPrompts.map((p) => p + LIP_SYNC_SUFFIX) : localPrompts).join(' | ');
   director.inputs['segment_lengths'] = segmentFrames.join(', ');
   director.inputs['frame_rate'] = fps;
   director.inputs['epsilon'] = 0.001;
-  director.inputs['guide_strength'] = cfg.shots.map(() => '1.0').join(', ');
-  director.inputs['use_custom_audio'] = false;
+  const guideStrength = typeof cfg.guideStrength === 'number' ? cfg.guideStrength : 1.0;
+  director.inputs['guide_strength'] = cfg.shots.map(() => String(guideStrength)).join(', ');
+  director.inputs['use_custom_audio'] = useCustomAudio;
   director.inputs['custom_width'] = width;
   director.inputs['custom_height'] = height;
   director.inputs['divisible_by'] = 32;
   director.inputs['img_compression'] = 18;
+
+  // ── OPT-IN lora chain override (independent of audio). Absent → untouched. ──
+  if (cfg.loras && cfg.loras.length > 0) {
+    rebuildLoraChain(workflow as LtxWfNodes, cfg.loras);
+    ctx.log(
+      `comfy.ltx_director: loras → ${cfg.loras.map((l) => `${l.name}@${l.strength ?? 0.8}`).join(', ')}`,
+    );
+  }
+
+  // ── Custom audio: mux the LTXDirector combined_audio output (slot 6) into
+  // the video, replacing the generated-audio decode path. ONLY when custom
+  // audio is active — the relay/narrative bundles keep their node-16 wiring. ──
+  if (useCustomAudio) {
+    const createVideo = workflow['17'];
+    if (createVideo && createVideo.class_type === 'CreateVideo') {
+      createVideo.inputs['audio'] = ['46', 6];
+    }
+  }
 
   const negativeNode = workflow['90'];
   if (negativeNode && negativeNode.class_type === 'CLIPTextEncode') {
@@ -632,6 +839,11 @@ function describe(): RunnerDescription {
         shotRange: { type: 'array', items: { type: 'number' } },
         chunkIndex: { type: 'number' },
         chunkCount: { type: 'number' },
+        audioInput: { type: 'string', description: 'Input id holding this item\'s audio path (audio-driven mode)' },
+        imageInput: { type: 'string', description: 'Input id holding this item\'s still-image path (single-still mode, no scenes_plan)' },
+        duration: { type: 'number', description: 'Fallback clip length (s) for single-still mode when no audio sizes it' },
+        promptInput: { type: 'string', description: 'Single-still mode: input id holding a per-item motion directive (string); globalPrompt is appended as a style suffix' },
+        guideStrength: { type: 'number', description: 'LTX guide_strength 0..1. Lower = more motion (looser to the still). Default 1.0; ~0.5-0.7 for lively motion' },
         outputPath: { type: 'string', description: 'Output video path relative to project dir' },
       },
     },

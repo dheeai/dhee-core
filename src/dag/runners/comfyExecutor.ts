@@ -462,8 +462,12 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
   }
 
   // ── Download first media output ──
+  // Audio extensions (wav/mp3/flac/ogg/m4a) let audio-producing workflows
+  // (TTS, music) round-trip through this shared executor too.
   const imageOut =
-    queueResult.outputs.find((o) => /\.(png|jpg|jpeg|webp|mp4|webm|mov)$/i.test(o.filename)) ?? queueResult.outputs[0]!;
+    queueResult.outputs.find((o) =>
+      /\.(png|jpg|jpeg|webp|mp4|webm|mov|wav|mp3|flac|ogg|m4a)$/i.test(o.filename),
+    ) ?? queueResult.outputs[0]!;
   try {
     await retryTransient(() => client.downloadOutput(imageOut.filename, imageOut.subfolder, outAbs), {
       signal: ctx.signal,

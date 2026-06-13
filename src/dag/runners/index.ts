@@ -15,6 +15,7 @@ import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
+import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
 import {
@@ -145,6 +146,18 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Synthesizes a 10s MP4 clip for one shot from a shot_breakdown entry. Stand-in for the real LTX video runner — produces real binary artifacts (animated colored boxes; no text overlay) so end-to-end tests flow real videos through events + CAS + branches without needing GPU.',
     },
     runner: ffmpegShotClipRunner,
+  },
+  {
+    manifest: {
+      tool: 'ffmpeg.kenburns',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'ffmpeg Ken Burns',
+      description:
+        'Animates one still image with a subtle Ken Burns zoom/pan and muxes narration audio, sized to that audio. Keeps text-heavy stills (infographics, slides) pixel-sharp — unlike generative video.',
+    },
+    runner: ffmpegKenBurnsRunner,
   },
   {
     manifest: {

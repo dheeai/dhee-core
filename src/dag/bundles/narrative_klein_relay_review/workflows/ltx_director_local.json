@@ -30,7 +30,7 @@
         1
       ],
       "negative": [
-        "90",
+        "26",
         0
       ]
     },
@@ -164,11 +164,11 @@
   "14": {
     "inputs": {
       "positive": [
-        "8",
+        "58",
         0
       ],
       "negative": [
-        "8",
+        "58",
         1
       ],
       "latent": [
@@ -182,26 +182,19 @@
     }
   },
   "15": {
+    "class_type": "VAEDecode",
     "inputs": {
-      "spatial_tiles": 4,
-      "spatial_overlap": 1,
-      "temporal_tile_length": 16,
-      "temporal_overlap": 1,
-      "last_frame_fix": false,
-      "working_device": "auto",
-      "working_dtype": "auto",
+      "samples": [
+        "14",
+        2
+      ],
       "vae": [
         "3",
         0
-      ],
-      "latents": [
-        "14",
-        2
       ]
     },
-    "class_type": "LTXVSpatioTemporalTiledVAEDecode",
     "_meta": {
-      "title": "LTXV Spatio Temporal Tiled VAE Decode"
+      "title": "VAE Decode (video) - ported from LTX Director Fixed V2"
     }
   },
   "16": {
@@ -512,20 +505,6 @@
       "title": "Load Diffusion Model (LTX 2.3 22B distilled, transformer-only fp8 scaled)"
     }
   },
-  "80": {
-    "inputs": {
-      "lora_name": "ltx2.3-transition.safetensors",
-      "strength_model": 1.0,
-      "model": [
-        "77",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoRA: LTX 2.3 Transition (strength 1.0)"
-    }
-  },
   "84": {
     "inputs": {
       "clip_name1": "gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors",
@@ -543,26 +522,13 @@
       "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
       "strength_model": 0.8,
       "model": [
-        "80",
+        "77",
         0
       ]
     },
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "LoRA: OmniNFT-RL (strength 0.8)"
-    }
-  },
-  "90": {
-    "inputs": {
-      "text": "",
-      "clip": [
-        "84",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "Negative Prompt"
     }
   }
 }

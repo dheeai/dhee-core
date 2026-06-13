@@ -36,6 +36,55 @@ interface FfmpegConcatConfig {
   inputs: string[];
   /** Output path relative to project dir. */
   outputPath: string;
+  /** Transition between clips: 'none' (hard cut, concat demuxer) or an xfade
+   *  transition name ('fade', 'fadeblack', 'dissolve', 'wipeleft', …). Default 'none'. */
+  transition?: string;
+  /** Crossfade duration in seconds (xfade + acrossfade). Default 0.5. */
+  transitionDuration?: number;
+}
+
+function probeDurationSec(inputPath: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffprobeBin(), [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', inputPath,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    proc.stdout?.on('data', (d) => { out += d.toString(); });
+    proc.on('close', () => { const n = parseFloat(out.trim()); resolve(Number.isFinite(n) && n > 0 ? n : null); });
+    proc.on('error', () => resolve(null));
+  });
+}
+
+/**
+ * Build an xfade (video) + acrossfade (audio) filtergraph that chains N clips
+ * with a crossfade of `d` seconds at each junction. Returns the filter_complex
+ * plus the final video/audio labels. `durations[i]` is clip i's length (s).
+ *
+ * xfade offset for the k-th junction = (merged length so far) − d
+ *   = sum(dur[0..k-1]) − k*d   (prefix sum minus k overlaps).
+ */
+export function buildXfadeGraph(durations: number[], transition: string, d: number): { filter: string; vLabel: string; aLabel: string } {
+  const n = durations.length;
+  const parts: string[] = [];
+  // Normalize each clip's timebase so xfade is happy.
+  for (let i = 0; i < n; i++) {
+    parts.push(`[${i}:v]settb=AVTB,format=yuv420p[v${i}]`);
+    parts.push(`[${i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`);
+  }
+  let prevV = `v0`;
+  let prevA = `a0`;
+  let prefix = durations[0]!;
+  for (let k = 1; k < n; k++) {
+    const offset = Math.max(0, prefix - k * d);
+    const vOut = k === n - 1 ? 'vout' : `vx${k}`;
+    const aOut = k === n - 1 ? 'aout' : `ax${k}`;
+    parts.push(`[${prevV}][v${k}]xfade=transition=${transition}:duration=${d}:offset=${offset.toFixed(3)}[${vOut}]`);
+    parts.push(`[${prevA}][a${k}]acrossfade=d=${d}[${aOut}]`);
+    prevV = vOut; prevA = aOut;
+    prefix += durations[k]!;
+  }
+  return { filter: parts.join(';'), vLabel: n === 1 ? 'v0' : 'vout', aLabel: n === 1 ? 'a0' : 'aout' };
 }
 
 function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
@@ -168,6 +217,41 @@ async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
     return { ok: true, outputPath: cfg.outputPath, metadata: { mode: 'reencode', inputCount: 1, watermarked: true } };
   }
 
+  // ── N-input WITH crossfade transitions: xfade+acrossfade → temp → watermark ──
+  const transition = (cfg.transition ?? 'none').trim();
+  if (transition !== 'none') {
+    const d = cfg.transitionDuration && cfg.transitionDuration > 0 ? cfg.transitionDuration : 0.5;
+    const durations: number[] = [];
+    for (const p of cfg.inputs) {
+      const dur = await probeDurationSec(p);
+      if (dur == null) return { ok: false, error: `ffmpeg.concat: could not probe duration of ${p} (needed for '${transition}' transitions)` };
+      durations.push(dur);
+    }
+    const { filter, vLabel, aLabel } = buildXfadeGraph(durations, transition, d);
+    const xfadeTarget = needsReencode ? `${outputAbs}.xfade.tmp.mp4` : outputAbs;
+    const inputArgs = cfg.inputs.flatMap((p) => ['-i', p]);
+    ctx.log(`ffmpeg.concat: ${transition} crossfade (${d}s) across ${cfg.inputs.length} clips → ${needsReencode ? '<temp>' : cfg.outputPath}`);
+    const xf = await runFFmpeg([
+      '-y', ...inputArgs,
+      '-filter_complex', filter,
+      '-map', `[${vLabel}]`, '-map', `[${aLabel}]`,
+      '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+      xfadeTarget,
+    ]);
+    if (!xf.ok) {
+      try { if (existsSync(xfadeTarget)) unlinkSync(xfadeTarget); } catch { /* ignore */ }
+      return { ok: false, error: `ffmpeg.concat: xfade pass failed — ${xf.stderr.slice(-600)}` };
+    }
+    if (!needsReencode) {
+      return { ok: true, outputPath: cfg.outputPath, metadata: { mode: `xfade:${transition}`, inputCount: cfg.inputs.length, watermarked: false } };
+    }
+    const rw = await reencodePass(ctx, xfadeTarget, outputAbs, watermarkPath!);
+    try { unlinkSync(xfadeTarget); } catch { /* ignore */ }
+    if (!rw.ok) return { ok: false, error: `ffmpeg.concat: watermark pass failed — ${(rw.stderr ?? '').slice(-500)}` };
+    return { ok: true, outputPath: cfg.outputPath, metadata: { mode: `xfade:${transition}+reencode`, inputCount: cfg.inputs.length, watermarked: true } };
+  }
+
   // ── N-input path: concat demuxer → temp → optional watermark pass ──
   const listFile = join(tmpdir(), `dag_concat_${Date.now()}.txt`);
   const listContent = cfg.inputs.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
@@ -224,6 +308,8 @@ function describe(): RunnerDescription {
       properties: {
         inputs: { type: 'array', items: { type: 'string' }, minItems: 1 },
         outputPath: { type: 'string' },
+        transition: { type: 'string', description: "Crossfade between clips: 'none' (hard cut) or an xfade name ('fade', 'dissolve', 'wipeleft', …). Default 'none'." },
+        transitionDuration: { type: 'number', description: 'Crossfade seconds. Default 0.5.' },
       },
     },
     costHint: 'free',
