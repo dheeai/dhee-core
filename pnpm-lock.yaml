@@ -72,9 +72,9 @@ importers:
         specifier: ^3.24.4
         version: 3.25.76
     devDependencies:
-      '@dhee/runner-sdk':
-        specifier: workspace:*
-        version: link:packages/runner-sdk
+      '@dheeai/runner-sdk':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@eslint/js':
         specifier: ^9.28.0
         version: 9.39.1
@@ -208,28 +208,6 @@ importers:
       vitest:
         specifier: ^4.1.2
         version: 4.1.4(@types/node@24.12.2)(@vitest/coverage-v8@3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@22.19.1)(jiti@2.6.1)(jsdom@29.0.2)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3)))(jsdom@29.0.2)(vite@8.0.8(@types/node@24.12.2)(esbuild@0.27.1)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
-
-  packages/openrouter-image-runner:
-    dependencies:
-      '@dhee/runner-sdk':
-        specifier: workspace:*
-        version: link:../runner-sdk
-    devDependencies:
-      '@types/node':
-        specifier: ^22.15.29
-        version: 22.19.1
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  packages/runner-sdk:
-    devDependencies:
-      '@types/node':
-        specifier: ^22.15.29
-        version: 22.19.1
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
 
 packages:
 
@@ -531,6 +509,10 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@dheeai/runner-sdk@0.1.0':
+    resolution: {integrity: sha512-lH4K6tVyxFiJHfgSrDkI2KmyBtZiKvEwL4keLrgFfd4IRpipx4J+DGKQlRYPmxZuR0rxPMYcA8m67fnhi9MN6w==}
+    engines: {node: '>=20.0.0'}
 
   '@emnapi/core@1.9.2':
     resolution: {integrity: sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA==}
@@ -4989,6 +4971,8 @@ snapshots:
       css-tree: 3.2.1
 
   '@csstools/css-tokenizer@4.0.0': {}
+
+  '@dheeai/runner-sdk@0.1.0': {}
 
   '@emnapi/core@1.9.2':
     dependencies:
