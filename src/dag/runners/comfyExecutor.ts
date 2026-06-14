@@ -445,6 +445,16 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
     if (!ap.ok) return { ok: false, error: tag(ap.error) };
   }
 
+  // ── Optional debug dump of the EXACT workflow submitted to Comfy ──
+  if (process.env['DHEE_DUMP_WORKFLOW']) {
+    try {
+      writeFileSync(process.env['DHEE_DUMP_WORKFLOW'], JSON.stringify(workflow, null, 2));
+      ctx.log(tag(`dumped submitted workflow → ${process.env['DHEE_DUMP_WORKFLOW']}`));
+    } catch {
+      /* best-effort debug aid */
+    }
+  }
+
   // ── Queue + await ──
   if (ctx.signal?.aborted) return { ok: false, error: tag('aborted before queue') };
   let queueResult: { outputs: Array<{ filename: string; subfolder?: string }> };

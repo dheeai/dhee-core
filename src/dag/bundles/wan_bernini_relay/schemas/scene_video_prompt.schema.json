@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "required": ["videoPrompt", "references"],
+  "properties": {
+    "videoPrompt": { "type": "string", "minLength": 30 },
+    "references": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "slot"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "type": { "type": "string", "enum": ["character", "setting", "background"] },
+          "slot": { "type": "string", "enum": ["image0", "image1", "image2"] }
+        }
+      }
+    }
+  }
+}

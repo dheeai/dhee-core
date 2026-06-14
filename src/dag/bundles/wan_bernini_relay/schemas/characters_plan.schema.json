@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "required": ["characters"],
+  "properties": {
+    "characters": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "description"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "name": { "type": "string" },
+          "description": { "type": "string", "minLength": 50 }
+        }
+      }
+    }
+  }
+}

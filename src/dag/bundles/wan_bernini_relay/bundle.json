@@ -1,0 +1,302 @@
+{
+  "id": "wan_bernini_relay",
+  "version": "0.1.0",
+  "license": "MIT",
+  "displayName": "WAN Bernini Reference Relay (test)",
+  "summary": "Reference-driven video: Ideogram character sheets + a background drive a WAN 2.2 Bernini subject-to-video render per scene. No dialogue.",
+  "techLine": "IDEOGRAM SHEETS · WAN 2.2 BERNINI R2V",
+  "engineCompat": ">=0.1.0",
+  "description": "A test pipeline that renders a short, dialogue-free video from two character reference sheets (Ideogram 4) plus a single background image. Each scene is a WAN 2.2 'Bernini' multi-reference-to-video render: the two characters are addressed as image0 / image1 and the background as image2, exactly like Flux Klein reference addressing. Cast is fixed at two characters + one background to match the workflow's three reference slots. Clips are concatenated into the final video.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "comfy.tti": ">=0.1.0",
+      "comfy.wan_bernini": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0"
+    }
+  },
+  "inputs": [
+    {
+      "id": "story_input",
+      "kind": "file",
+      "path": "inputs/story.md",
+      "required": true,
+      "label": "Your story / premise",
+      "placeholder": "Two characters share a single location. Describe what they do together — visual action only, no dialogue. e.g. 'A hiker and her guide climb a snow ridge at dawn; they pause, point toward the summit, and press on.'",
+      "multiline": true
+    },
+    {
+      "id": "targetDuration",
+      "kind": "project",
+      "field": "targetDuration",
+      "default": 20,
+      "label": "Duration",
+      "control": "pills",
+      "unit": "seconds",
+      "options": [
+        { "value": 10, "label": "10s" },
+        { "value": 20, "label": "20s" },
+        { "value": 30, "label": "30s" }
+      ],
+      "allowCustom": true
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "cinematic_realism",
+      "label": "Style",
+      "control": "select",
+      "options": [
+        { "value": "cinematic_realism", "label": "Cinematic Realism" },
+        { "value": "anime", "label": "Anime" }
+      ],
+      "allowCustom": true
+    }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "story",
+      "displayName": "Story",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": { "format": "md", "pattern": "plans/story.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/story.md",
+          "tier": "heavy",
+          "outputFormat": "markdown"
+        }
+      },
+      "displayCapability": "story.prose"
+    },
+    {
+      "id": "world_style",
+      "displayName": "World & Style",
+      "kind": "stage",
+      "inputs": [{ "from": "story", "usage": "context" }],
+      "outputs": { "format": "md", "pattern": "plans/world_style.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/world_style.md",
+          "tier": "heavy",
+          "outputFormat": "markdown"
+        }
+      },
+      "displayCapability": "style.world"
+    },
+    {
+      "id": "characters_plan",
+      "displayName": "Cast (2)",
+      "kind": "stage",
+      "inputs": [
+        { "from": "story", "usage": "context" },
+        { "from": "world_style", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/characters_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/characters_plan.md",
+          "outputSchema": "schemas/characters_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "character.plan"
+    },
+    {
+      "id": "character_sheet_prompt",
+      "displayName": "Sheet Prompts",
+      "kind": "collection",
+      "itemSource": "characters_plan",
+      "itemKey": "characters",
+      "inputs": [
+        { "from": "characters_plan", "usage": "input", "scope": "matching" },
+        { "from": "world_style", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "prompts/character_sheets/{{item_id}}.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/character_sheet.md",
+          "outputSchema": "schemas/ideogram_caption.schema.json",
+          "tier": "medium",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "character.prompt",
+      "headlineField": "high_level_description"
+    },
+    {
+      "id": "character_sheet",
+      "displayName": "Character Sheets",
+      "kind": "collection",
+      "itemSource": "character_sheet_prompt",
+      "inputs": [{ "from": "character_sheet_prompt", "usage": "input", "scope": "matching" }],
+      "outputs": { "format": "image", "pattern": "assets/images/characters/{{item_id}}.png" },
+      "runner": {
+        "tool": "comfy.tti",
+        "config": {
+          "workflowPath": "workflows/ideogram4_portrait.json",
+          "manifestPath": "workflows/ideogram4.manifest.json",
+          "endpoint": "self.local"
+        }
+      },
+      "displayCapability": "character.image"
+    },
+    {
+      "id": "settings_plan",
+      "displayName": "Background (1)",
+      "kind": "stage",
+      "inputs": [
+        { "from": "story", "usage": "context" },
+        { "from": "world_style", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/settings_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/settings_plan.md",
+          "outputSchema": "schemas/settings_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "setting.plan"
+    },
+    {
+      "id": "background_prompt",
+      "displayName": "Background Prompt",
+      "kind": "collection",
+      "itemSource": "settings_plan",
+      "itemKey": "settings",
+      "inputs": [
+        { "from": "settings_plan", "usage": "input", "scope": "matching" },
+        { "from": "world_style", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "prompts/backgrounds/{{item_id}}.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/background.md",
+          "outputSchema": "schemas/ideogram_caption.schema.json",
+          "tier": "medium",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "setting.prompt",
+      "headlineField": "high_level_description"
+    },
+    {
+      "id": "background_image",
+      "displayName": "Background",
+      "kind": "collection",
+      "itemSource": "background_prompt",
+      "inputs": [{ "from": "background_prompt", "usage": "input", "scope": "matching" }],
+      "outputs": { "format": "image", "pattern": "assets/images/backgrounds/{{item_id}}.png" },
+      "runner": {
+        "tool": "comfy.tti",
+        "config": {
+          "workflowPath": "workflows/ideogram4.json",
+          "manifestPath": "workflows/ideogram4.manifest.json",
+          "endpoint": "self.local"
+        }
+      },
+      "displayCapability": "setting.image"
+    },
+    {
+      "id": "scenes_plan",
+      "displayName": "Scene Breakdown",
+      "kind": "stage",
+      "inputs": [
+        { "from": "story", "usage": "context" },
+        { "from": "characters_plan", "usage": "context" },
+        { "from": "settings_plan", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/scenes_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scenes_plan.md",
+          "outputSchema": "schemas/scenes_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json",
+          "maxTokens": 8000
+        }
+      },
+      "displayCapability": "scene.plan"
+    },
+    {
+      "id": "scene_video_prompt",
+      "displayName": "Clip Prompts",
+      "kind": "collection",
+      "itemSource": "scenes_plan",
+      "itemKey": "scenes",
+      "inputs": [
+        { "from": "scenes_plan", "usage": "input" },
+        { "from": "characters_plan", "usage": "context" },
+        { "from": "settings_plan", "usage": "context" },
+        { "from": "world_style", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "prompts/videos/{{scene_id}}.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scene_video_prompt.md",
+          "outputSchema": "schemas/scene_video_prompt.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json"
+        }
+      },
+      "displayCapability": "scene.video_prompt",
+      "headlineField": "videoPrompt"
+    },
+    {
+      "id": "scene_clip",
+      "displayName": "Clips",
+      "kind": "collection",
+      "itemSource": "scene_video_prompt",
+      "inputs": [
+        { "from": "scene_video_prompt", "usage": "input", "scope": "matching" },
+        { "from": "character_sheet", "usage": "reference", "scope": "all" },
+        { "from": "background_image", "usage": "reference", "scope": "all" }
+      ],
+      "outputs": { "format": "video", "pattern": "assets/videos/wan/{{item_id}}.mp4" },
+      "runner": {
+        "tool": "comfy.wan_bernini",
+        "config": {
+          "workflowPath": "workflows/wan_bernini_r2v.json",
+          "manifestPath": "workflows/wan_bernini_r2v.manifest.json",
+          "endpoint": "self.local",
+          "width": 832,
+          "height": 480,
+          "length": 121
+        }
+      },
+      "displayCapability": "scene.video"
+    },
+    {
+      "id": "final_video",
+      "displayName": "Final Cut",
+      "kind": "stage",
+      "inputs": [{ "from": "scene_clip", "usage": "input", "scope": "all" }],
+      "outputs": { "format": "video", "pattern": "assets/videos/final/final_video.mp4" },
+      "runner": { "tool": "ffmpeg.concat", "config": {} },
+      "displayCapability": "final.video"
+    }
+  ],
+  "display": {
+    "thumbnail": {
+      "from": ["setting.image", "character.image"],
+      "pick": "first_completed"
+    },
+    "stats": [
+      { "label": "characters", "source": "character.plan", "path": "characters.length" },
+      { "label": "scenes", "source": "scene.plan", "path": "scenes.length" }
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "wan22_bernini_multi_r2v",
+  "displayName": "WAN 2.2 Bernini multi-reference to video",
+  "pipeline": "video_generation",
+  "outputType": "video",
+  "inputRequirements": [
+    { "id": "prompt", "type": "text", "source": "llm", "required": true },
+    { "id": "image0", "type": "image", "source": "character_sheet", "required": true },
+    { "id": "image1", "type": "image", "source": "character_sheet", "required": true },
+    { "id": "image2", "type": "image", "source": "background_image", "required": true },
+    { "id": "width", "type": "number", "source": "system", "required": false },
+    { "id": "height", "type": "number", "source": "system", "required": false },
+    { "id": "length", "type": "number", "source": "system", "required": false },
+    { "id": "seed", "type": "number", "source": "system", "required": false },
+    { "id": "filenamePrefix", "type": "text", "source": "system", "required": false }
+  ],
+  "workflowFile": "wan_bernini_r2v.json",
+  "format": "api",
+  "parameterMappings": [
+    { "input": "prompt", "nodeId": "6", "field": "text" },
+    { "input": "image0", "nodeId": "139", "field": "image" },
+    { "input": "image1", "nodeId": "119", "field": "image" },
+    { "input": "image2", "nodeId": "138", "field": "image" },
+    { "input": "width", "nodeId": "112", "field": "value" },
+    { "input": "height", "nodeId": "114", "field": "value" },
+    { "input": "length", "nodeId": "128", "field": "value" },
+    { "input": "seed", "nodeId": "57", "field": "noise_seed" },
+    { "input": "filenamePrefix", "nodeId": "67", "field": "filename_prefix" }
+  ],
+  "builtIn": false,
+  "active": true,
+  "mode": "local",
+  "_notes": "WAN 2.2 dual-sampler (Bernini HIGH/LOW + lightx2v distill LoRA). image0/image1 = character reference sheets, image2 = background; all three are batched (node 136 BatchImagesNode) into BerniniConditioning (132) and addressed positionally by the prompt ('the man from image0, the woman from image1, … in image2'). length is the frame count (node 128) at 24fps; 121 ≈ 5s, 145 ≈ 6s. Only the high-noise sampler's seed (57) is mapped — the low-noise sampler (58) has add_noise disabled. The negative prompt (node 7, WAN default) is intentionally left fixed. CLIPVisionLoader (108) is present but unconsumed in this FIXED export; Comfy prunes it at run time."
+}

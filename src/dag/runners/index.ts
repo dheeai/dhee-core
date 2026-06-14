@@ -13,6 +13,7 @@ import { comfyTtiRunner } from './comfyTti.js';
 import { comfyFl2vRunner } from './comfyFl2v.js';
 import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
+import { comfyWanBerniniRunner } from './comfyWanBernini.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
@@ -122,6 +123,18 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Qwen Image Edit 2511 + Multi-Angle LoRA + Lightning 4-step LoRA. Iteratively edits a prior shot (LLM-picked from previousN candidates) into the next shot via camera-rotation guidance. Enables consistent character/setting continuity across a scene at low cost.',
     },
     runner: comfyQwenEditChainRunner,
+  },
+  {
+    manifest: {
+      tool: 'comfy.wan_bernini',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Comfy WAN 2.2 Bernini (multi-reference to video)',
+      description:
+        'Drives the WAN 2.2 Bernini reference-to-video workflow: three reference images (two character sheets + a background) batched into BerniniConditioning and addressed positionally by the prompt (image0/image1/image2). Reference resolution against the character_sheet / background_image maps is runner-specific; upload + parameter injection + video download are handled by the shared executor.',
+    },
+    runner: comfyWanBerniniRunner,
   },
   {
     manifest: {

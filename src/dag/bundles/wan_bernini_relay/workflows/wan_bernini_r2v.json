@@ -1,0 +1,396 @@
+{
+ "6": {
+  "inputs": {
+   "text": "You are a helpful assistant specialized in subject-to-video generation. The man from image0 and the woman from image1 are climbing up the path of the snowy mountain in image2.",
+   "clip": [
+    "38",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "CLIP Text Encode (Positive Prompt)"
+  }
+ },
+ "7": {
+  "inputs": {
+   "text": "色调艳丽，过曝，静态，场景切换,细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+   "clip": [
+    "38",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "CLIP Text Encode (Negative Prompt)"
+  }
+ },
+ "8": {
+  "inputs": {
+   "samples": [
+    "58",
+    0
+   ],
+   "vae": [
+    "39",
+    0
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "38": {
+  "inputs": {
+   "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "type": "wan",
+   "device": "default"
+  },
+  "class_type": "CLIPLoader",
+  "_meta": {
+   "title": "Load CLIP"
+  }
+ },
+ "39": {
+  "inputs": {
+   "vae_name": "wan_2.1_vae_Comfy-Org.safetensors"
+  },
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "Load VAE"
+  }
+ },
+ "54": {
+  "inputs": {
+   "shift": 8.000000000000002,
+   "model": [
+    "69",
+    0
+   ]
+  },
+  "class_type": "ModelSamplingSD3",
+  "_meta": {
+   "title": "ModelSamplingSD3"
+  }
+ },
+ "55": {
+  "inputs": {
+   "shift": 8,
+   "model": [
+    "68",
+    0
+   ]
+  },
+  "class_type": "ModelSamplingSD3",
+  "_meta": {
+   "title": "ModelSamplingSD3"
+  }
+ },
+ "56": {
+  "inputs": {
+   "unet_name": "Bernini_LOW_fp8_e4m3fn_scaled.safetensors",
+   "weight_dtype": "fp8_e4m3fn_fast"
+  },
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Load Diffusion Model"
+  }
+ },
+ "57": {
+  "inputs": {
+   "add_noise": "enable",
+   "noise_seed": 922702715119177,
+   "steps": 6,
+   "cfg": 1,
+   "sampler_name": "lcm",
+   "scheduler": "simple",
+   "start_at_step": 0,
+   "end_at_step": 3,
+   "return_with_leftover_noise": "enable",
+   "model": [
+    "54",
+    0
+   ],
+   "positive": [
+    "132",
+    0
+   ],
+   "negative": [
+    "132",
+    1
+   ],
+   "latent_image": [
+    "132",
+    2
+   ]
+  },
+  "class_type": "KSamplerAdvanced",
+  "_meta": {
+   "title": "KSampler (Advanced)"
+  }
+ },
+ "58": {
+  "inputs": {
+   "add_noise": "disable",
+   "noise_seed": 0,
+   "steps": 6,
+   "cfg": 1,
+   "sampler_name": "lcm",
+   "scheduler": "simple",
+   "start_at_step": 3,
+   "end_at_step": 10000,
+   "return_with_leftover_noise": "disable",
+   "model": [
+    "55",
+    0
+   ],
+   "positive": [
+    "132",
+    0
+   ],
+   "negative": [
+    "132",
+    1
+   ],
+   "latent_image": [
+    "57",
+    0
+   ]
+  },
+  "class_type": "KSamplerAdvanced",
+  "_meta": {
+   "title": "KSampler (Advanced)"
+  }
+ },
+ "63": {
+  "inputs": {
+   "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank16_bf16.safetensors",
+   "strength_model": 3.0000000000000004,
+   "model": [
+    "71",
+    0
+   ]
+  },
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "Load LoRA"
+  }
+ },
+ "64": {
+  "inputs": {
+   "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank16_bf16.safetensors",
+   "strength_model": 1.5000000000000002,
+   "model": [
+    "56",
+    0
+   ]
+  },
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "Load LoRA"
+  }
+ },
+ "67": {
+  "inputs": {
+   "frame_rate": 24,
+   "loop_count": 0,
+   "filename_prefix": "AnimateDiff",
+   "format": "video/h264-mp4",
+   "pix_fmt": "yuv420p",
+   "crf": 19,
+   "save_metadata": true,
+   "trim_to_audio": false,
+   "pingpong": false,
+   "save_output": true,
+   "images": [
+    "8",
+    0
+   ]
+  },
+  "class_type": "VHS_VideoCombine",
+  "_meta": {
+   "title": "Video Combine 🎥🅥🅗🅢"
+  }
+ },
+ "68": {
+  "inputs": {
+   "sage_attention": "auto",
+   "allow_compile": false,
+   "model": [
+    "64",
+    0
+   ]
+  },
+  "class_type": "PathchSageAttentionKJ",
+  "_meta": {
+   "title": "Patch Sage Attention KJ"
+  }
+ },
+ "69": {
+  "inputs": {
+   "nag_scale": 11,
+   "nag_alpha": 0.25,
+   "nag_tau": 2.5,
+   "input_type": "default",
+   "inplace": false,
+   "model": [
+    "70",
+    0
+   ],
+   "conditioning": [
+    "132",
+    1
+   ]
+  },
+  "class_type": "WanVideoNAG",
+  "_meta": {
+   "title": "WanVideoNAG"
+  }
+ },
+ "70": {
+  "inputs": {
+   "model": [
+    "63",
+    0
+   ]
+  },
+  "class_type": "CFGZeroStar",
+  "_meta": {
+   "title": "CFGZeroStar"
+  }
+ },
+ "71": {
+  "inputs": {
+   "unet_name": "Bernini_HIGH_fp8_e4m3fn_scaled.safetensors",
+   "weight_dtype": "fp8_e4m3fn_fast"
+  },
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Load Diffusion Model"
+  }
+ },
+ "108": {
+  "inputs": {
+   "clip_name": "clip_vision_h_Comfy-Org.safetensors"
+  },
+  "class_type": "CLIPVisionLoader",
+  "_meta": {
+   "title": "Load CLIP Vision"
+  }
+ },
+ "112": {
+  "inputs": {
+   "value": 832
+  },
+  "class_type": "INTConstant",
+  "_meta": {
+   "title": "INT Constant"
+  }
+ },
+ "114": {
+  "inputs": {
+   "value": 480
+  },
+  "class_type": "INTConstant",
+  "_meta": {
+   "title": "INT Constant"
+  }
+ },
+ "119": {
+  "inputs": {
+   "image": "char_b.png"
+  },
+  "class_type": "LoadImage",
+  "_meta": {
+   "title": "Load Image"
+  }
+ },
+ "128": {
+  "inputs": {
+   "value": 145
+  },
+  "class_type": "INTConstant",
+  "_meta": {
+   "title": "INT Constant"
+  }
+ },
+ "132": {
+  "inputs": {
+   "width": [
+    "112",
+    0
+   ],
+   "height": [
+    "114",
+    0
+   ],
+   "length": [
+    "128",
+    0
+   ],
+   "batch_size": 1,
+   "ref_max_size": 848,
+   "positive": [
+    "6",
+    0
+   ],
+   "negative": [
+    "7",
+    0
+   ],
+   "vae": [
+    "39",
+    0
+   ],
+   "reference_images": {
+    "reference_image_0": [
+     "136",
+     0
+    ]
+   }
+  },
+  "class_type": "BerniniConditioning",
+  "_meta": {
+   "title": "Bernini Conditioning"
+  }
+ },
+ "136": {
+  "inputs": {
+   "images.image0": [
+    "139",
+    0
+   ],
+   "images.image1": [
+    "119",
+    0
+   ],
+   "images.image2": [
+    "138",
+    0
+   ]
+  },
+  "class_type": "BatchImagesNode",
+  "_meta": {
+   "title": "Batch Images"
+  }
+ },
+ "138": {
+  "inputs": {
+   "image": "base_camp_dawn.png"
+  },
+  "class_type": "LoadImage",
+  "_meta": {
+   "title": "Load Image"
+  }
+ },
+ "139": {
+  "inputs": {
+   "image": "arjun.png"
+  },
+  "class_type": "LoadImage",
+  "_meta": {
+   "title": "Load Image"
+  }
+ }
+}
