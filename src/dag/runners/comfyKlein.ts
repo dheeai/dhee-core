@@ -89,20 +89,40 @@ interface ShotPrompt {
 }
 
 /**
+ * Reference `type` → the scope='all' input map ({ itemId → absolutePath }) it
+ * resolves against. The runner is workflow-generic: it knows nothing about
+ * scenes, coverage or "plates" as concepts — a `plate` reference is resolved
+ * exactly like a `character` or `setting` one, by id against the matching map.
+ * The bundle decides WHICH ids to put in references[] (e.g. the shot prompt
+ * emits its coverage plate as references[0]); the runner just resolves them.
+ */
+const REFERENCE_TYPE_TO_INPUT: Record<string, string> = {
+  character: 'character_image',
+  setting: 'setting_image',
+  plate: 'plate_image',
+};
+
+/** Case-insensitive id lookup map (collection item ids can get case-folded). */
+function lowerKeyed(m: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(m ?? {})) out[k.toLowerCase()] = v;
+  return out;
+}
+
+/**
  * Resolve the shot prompt + its references into ordered image paths.
- * First resolved reference → base_image; the rest → reference_image_1..N.
- * References resolve against the character_image / setting_image scope='all'
- * maps the walker exposes ({ itemId → absolutePath }).
+ * references[0] → base_image; the rest → reference_image_1..N. Each entry
+ * resolves by `type` against its scope='all' map (see REFERENCE_TYPE_TO_INPUT).
  */
 function resolveReferences(
   ctx: RunnerContext,
 ): { prompt?: string; shotPrompt: ShotPrompt | null; imageInputs: Record<string, string> } {
   const imageInputs: Record<string, string> = {};
-  const cfg = ctx.node.runner.config as Record<string, unknown>;
+  const cfg = ctx.node.runner.config;
 
   // Explicit config wins (direct paths, e.g. from a non-narrative caller).
-  let prompt = typeof cfg['prompt'] === 'string' ? (cfg['prompt'] as string) : undefined;
-  if (typeof cfg['baseImage'] === 'string') imageInputs['base_image'] = cfg['baseImage'] as string;
+  let prompt = typeof cfg['prompt'] === 'string' ? cfg['prompt'] : undefined;
+  if (typeof cfg['baseImage'] === 'string') imageInputs['base_image'] = cfg['baseImage'];
   if (Array.isArray(cfg['referenceImages'])) {
     (cfg['referenceImages'] as string[]).slice(0, KLEIN_MAX_REFERENCES).forEach((p, i) => {
       imageInputs[`reference_image_${i + 1}`] = p;
@@ -119,12 +139,13 @@ function resolveReferences(
         shotPrompt = p;
         if (!prompt) prompt = p.imagePrompt;
         if (!imageInputs['base_image'] && Array.isArray(p.references) && p.references.length > 0) {
-          const charMap = (ctx.inputs['character_image'] as Record<string, string> | undefined) ?? {};
-          const setMap = (ctx.inputs['setting_image'] as Record<string, string> | undefined) ?? {};
+          const maps: Record<string, Record<string, string>> = {};
+          for (const [type, inputKey] of Object.entries(REFERENCE_TYPE_TO_INPUT)) {
+            maps[type] = lowerKeyed(ctx.inputs[inputKey] as Record<string, string> | undefined);
+          }
           const refPaths: string[] = [];
           for (const ref of p.references) {
-            const path =
-              ref.type === 'character' ? charMap[ref.id] : ref.type === 'setting' ? setMap[ref.id] : undefined;
+            const path = maps[ref.type]?.[ref.id.toLowerCase()];
             if (path) refPaths.push(path);
           }
           if (refPaths.length > 0) {
@@ -138,6 +159,7 @@ function resolveReferences(
       }
     }
   }
+
   return { prompt, shotPrompt, imageInputs };
 }
 
@@ -174,7 +196,7 @@ export function createComfyKleinRunner(opts?: {
   });
 
   async function run(ctx: RunnerContext): Promise<RunnerResult> {
-    const cfg = ctx.node.runner.config as Record<string, unknown>;
+    const cfg = ctx.node.runner.config;
 
     if (Array.isArray(cfg['referenceImages']) && (cfg['referenceImages'] as unknown[]).length > KLEIN_MAX_REFERENCES) {
       return {
@@ -198,18 +220,18 @@ export function createComfyKleinRunner(opts?: {
       ctx,
       tool: 'comfy.klein',
       workflowPath: cfg['workflowPath'] as string,
-      ...(typeof cfg['manifestPath'] === 'string' ? { manifestPath: cfg['manifestPath'] as string } : {}),
+      ...(typeof cfg['manifestPath'] === 'string' ? { manifestPath: cfg['manifestPath'] } : {}),
       ...(Array.isArray(cfg['parameterMappings'])
         ? { parameterMappings: cfg['parameterMappings'] as never }
         : {}),
-      ...(typeof cfg['endpoint'] === 'string' ? { endpoint: cfg['endpoint'] as string } : {}),
+      ...(typeof cfg['endpoint'] === 'string' ? { endpoint: cfg['endpoint'] } : {}),
       outputPath: cfg['outputPath'] as string,
       ...(prompt !== undefined ? { prompt } : {}),
       imageInputs,
       scalars,
       ...(cfg['forceRerun'] === true ? { forceRerun: true } : {}),
-      ...(typeof cfg['width'] === 'number' ? { width: cfg['width'] as number } : {}),
-      ...(typeof cfg['height'] === 'number' ? { height: cfg['height'] as number } : {}),
+      ...(typeof cfg['width'] === 'number' ? { width: cfg['width'] } : {}),
+      ...(typeof cfg['height'] === 'number' ? { height: cfg['height'] } : {}),
       pruneAbsent: pruneKleinReferences,
       ...(dependencies ? { dependencies } : {}),
       clientFactory,
