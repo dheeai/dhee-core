@@ -1,0 +1,17 @@
+{
+  "tool": "dhee.cloud.image",
+  "version": "0.1.0",
+  "engineCompat": ">=0.1.0",
+  "entry": "dist/index.js",
+  "credentials": ["DHEE_CLOUD_URL", "DHEE_CLOUD_TOKEN"],
+  "permissions": {
+    "network": ["dhee.ai", "localhost", "127.0.0.1"],
+    "filesystem": "project",
+    "subprocess": false,
+    "env": [
+      "DHEE_CLOUD_URL",
+      "DHEE_CLOUD_TOKEN",
+      "DHEE_CLOUD_IMAGE_MODEL"
+    ]
+  }
+}

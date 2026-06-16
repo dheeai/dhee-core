@@ -18,13 +18,12 @@ import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
-// These runners ship as first-party media runners under /runners for now.
-// They are imported here so bundles can depend on openrouter.* without asking
-// Desktop users to install a separate ~/.dhee runner package.
+// Dhee Cloud media runners call the website proxy. Provider keys, billing,
+// entitlement, and credit logic stay in dhee-website.
 // @ts-expect-error JS runner module intentionally has no TS declaration file.
-import { manifest as openRouterImageManifest, runner as openRouterImageRunner } from '../../../runners/openrouter-image/dist/index.js';
+import { manifest as dheeCloudImageManifest, runner as dheeCloudImageRunner } from '../../../runners/dhee-cloud-image/dist/index.js';
 // @ts-expect-error JS runner module intentionally has no TS declaration file.
-import { manifest as openRouterVideoManifest, runner as openRouterVideoRunner } from '../../../runners/openrouter-video/dist/index.js';
+import { manifest as dheeCloudVideoManifest, runner as dheeCloudVideoRunner } from '../../../runners/dhee-cloud-video/dist/index.js';
 import {
   RunnerRegistry,
   getGlobalRegistry,
@@ -167,12 +166,12 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     runner: ffmpegKenBurnsRunner,
   },
   {
-    manifest: openRouterImageManifest,
-    runner: openRouterImageRunner,
+    manifest: dheeCloudImageManifest,
+    runner: dheeCloudImageRunner,
   },
   {
-    manifest: openRouterVideoManifest,
-    runner: openRouterVideoRunner,
+    manifest: dheeCloudVideoManifest,
+    runner: dheeCloudVideoRunner,
   },
   {
     manifest: {

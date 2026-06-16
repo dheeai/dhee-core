@@ -1,16 +1,16 @@
 {
   "id": "openrouter_youtube_documentary",
   "version": "0.1.1",
-  "displayName": "OpenRouter Documentary",
-  "summary": "YouTube-style documentary video using OpenRouter image and video generation.",
-  "techLine": "LLM PLAN + OPENROUTER IMAGE + OPENROUTER VIDEO",
+  "displayName": "Dhee Cloud Documentary",
+  "summary": "YouTube-style documentary video using Dhee Cloud image and video generation.",
+  "techLine": "LLM PLAN + DHEE CLOUD IMAGE + DHEE CLOUD VIDEO",
   "engineCompat": ">=0.1.0",
-  "description": "Creates a short documentary-style YouTube video from a topic or story. The bundle plans four documentary beats, writes narration guidance, generates a keyframe image per beat with OpenRouter, turns each beat into an OpenRouter video clip, and concatenates the clips into one MP4.",
+  "description": "Creates a short documentary-style YouTube video from a topic or story. The bundle plans four documentary beats, writes narration guidance, generates a keyframe image per beat through Dhee Cloud, turns each beat into a Dhee Cloud video clip, and concatenates the clips into one MP4.",
   "dependencies": {
     "runners": {
       "llm.generate": ">=0.1.0",
-      "openrouter.image": ">=0.1.0",
-      "openrouter.video": ">=0.1.0",
+      "dhee.cloud.image": ">=0.1.0",
+      "dhee.cloud.video": ">=0.1.0",
       "ffmpeg.concat": ">=0.1.0"
     }
   },
@@ -65,19 +65,19 @@
       "id": "imageModel",
       "kind": "project",
       "field": "imageModel",
-      "default": "google/gemini-2.5-flash-image",
+      "default": "bytedance-seed/seedream-4.5",
       "label": "Image Model",
       "control": "text",
-      "placeholder": "google/gemini-2.5-flash-image"
+      "placeholder": "bytedance-seed/seedream-4.5"
     },
     {
       "id": "videoModel",
       "kind": "project",
       "field": "videoModel",
-      "default": "google/veo-3.1",
+      "default": "bytedance/seedance-2.0",
       "label": "Video Model",
       "control": "text",
-      "placeholder": "google/veo-3.1"
+      "placeholder": "bytedance/seedance-2.0"
     }
   ],
   "goal": "final_video",
@@ -169,7 +169,7 @@
       ],
       "outputs": { "format": "image", "pattern": "assets/images/segments/{{item_id}}.png" },
       "runner": {
-        "tool": "openrouter.image",
+        "tool": "dhee.cloud.image",
         "config": {
           "promptInput": "segment_image_prompt",
           "modelInput": "imageModel",
@@ -213,7 +213,7 @@
       ],
       "outputs": { "format": "video", "pattern": "videos/segments/{{item_id}}.mp4" },
       "runner": {
-        "tool": "openrouter.video",
+        "tool": "dhee.cloud.video",
         "config": {
           "promptInput": "segment_motion_prompt",
           "firstFrameInput": "segment_image",
