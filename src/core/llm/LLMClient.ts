@@ -81,10 +81,19 @@ export class LLMClient {
     const organization = config.organization ?? process.env['LLM_ORGANIZATION'];
     const defaultHeaders = config.defaultHeaders ?? this.parseDefaultHeaders();
 
+    // Request timeout. Default 200s prevents stuck reasoning loops, but
+    // slow local models on large prompts (e.g. a big local LLM that must
+    // swap into VRAM, then chew a 10k-token per-shot prompt) can exceed
+    // that — override with LLM_REQUEST_TIMEOUT_MS.
+    const timeoutMs = (() => {
+      const raw = process.env['LLM_REQUEST_TIMEOUT_MS'];
+      const n = raw ? Number(raw) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : 200 * 1000;
+    })();
     this.client = new OpenAI({
       baseURL: this.baseUrl,
       apiKey,
-      timeout: 200 * 1000, // 200 seconds — prevent stuck reasoning loops
+      timeout: timeoutMs,
       organization,
       defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
     });
@@ -259,12 +268,19 @@ export class LLMClient {
     // per-call usage telemetry (issue #102 fix #0) sees prefix-cache hits.
     const request: OpenAI.ChatCompletionCreateParamsNonStreaming & {
       usage?: { include: boolean };
+      chat_template_kwargs?: { enable_thinking: boolean };
     } = {
       model: this.model,
       messages: this.convertMessages(messages),
       temperature,
       stream: false,
       usage: { include: true },
+      // Thinking models (local Qwen3 / Gemma reasoning variants) otherwise spend
+      // the whole token budget on reasoning_content and return empty `content`,
+      // which triggers wasteful empty-response retries (each a full max-token
+      // generation) on this structured-generation path. Disable thinking here.
+      // Harmless to providers/templates that ignore the field (e.g. OpenRouter).
+      chat_template_kwargs: { enable_thinking: false },
     };
 
     if (maxTokens) request.max_tokens = maxTokens;
@@ -812,8 +828,17 @@ PASS the image ONLY if it is clean, coherent, anatomically correct, and reasonab
       arguments: this.safeParseJson(tc.function.arguments),
     }));
 
+    // Fall back to reasoning_content when a thinking model still emptied
+    // `content` (belt-and-suspenders alongside enable_thinking:false). Without
+    // this, an all-reasoning response reads as empty and forces a retry.
+    const primaryContent = this.cleanContent(choice.message.content);
+    const content =
+      primaryContent && primaryContent.length > 0
+        ? primaryContent
+        : this.cleanContent(providerMessage.reasoning_content ?? providerMessage.reasoning ?? null);
+
     return {
-      content: this.cleanContent(choice.message.content),
+      content,
       toolCalls,
       finishReason: choice.finish_reason,
       reasoning: providerMessage.reasoning ?? providerMessage.reasoning_content ?? undefined,
