@@ -26,6 +26,7 @@ async function executeRunTo(
   const params = ctx.spec.params as {
     projectDir?: string;
     stage?: string;
+    runOnly?: string[];
   };
   const projectDir = resolveProjectDir({
     name: ctx.spec.projectName,
@@ -53,6 +54,7 @@ async function executeRunTo(
   const result = await runProjectViaBundle({
     projectDir,
     ...(params.stage ? { stopAt: params.stage } : {}),
+    ...(params.runOnly !== undefined ? { runOnly: params.runOnly } : {}),
     signal: ctx.signal,
     onTool: ctx.hooks.onTool,
     onResult: ctx.hooks.onResult,

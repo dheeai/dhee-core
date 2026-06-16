@@ -9,7 +9,7 @@
  * The runProjectViaBundle dep is injected so we never boot a real walk.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -92,5 +92,33 @@ describe('dhee_regenerate_node (tool wrapper)', () => {
     expect(runProjectViaBundle).toHaveBeenCalledWith(
       expect.objectContaining({ signal: controller.signal }),
     );
+  });
+
+  it('production path invalidates and dispatches the re-run in the background without using the chat AbortSignal', async () => {
+    const dir = tmpProject();
+    const controller = new AbortController();
+    const dispatch = vi.fn().mockReturnValue({ status: 'started', taskId: 'task-bg-1' });
+    const getActive = vi.fn().mockReturnValue(null);
+    const tool = makeRegenerateNodeTool({
+      getBackgroundTaskRunner: () => ({
+        getActive,
+        dispatch,
+      }),
+    }) as unknown as ToolLike;
+
+    const out = await tool.execute('t', { projectDir: dir, nodeId: 'story' }, controller.signal);
+
+    expect(out.isError).toBeFalsy();
+    expect(out.content[0].text).toMatch(/started in the background/i);
+    expect(dispatch).toHaveBeenCalledWith({
+      kind: 'run_to',
+      projectName: expect.stringMatching(/^regen-tool-/),
+      params: { projectDir: dir },
+      sessionId: expect.stringMatching(/^dhee_regenerate_node:regen-tool-/),
+    });
+
+    const after = JSON.parse(readFileSync(join(dir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.story).toBeUndefined();
+    expect(after.walkState.lastInvalidatedIds).toContain('story');
   });
 });

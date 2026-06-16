@@ -1,0 +1,205 @@
+{
+  "id": "infographics",
+  "version": "0.1.0",
+  "license": "MIT",
+  "displayName": "Infographics",
+  "summary": "Narrated infographic videos: Ideogram 4 infographic stills, Qwen3-TTS narration, crisp ffmpeg Ken Burns motion + crossfades.",
+  "techLine": "Ideogram 4 · Qwen3-TTS (cloned voice) · ffmpeg Ken Burns + xfade",
+  "engineCompat": ">=0.1.0",
+  "description": "Turns a brief into a narrated infographic video. An LLM distills the brief into segments; each segment becomes a rich Ideogram 4 infographic still (via comfy.tti) — pure data design, NO people or talking heads — and a Qwen3-TTS narration track (via comfy.tts) in ONE consistent voice: a narrator voice is designed + saved once, then cloned for every segment. Each still is animated with a subtle, pixel-sharp ffmpeg Ken Burns move (ffmpeg.kenburns) sized to its narration — NOT generative video, which mangles text/charts — and the clips are concatenated with crossfade transitions. Audio is generated FIRST so each clip is sized to the narration.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "comfy.tti": ">=0.1.0",
+      "comfy.tts": ">=0.1.0",
+      "ffmpeg.kenburns": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0"
+    },
+    "runnerPackages": {
+      "comfy.tts": "dhee-runner-tts"
+    }
+  },
+  "inputs": [
+    { "id": "brief_input", "kind": "file", "path": "inputs/brief.md", "required": true },
+    { "id": "style", "kind": "project", "field": "style", "default": "clean_editorial_infographic" },
+    { "id": "aspect", "kind": "project", "field": "aspect", "default": "16:9" }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "outline",
+      "displayName": "Outline",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": { "format": "md", "pattern": "plans/outline.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": { "promptTemplate": "prompts/outline.md", "tier": "heavy", "outputFormat": "markdown", "temperature": 0.6 }
+      },
+      "displayCapability": "outline.prose"
+    },
+    {
+      "id": "infographic_plan",
+      "displayName": "Infographic Plan",
+      "kind": "stage",
+      "inputs": [{ "from": "outline", "usage": "context" }],
+      "outputs": { "format": "json", "pattern": "plans/infographic_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/infographic_plan.md",
+          "outputSchema": "schemas/infographic_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json",
+          "temperature": 0.5,
+          "maxTokens": 8000
+        }
+      },
+      "displayCapability": "plan.json"
+    },
+
+    {
+      "id": "segment_image_prompt",
+      "displayName": "Segment Image Prompt",
+      "kind": "collection",
+      "itemSource": "infographic_plan",
+      "itemKey": "segments",
+      "inputs": [
+        { "from": "infographic_plan", "usage": "input", "scope": "matching" },
+        { "from": "outline", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "prompts/segment_image/{{item_id}}.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/segment_image_prompt.md",
+          "outputSchema": "schemas/segment_image_prompt.schema.json",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "segment.image_prompt"
+    },
+    {
+      "id": "segment_image",
+      "displayName": "Segment Image",
+      "kind": "collection",
+      "itemSource": "segment_image_prompt",
+      "inputs": [{ "from": "segment_image_prompt", "usage": "input", "scope": "matching" }],
+      "outputs": { "format": "image", "pattern": "assets/images/segments/{{item_id}}.png" },
+      "runner": {
+        "tool": "comfy.tti",
+        "config": {
+          "workflowPath": "workflows/ideogram4.json",
+          "manifestPath": "workflows/ideogram4.manifest.json",
+          "endpoint": "self.local",
+          "width": 1920,
+          "height": 1080
+        }
+      },
+      "displayCapability": "segment.image"
+    },
+
+    {
+      "id": "segment_narration",
+      "displayName": "Segment Narration",
+      "kind": "collection",
+      "itemSource": "infographic_plan",
+      "itemKey": "segments",
+      "inputs": [
+        { "from": "infographic_plan", "usage": "input", "scope": "matching" },
+        { "from": "outline", "usage": "context" }
+      ],
+      "outputs": { "format": "md", "pattern": "plans/narration/{{item_id}}.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/segment_narration.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.4
+        }
+      },
+      "displayCapability": "segment.narration"
+    },
+    {
+      "id": "narrator_voice",
+      "displayName": "Narrator Voice",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": { "format": "audio", "pattern": "assets/audio/narrator_voice.wav" },
+      "runner": {
+        "tool": "comfy.tts",
+        "config": {
+          "workflowPath": "workflows/qwen3_voice_save.json",
+          "endpoint": "self.local",
+          "textNodeId": "1",
+          "textField": "text",
+          "text": "Every great idea begins as a simple question, and the answer can change everything we thought we knew.",
+          "fields": {
+            "1": { "instruct": "A warm, clear, professional narrator voice: neutral accent, measured and confident pacing, friendly and engaging — the polished tone of a documentary voice-over.", "seed": 42 }
+          }
+        }
+      },
+      "displayCapability": "narrator.voice"
+    },
+    {
+      "id": "segment_audio",
+      "displayName": "Segment Narration Audio",
+      "kind": "collection",
+      "itemSource": "segment_narration",
+      "inputs": [
+        { "from": "segment_narration", "usage": "input", "scope": "matching" },
+        { "from": "narrator_voice", "usage": "context" }
+      ],
+      "outputs": { "format": "audio", "pattern": "assets/audio/segments/{{item_id}}.wav" },
+      "runner": {
+        "tool": "comfy.tts",
+        "config": {
+          "workflowPath": "workflows/qwen3_narration_cloned.json",
+          "endpoint": "self.local",
+          "textInput": "segment_narration",
+          "textNodeId": "4",
+          "textField": "script",
+          "textPrefix": "Narrator: "
+        }
+      },
+      "displayCapability": "segment.audio"
+    },
+
+    {
+      "id": "segment_video",
+      "displayName": "Segment Clip",
+      "kind": "collection",
+      "itemSource": "segment_image",
+      "inputs": [
+        { "from": "segment_image", "usage": "input", "scope": "matching" },
+        { "from": "segment_audio", "usage": "input", "scope": "matching" },
+        { "from": "infographic_plan", "usage": "context" }
+      ],
+      "outputs": { "format": "video", "pattern": "assets/videos/segments/{{item_id}}.mp4" },
+      "runner": {
+        "tool": "ffmpeg.kenburns",
+        "config": {
+          "imageInput": "segment_image",
+          "audioInput": "segment_audio",
+          "fps": 30,
+          "width": 1920,
+          "height": 1080,
+          "zoom": 1.08
+        }
+      },
+      "displayCapability": "segment.video"
+    },
+    {
+      "id": "final_video",
+      "displayName": "Final Video",
+      "kind": "stage",
+      "inputs": [{ "from": "segment_video", "usage": "input", "scope": "all" }],
+      "outputs": { "format": "video", "pattern": "assets/videos/final/final_video.mp4" },
+      "runner": { "tool": "ffmpeg.concat", "config": { "transition": "fade", "transitionDuration": 0.5 } },
+      "displayCapability": "final.video"
+    }
+  ]
+}

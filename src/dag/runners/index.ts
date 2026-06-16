@@ -4,7 +4,7 @@
  * legacy `getRunner` / `listRunners` API for back-compat with code
  * that hasn't migrated to using the registry directly.
  *
- * Custom runners (from ~/.kshana/runners/) are NOT loaded here — they
+ * Custom runners (from ~/.dhee/runners/) are NOT loaded here — they
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';
@@ -18,6 +18,13 @@ import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
+// These runners ship as first-party media runners under /runners for now.
+// They are imported here so bundles can depend on openrouter.* without asking
+// Desktop users to install a separate ~/.dhee runner package.
+// @ts-expect-error JS runner module intentionally has no TS declaration file.
+import { manifest as openRouterImageManifest, runner as openRouterImageRunner } from '../../../runners/openrouter-image/dist/index.js';
+// @ts-expect-error JS runner module intentionally has no TS declaration file.
+import { manifest as openRouterVideoManifest, runner as openRouterVideoRunner } from '../../../runners/openrouter-video/dist/index.js';
 import {
   RunnerRegistry,
   getGlobalRegistry,
@@ -158,6 +165,14 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Animates one still image with a subtle Ken Burns zoom/pan and muxes narration audio, sized to that audio. Keeps text-heavy stills (infographics, slides) pixel-sharp — unlike generative video.',
     },
     runner: ffmpegKenBurnsRunner,
+  },
+  {
+    manifest: openRouterImageManifest,
+    runner: openRouterImageRunner,
+  },
+  {
+    manifest: openRouterVideoManifest,
+    runner: openRouterVideoRunner,
   },
   {
     manifest: {

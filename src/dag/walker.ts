@@ -1779,6 +1779,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         filePath: result.outputPath,
         status: 'completed',
       });
+      if (result.metadata !== undefined) inst.metadata = result.metadata;
       const assetKind = assetKindForOutput(result.outputPath, node.outputs.format);
       if (assetKind) {
         opts.onAsset?.({
@@ -1786,9 +1787,9 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           filePath: result.outputPath,
           toolName: effectiveTool,
           nodeId: stateKey,
+          ...(result.metadata ? { metadata: result.metadata } : {}),
         });
       }
-      if (result.metadata !== undefined) inst.metadata = result.metadata;
       if (state) {
         state.nodes[stateKey] = {
           status: 'completed',

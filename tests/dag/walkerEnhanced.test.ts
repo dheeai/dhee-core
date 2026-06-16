@@ -218,6 +218,70 @@ describe('walkState persistence', () => {
     expect(state!.nodes['final']?.status).toBe('completed');
   });
 
+  it('forwards runner metadata on asset events for desktop usage reporting', async () => {
+    const metadata = {
+      provider: 'openrouter',
+      model: 'bytedance-seed/seedream-4.5',
+      responseId: 'chatcmpl_seedream',
+      usage: { cost: 0.04 },
+    };
+    const bundle: DagBundle = {
+      id: 'asset-metadata',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      goal: 'image',
+      nodes: [
+        {
+          id: 'image',
+          kind: 'stage',
+          inputs: [],
+          outputs: { format: 'image', pattern: 'assets/image.png' },
+          runner: { tool: 'asset.runner', config: {} },
+        },
+      ],
+    };
+    __resetGlobalRegistryForTesting();
+    getGlobalRegistry().register(
+      { tool: 'asset.runner', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+      {
+        describe: () => ({
+          id: 'asset.runner',
+          displayName: 'asset',
+          description: 'asset test stub',
+          capabilities: [],
+          modalities: { input: [], output: ['image'] },
+          configSchema: {},
+        }),
+        async run(ctx): Promise<RunnerResult> {
+          const outPath = 'assets/image.png';
+          const outAbs = join(ctx.projectDir, outPath);
+          mkdirSync(join(outAbs, '..'), { recursive: true });
+          writeFileSync(outAbs, 'image');
+          return { ok: true, outputPath: outPath, metadata };
+        },
+      },
+    );
+
+    const assets: Array<Record<string, unknown>> = [];
+    const result = await walkBundle({
+      projectDir,
+      bundle,
+      bundleSource: 'built-in:asset-metadata',
+      onAsset: (asset) => assets.push(asset),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(assets).toEqual([
+      expect.objectContaining({
+        kind: 'image',
+        filePath: 'assets/image.png',
+        toolName: 'asset.runner',
+        nodeId: 'image',
+        metadata,
+      }),
+    ]);
+  });
+
   it('walkBundle preserves walkState on failure (so resumes pick up where it left off)', async () => {
     __resetGlobalRegistryForTesting();
     const reg = getGlobalRegistry();

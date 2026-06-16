@@ -1,20 +1,25 @@
 /**
  * dhee_regenerate_node — invalidate a single node (optionally a
- * single item of a collection node) and re-dispatch the bundle so
- * that node + its downstream re-runs.
+ * single item of a collection node) and dispatch the follow-up bundle
+ * run in the background so that node + downstream re-runs.
  *
- * Thin wrapper over `src/dag/projectRegen.regenerateNode` — the
- * shared helper that the desktop's IPC bridge also uses. Keeping
- * both consumers on one helper means "regenerate" means the same
- * thing whether driven by the agent or by right-click.
+ * This must not block inside the agent turn: image/video jobs can take
+ * minutes, and the chat agent's own turn signal may abort long-running
+ * tool calls. The desktop right-click path already routes through the
+ * tracked BackgroundTaskRunner; this agent tool now follows the same
+ * async shape as `dhee_start_run`.
  */
 
+import { existsSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
 import {
+  invalidateNodes,
   regenerateNode,
   type RunProjectViaBundleFn,
 } from '../../../dag/projectRegen.js';
+import { isWalkLocked } from '../../../dag/projectWalkLock.js';
 
 const Params = Type.Object({
   projectDir: Type.String({ description: 'Absolute path to the project directory.' }),
@@ -28,6 +33,12 @@ const Params = Type.Object({
 });
 
 export interface RegenerateNodeDeps {
+  /** Production default = the process-wide background runner singleton. */
+  getBackgroundTaskRunner?: () => BackgroundTaskRunner | Promise<BackgroundTaskRunner>;
+  /**
+   * Legacy test/headless seam. Production does not use this path because
+   * it blocks the agent turn for the full media run.
+   */
   runProjectViaBundle?: RunProjectViaBundleFn;
   /**
    * Max regenerations of the SAME (projectDir, nodeId[:itemId]) key the
@@ -51,8 +62,44 @@ export interface RegenerateNodeDeps {
  */
 export const DEFAULT_MAX_REGENS_PER_KEY = 10;
 
+interface DispatchResultStarted {
+  status: 'started';
+  taskId: string;
+}
+interface DispatchResultRejected {
+  status: 'rejected';
+  reason: string;
+  activeTaskId: string;
+  activeProjectName: string;
+}
+type DispatchResult = DispatchResultStarted | DispatchResultRejected;
+
+interface BackgroundTaskRunner {
+  getActive?: () => null | {
+    id: string;
+    spec: {
+      kind: string;
+      projectName: string;
+      projectDir?: string;
+      sessionId: string;
+      params?: { projectDir?: string };
+    };
+  };
+  dispatch(spec: {
+    kind: 'run_to';
+    projectName: string;
+    params: { projectDir: string };
+    sessionId: string;
+  }): DispatchResult;
+}
+
 function textResult(text: string, isError = false) {
   return { content: [{ type: 'text' as const, text }], details: {}, ...(isError ? { isError: true } : {}) };
+}
+
+async function defaultGetBackgroundTaskRunner(): Promise<BackgroundTaskRunner> {
+  const mod = await import('../../../server/runners/backgroundTaskRunnerSingleton.js');
+  return mod.getBackgroundTaskRunner() as unknown as BackgroundTaskRunner;
 }
 
 export function makeRegenerateNodeTool(deps: RegenerateNodeDeps = {}) {
@@ -70,6 +117,10 @@ export function makeRegenerateNodeTool(deps: RegenerateNodeDeps = {}) {
     parameters: Params,
     async execute(_id, params, signal) {
       const key = params.itemId ? `${params.nodeId}:${params.itemId}` : params.nodeId;
+      const projectJsonPath = join(params.projectDir, 'project.json');
+      if (!existsSync(projectJsonPath)) {
+        return textResult(`project.json not found at ${projectJsonPath}`, true);
+      }
 
       // Budget gate (credit-burn guard): refuse a (cap+1)th regen of the
       // same key BEFORE any paid runner call. Scoped per projectDir so
@@ -87,20 +138,69 @@ export function makeRegenerateNodeTool(deps: RegenerateNodeDeps = {}) {
       }
       regensByKey.set(budgetKey, used + 1);
 
-      const result = await regenerateNode({
-        projectDir: params.projectDir,
-        nodeId: params.nodeId,
-        ...(params.itemId ? { itemId: params.itemId } : {}),
-        ...(signal ? { signal } : {}),
-        ...(deps.runProjectViaBundle ? { runProjectViaBundle: deps.runProjectViaBundle } : {}),
-      });
-      if (!result.ok) {
+      // Back-compat for unit tests/headless callers that inject the old
+      // synchronous runner seam. The exported production tool below does
+      // not set this dep, so real chat-driven regenerations stay detached.
+      if (deps.runProjectViaBundle) {
+        const result = await regenerateNode({
+          projectDir: params.projectDir,
+          nodeId: params.nodeId,
+          ...(params.itemId ? { itemId: params.itemId } : {}),
+          ...(signal ? { signal } : {}),
+          runProjectViaBundle: deps.runProjectViaBundle,
+        });
+        if (!result.ok) {
+          return textResult(
+            `Regenerate of '${key}' failed: ${result.error ?? '(no error)'}`,
+            true,
+          );
+        }
+        return textResult(`Regenerated '${key}'. Downstream nodes cascade-rerun via walker.`);
+      }
+
+      const runner = deps.getBackgroundTaskRunner
+        ? await deps.getBackgroundTaskRunner()
+        : await defaultGetBackgroundTaskRunner();
+      const active = runner.getActive?.();
+      if (active) {
         return textResult(
-          `Regenerate of '${key}' failed: ${result.error ?? '(no error)'}`,
+          `Another bundle run is already in flight (taskId=${active.id} on project '${active.spec.projectName}'). Stop it first with dhee_stop_run, or wait for it to finish.`,
           true,
         );
       }
-      return textResult(`Regenerated '${key}'. Downstream nodes cascade-rerun via walker.`);
+      if (isWalkLocked(params.projectDir)) {
+        return textResult(
+          `cannot regenerate '${key}': a walk is already in progress for this project. Stop it first with dhee_stop_run, or wait for it to finish, then retry.`,
+          true,
+        );
+      }
+
+      const inv = await invalidateNodes({
+        projectDir: params.projectDir,
+        nodeIds: [key],
+        source: 'chat-regenerate',
+      });
+      if (inv.error) {
+        return textResult(`Regenerate of '${key}' failed: ${inv.error}`, true);
+      }
+
+      const dispatch = runner.dispatch({
+        kind: 'run_to',
+        projectName: basename(params.projectDir),
+        params: { projectDir: params.projectDir },
+        sessionId: `dhee_regenerate_node:${basename(params.projectDir)}`,
+      });
+
+      if (dispatch.status === 'rejected') {
+        return textResult(
+          `Another bundle run is already in flight (taskId=${dispatch.activeTaskId} on project '${dispatch.activeProjectName}'). Stop it first with dhee_stop_run, or wait for it to finish.`,
+          true,
+        );
+      }
+
+      return textResult(
+        `Regeneration of '${key}' started in the background (taskId=${dispatch.taskId}). It will continue while we talk; I'll be notified when it finishes.`,
+      );
     },
   });
 }

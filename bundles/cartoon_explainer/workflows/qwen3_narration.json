@@ -1,0 +1,31 @@
+{
+  "1": {
+    "inputs": {
+      "text": "Narration goes here.",
+      "instruct": "A warm, clear, professional narrator voice: neutral accent, measured and confident pacing, friendly and engaging, the polished tone of a documentary voice-over.",
+      "model_choice": "1.7B",
+      "device": "auto",
+      "precision": "bf16",
+      "language": "English",
+      "seed": 42,
+      "max_new_tokens": 2048,
+      "top_p": 0.8,
+      "top_k": 20,
+      "temperature": 1,
+      "repetition_penalty": 1.05,
+      "attention": "sdpa",
+      "unload_model_after_generate": false
+    },
+    "class_type": "FB_Qwen3TTSVoiceDesign",
+    "_meta": { "title": "Narrator voice" }
+  },
+  "2": {
+    "inputs": {
+      "filename_prefix": "audio/qwen3_narration",
+      "audioUI": "",
+      "audio": ["1", 0]
+    },
+    "class_type": "SaveAudio",
+    "_meta": { "title": "Save narration" }
+  }
+}

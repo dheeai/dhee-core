@@ -1,0 +1,21 @@
+{
+  "id": "ideogram4",
+  "displayName": "Ideogram 4 text-to-image (infographics)",
+  "pipeline": "image_generation",
+  "outputType": "image",
+  "inputRequirements": [
+    { "id": "prompt", "type": "text", "source": "llm", "required": true },
+    { "id": "seed", "type": "number", "source": "system", "required": false },
+    { "id": "filenamePrefix", "type": "text", "source": "system", "required": false }
+  ],
+  "parameterMappings": [
+    { "input": "prompt", "nodeId": "98:24", "field": "text" },
+    { "input": "seed", "nodeId": "98:18", "field": "noise_seed" },
+    { "input": "filenamePrefix", "nodeId": "158", "field": "filename_prefix" }
+  ],
+  "format": "api",
+  "builtIn": false,
+  "active": true,
+  "mode": "local",
+  "_notes": "Ideogram 4 (local nvfp4). The prompt (node 98:24) is fed a STRUCTURED JSON caption (high_level_description + style_description + compositional_deconstruction with text elements/hex/bbox) produced by the segment_image_prompt LLM stage — Ideogram renders that far better than plain text, and it sidesteps the safety filter that tripped on bare prompts. Output aspect is set by ResolutionSelector (node 37, default '16:9 (Widescreen)'); width/height are derived, so they are not mapped here. The workflow's built-in magic-prompt scaffold (nodes 134:*) is preview-only / disconnected in the API export — the dhee LLM stage does that expansion instead."
+}

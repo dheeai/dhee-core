@@ -281,6 +281,7 @@ describe('BackgroundTaskRunner — execution hook events', () => {
         filePath: 'assets/images/s1shot1.png',
         toolName: 'comfy_generate',
         nodeId: 'shot_image:scene_1_shot_1',
+        metadata: { provider: 'openrouter', usage: { cost: 0.04 } },
       });
     };
 
@@ -305,9 +306,14 @@ describe('BackgroundTaskRunner — execution hook events', () => {
     const tool = events[0]?.payload as { toolName: string; nodeId: string };
     expect(tool.toolName).toBe('llm_call');
     expect(tool.nodeId).toBe('plot:plot');
-    const asset = events[3]?.payload as { kind: string; filePath: string };
+    const asset = events[3]?.payload as {
+      kind: string;
+      filePath: string;
+      metadata?: Record<string, unknown>;
+    };
     expect(asset.kind).toBe('image');
     expect(asset.filePath).toBe('assets/images/s1shot1.png');
+    expect(asset.metadata).toEqual({ provider: 'openrouter', usage: { cost: 0.04 } });
   });
 
   it('forwards tool error messages through the result event so the chat session can surface them', async () => {

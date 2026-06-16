@@ -4,6 +4,12 @@ node_modules/
 # Build output
 dist/
 
+# Core custom runner entrypoints are loaded directly from runner.json.
+!runners/openrouter-image/dist/
+!runners/openrouter-image/dist/index.js
+!runners/openrouter-video/dist/
+!runners/openrouter-video/dist/index.js
+
 # Environment
 .env
 .env.local

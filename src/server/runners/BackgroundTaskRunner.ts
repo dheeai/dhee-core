@@ -134,6 +134,7 @@ export interface TaskExecutionHooks {
     filePath: string;
     toolName?: string;
     nodeId?: string;
+    metadata?: Record<string, unknown>;
   }) => void;
 }
 
@@ -212,6 +213,7 @@ export interface BackgroundTaskRunnerEvents {
     filePath: string;
     toolName?: string;
     nodeId?: string;
+    metadata?: Record<string, unknown>;
   };
   completed: { task: TaskRecord };
   failed: { task: TaskRecord; error: string };
@@ -384,6 +386,7 @@ export class BackgroundTaskRunner {
           filePath: info.filePath,
           ...(info.toolName !== undefined ? { toolName: info.toolName } : {}),
           ...(info.nodeId !== undefined ? { nodeId: info.nodeId } : {}),
+          ...(info.metadata !== undefined ? { metadata: info.metadata } : {}),
         }),
     };
 

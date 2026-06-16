@@ -1,0 +1,255 @@
+{
+  "id": "openrouter_youtube_documentary",
+  "version": "0.1.1",
+  "displayName": "OpenRouter Documentary",
+  "summary": "YouTube-style documentary video using OpenRouter image and video generation.",
+  "techLine": "LLM PLAN + OPENROUTER IMAGE + OPENROUTER VIDEO",
+  "engineCompat": ">=0.1.0",
+  "description": "Creates a short documentary-style YouTube video from a topic or story. The bundle plans four documentary beats, writes narration guidance, generates a keyframe image per beat with OpenRouter, turns each beat into an OpenRouter video clip, and concatenates the clips into one MP4.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "openrouter.image": ">=0.1.0",
+      "openrouter.video": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0"
+    }
+  },
+  "inputs": [
+    {
+      "id": "story_input",
+      "kind": "file",
+      "path": "inputs/story.md",
+      "required": true,
+      "label": "Documentary topic",
+      "placeholder": "How a forgotten invention quietly changed modern music videos...",
+      "multiline": true
+    },
+    {
+      "id": "targetDuration",
+      "kind": "project",
+      "field": "targetDuration",
+      "default": 32,
+      "label": "Duration",
+      "control": "pills",
+      "unit": "seconds",
+      "options": [
+        { "value": 32, "label": "32s" }
+      ]
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "youtube_documentary",
+      "label": "Style",
+      "control": "select",
+      "options": [
+        { "value": "youtube_documentary", "label": "YouTube Documentary" },
+        { "value": "investigative", "label": "Investigative" },
+        { "value": "cinematic_history", "label": "Cinematic History" },
+        { "value": "tech_explainer", "label": "Tech Explainer" }
+      ]
+    },
+    {
+      "id": "aspect",
+      "kind": "project",
+      "field": "aspect",
+      "default": "16:9",
+      "label": "Aspect",
+      "control": "pills",
+      "options": [
+        { "value": "16:9", "label": "16:9" }
+      ]
+    },
+    {
+      "id": "imageModel",
+      "kind": "project",
+      "field": "imageModel",
+      "default": "google/gemini-2.5-flash-image",
+      "label": "Image Model",
+      "control": "text",
+      "placeholder": "google/gemini-2.5-flash-image"
+    },
+    {
+      "id": "videoModel",
+      "kind": "project",
+      "field": "videoModel",
+      "default": "google/veo-3.1",
+      "label": "Video Model",
+      "control": "text",
+      "placeholder": "google/veo-3.1"
+    }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "research_brief",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": { "format": "md", "pattern": "plans/research_brief.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/research_brief.md",
+          "tier": "heavy",
+          "outputFormat": "markdown",
+          "temperature": 0.35
+        }
+      },
+      "displayCapability": "documentary.research"
+    },
+    {
+      "id": "documentary_plan",
+      "kind": "stage",
+      "inputs": [
+        { "from": "research_brief", "usage": "context" }
+      ],
+      "outputs": { "format": "json", "pattern": "plans/documentary_plan.json" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/documentary_plan.md",
+          "outputSchema": "schemas/documentary_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json",
+          "temperature": 0.4,
+          "maxTokens": 6000
+        }
+      },
+      "displayCapability": "documentary.plan"
+    },
+    {
+      "id": "narration_script",
+      "kind": "stage",
+      "inputs": [
+        { "from": "research_brief", "usage": "context" },
+        { "from": "documentary_plan", "usage": "context" }
+      ],
+      "outputs": { "format": "md", "pattern": "plans/narration_script.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/narration_script.md",
+          "tier": "heavy",
+          "outputFormat": "markdown",
+          "temperature": 0.45
+        }
+      },
+      "displayCapability": "documentary.script"
+    },
+    {
+      "id": "segment_image_prompt",
+      "kind": "collection",
+      "itemSource": "documentary_plan",
+      "itemKey": "segments",
+      "inputs": [
+        { "from": "documentary_plan", "usage": "input", "scope": "matching" },
+        { "from": "narration_script", "usage": "context" },
+        { "from": "research_brief", "usage": "context" }
+      ],
+      "outputs": { "format": "md", "pattern": "prompts/images/{{item_id}}.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/segment_image_prompt.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "documentary.image_prompt",
+      "headlineField": "imagePrompt"
+    },
+    {
+      "id": "segment_image",
+      "kind": "collection",
+      "itemSource": "segment_image_prompt",
+      "inputs": [
+        { "from": "segment_image_prompt", "usage": "input", "scope": "matching" }
+      ],
+      "outputs": { "format": "image", "pattern": "assets/images/segments/{{item_id}}.png" },
+      "runner": {
+        "tool": "openrouter.image",
+        "config": {
+          "promptInput": "segment_image_prompt",
+          "modelInput": "imageModel",
+          "aspectRatio": "16:9",
+          "size": "1K",
+          "outputFormat": "png"
+        }
+      },
+      "displayCapability": "documentary.keyframe"
+    },
+    {
+      "id": "segment_motion_prompt",
+      "kind": "collection",
+      "itemSource": "documentary_plan",
+      "itemKey": "segments",
+      "inputs": [
+        { "from": "documentary_plan", "usage": "input", "scope": "matching" },
+        { "from": "narration_script", "usage": "context" },
+        { "from": "segment_image_prompt", "usage": "context", "scope": "matching" }
+      ],
+      "outputs": { "format": "md", "pattern": "prompts/video/{{item_id}}.md" },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/segment_motion_prompt.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.45
+        }
+      },
+      "displayCapability": "documentary.video_prompt",
+      "headlineField": "motionPrompt"
+    },
+    {
+      "id": "segment_video",
+      "kind": "collection",
+      "itemSource": "segment_motion_prompt",
+      "inputs": [
+        { "from": "segment_motion_prompt", "usage": "input", "scope": "matching" },
+        { "from": "segment_image", "usage": "reference", "scope": "matching" }
+      ],
+      "outputs": { "format": "video", "pattern": "videos/segments/{{item_id}}.mp4" },
+      "runner": {
+        "tool": "openrouter.video",
+        "config": {
+          "promptInput": "segment_motion_prompt",
+          "firstFrameInput": "segment_image",
+          "modelInput": "videoModel",
+          "duration": 8,
+          "aspectRatio": "16:9",
+          "resolution": "720p",
+          "generateAudio": false,
+          "pollIntervalMs": 30000,
+          "maxPolls": 180
+        }
+      },
+      "displayCapability": "documentary.segment_video"
+    },
+    {
+      "id": "final_video",
+      "kind": "stage",
+      "inputs": [
+        { "from": "segment_video", "usage": "input" }
+      ],
+      "outputs": { "format": "video", "pattern": "final/openrouter_documentary.mp4" },
+      "runner": {
+        "tool": "ffmpeg.concat",
+        "config": {}
+      },
+      "displayCapability": "final.video"
+    }
+  ],
+  "display": {
+    "thumbnail": {
+      "from": "final.video",
+      "pick": "latest_completed"
+    },
+    "stats": [
+      { "label": "segments", "source": "documentary.plan", "path": "segments.length" },
+      { "label": "clips", "source": "documentary.segment_video", "count_completed": true }
+    ]
+  }
+}
