@@ -194,6 +194,75 @@ describe('comfy.klein — reference resolution from shot prompt', () => {
     expect(wf['83']).toBeUndefined();
   });
 
+  it('resolves references by SOURCE NODE id when inputs are single-image path strings (UGC composite)', async () => {
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyKleinRunner({ clientFactory: () => makeStubClient(stub) });
+    const sceneImg = join(projectDir, 'scene.png');
+    const creatorImg = join(projectDir, 'creator.png');
+    writeFileSync(sceneImg, Buffer.from('s'));
+    writeFileSync(creatorImg, Buffer.from('c'));
+
+    const result = await runner.run(
+      makeCtx(
+        { ...baseConfig(), prompt: undefined },
+        {
+          host_frame_prompt: {
+            imagePrompt: 'the creator from image1 standing in the location from image0, facing camera',
+            references: [
+              { id: 'setting_image', type: 'setting' },
+              { id: 'character_image', type: 'character' },
+            ],
+          },
+          // single-image STAGE outputs (plain path strings, not collection maps)
+          setting_image: sceneImg,
+          character_image: creatorImg,
+        },
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    const wf = stub.queued[0]!;
+    expect(wf['76']!.inputs['image']).toBe('up_scene.png'); // setting → base_image
+    expect(wf['81']!.inputs['image']).toBe('up_creator.png'); // creator → reference_image_1
+  });
+
+  it('records the dependency against the ACTUAL prompt node id, not hardcoded shot_image_prompt (issue #158)', async () => {
+    const stub: Stub = { queued: [], uploads: [] };
+    const runner = createComfyKleinRunner({ clientFactory: () => makeStubClient(stub) });
+    const sceneImg = join(projectDir, 'scene2.png');
+    const creatorImg = join(projectDir, 'creator2.png');
+    writeFileSync(sceneImg, Buffer.from('s'));
+    writeFileSync(creatorImg, Buffer.from('c'));
+
+    const result = await runner.run(
+      makeCtx(
+        { ...baseConfig(), prompt: undefined },
+        {
+          // non-narrative prompt node — NOT named 'shot_image_prompt'
+          host_frame_prompt: {
+            imagePrompt: 'the creator from image1 in the location from image0',
+            references: [
+              { id: 'setting_image', type: 'setting' },
+              { id: 'character_image', type: 'character' },
+            ],
+          },
+          setting_image: sceneImg,
+          character_image: creatorImg,
+        },
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    const deps = (result.ok ? result.metadata?.['dependencies'] : undefined) as
+      | Array<{ nodeId: string; role?: string }>
+      | undefined;
+    // The prompt dep must point at the REAL upstream node, so cascade-
+    // invalidation can reach this image when its prompt is regenerated.
+    expect(deps?.[0]).toMatchObject({ nodeId: 'host_frame_prompt', role: 'input' });
+    // Counter: the old hardcoded id must NOT be recorded.
+    expect(deps?.some((d) => d.nodeId === 'shot_image_prompt')).toBe(false);
+  });
+
   it('fails clearly when the shot prompt has zero resolvable references (base_image required)', async () => {
     const stub: Stub = { queued: [], uploads: [] };
     const runner = createComfyKleinRunner({ clientFactory: () => makeStubClient(stub) });

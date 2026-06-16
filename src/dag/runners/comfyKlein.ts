@@ -116,7 +116,7 @@ function lowerKeyed(m: Record<string, string> | undefined): Record<string, strin
  */
 function resolveReferences(
   ctx: RunnerContext,
-): { prompt?: string; shotPrompt: ShotPrompt | null; imageInputs: Record<string, string> } {
+): { prompt?: string; shotPrompt: ShotPrompt | null; imageInputs: Record<string, string>; promptNodeId?: string } {
   const imageInputs: Record<string, string> = {};
   const cfg = ctx.node.runner.config;
 
@@ -129,14 +129,18 @@ function resolveReferences(
     });
   }
 
-  // Else resolve from the upstream shot prompt JSON.
+  // Else resolve from the upstream shot prompt JSON. Capture the SOURCE
+  // NODE ID (the ctx.inputs key) the prompt came from so the dependency is
+  // recorded against the real prompt node, not a hardcoded name (issue #158).
   let shotPrompt: ShotPrompt | null = null;
+  let promptNodeId: string | undefined;
   if (!prompt || !imageInputs['base_image']) {
-    for (const v of Object.values(ctx.inputs)) {
+    for (const [inputKey, v] of Object.entries(ctx.inputs)) {
       if (v && typeof v === 'object' && 'imagePrompt' in (v as Record<string, unknown>)) {
         const p = v as ShotPrompt;
         if (typeof p.imagePrompt !== 'string') continue;
         shotPrompt = p;
+        promptNodeId = inputKey;
         if (!prompt) prompt = p.imagePrompt;
         if (!imageInputs['base_image'] && Array.isArray(p.references) && p.references.length > 0) {
           const maps: Record<string, Record<string, string>> = {};
@@ -145,7 +149,15 @@ function resolveReferences(
           }
           const refPaths: string[] = [];
           for (const ref of p.references) {
-            const path = maps[ref.type]?.[ref.id.toLowerCase()];
+            let path = maps[ref.type]?.[ref.id.toLowerCase()];
+            // Fallback for single-image (non-collection) callers, e.g. a UGC
+            // composite where `setting_image` / `product_image` are plain stage
+            // nodes, not collections: resolve the reference by its SOURCE NODE
+            // id directly when ctx.inputs[ref.id] is a path string.
+            if (!path) {
+              const direct = ctx.inputs[ref.id];
+              if (typeof direct === 'string' && direct.length > 0) path = direct;
+            }
             if (path) refPaths.push(path);
           }
           if (refPaths.length > 0) {
@@ -160,7 +172,7 @@ function resolveReferences(
     }
   }
 
-  return { prompt, shotPrompt, imageInputs };
+  return { prompt, shotPrompt, imageInputs, ...(promptNodeId ? { promptNodeId } : {}) };
 }
 
 export function createComfyKleinRunner(opts?: {
@@ -205,10 +217,14 @@ export function createComfyKleinRunner(opts?: {
       };
     }
 
-    const { prompt, shotPrompt, imageInputs } = resolveReferences(ctx);
+    const { prompt, shotPrompt, imageInputs, promptNodeId } = resolveReferences(ctx);
 
     const dependencies = shotPrompt
-      ? extractShotReferences({ promptItemId: ctx.itemId ?? '', prompt: shotPrompt })
+      ? extractShotReferences({
+          promptItemId: ctx.itemId ?? '',
+          ...(promptNodeId ? { promptNodeId } : {}),
+          prompt: shotPrompt,
+        })
       : undefined;
 
     const scalars: Record<string, unknown> = {};

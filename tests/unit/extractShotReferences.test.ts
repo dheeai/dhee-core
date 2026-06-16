@@ -140,4 +140,26 @@ describe('extractShotReferences', () => {
     const kiyokoDeps = r.filter((d) => d.itemId === 'kiyoko');
     expect(kiyokoDeps).toHaveLength(1);
   });
+
+  // issue #158: the prompt dep must record the ACTUAL upstream prompt node
+  // id, not a hardcoded 'shot_image_prompt'. Hardcoding it left the dep graph
+  // with a dangling edge in non-narrative bundles (e.g. ugc_ad's
+  // 'host_frame_prompt'), so cascade-invalidation never reached the image.
+  it('11. records the provided prompt node id (issue #158)', () => {
+    const r = extractShotReferences({
+      promptNodeId: 'host_frame_prompt',
+      promptItemId: '',
+      prompt: { imagePrompt: 'x', references: [] },
+    });
+    expect(r[0]).toEqual({ nodeId: 'host_frame_prompt', itemId: '', role: 'input' });
+    // counter: the old hardcoded id must NOT leak in.
+    expect(r.some((d) => d.nodeId === 'shot_image_prompt')).toBe(false);
+  });
+
+  it('12. defaults prompt node id to shot_image_prompt for back-compat', () => {
+    const r = extractShotReferences({ promptItemId: 's1_s5', prompt: null });
+    expect(r[0]).toEqual({ nodeId: 'shot_image_prompt', itemId: 's1_s5', role: 'input' });
+    const blank = extractShotReferences({ promptNodeId: '  ', promptItemId: 's1', prompt: null });
+    expect(blank[0]!.nodeId).toBe('shot_image_prompt');
+  });
 });
