@@ -18,6 +18,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { invalidateNodes, regenerateNode } from '../../src/dag/projectRegen.js';
+import type { DagBundle } from '../../src/dag/schema.js';
+
+// Minimal 3-node chain bundle: prompt -> image -> clip, wired via inputs[].from.
+// Only `nodes[].id` and `nodes[].inputs[].from` are read by the structural cascade.
+function chainBundle(): DagBundle {
+  return {
+    id: 'chain', version: '1.0.0', goal: 'a_clip',
+    nodes: [
+      { id: 'a_prompt', inputs: [], runner: { tool: 'llm.generate', config: {} }, outputs: { format: 'json', pattern: 'p.json' } },
+      { id: 'a_image', inputs: [{ from: 'a_prompt', usage: 'input' }], runner: { tool: 'comfy.klein', config: {} }, outputs: { format: 'image', pattern: 'i.png' } },
+      { id: 'a_clip', inputs: [{ from: 'a_image', usage: 'input' }], runner: { tool: 'comfy.ltx_director', config: {} }, outputs: { format: 'video', pattern: 'c.mp4' } },
+    ],
+  } as unknown as DagBundle;
+}
 
 let projectDir: string;
 
@@ -224,6 +238,37 @@ describe('invalidateNodes', () => {
     const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
     expect(after.walkState.nodes['shot_image:scene_1_shot_3']).toBeUndefined();
     expect(after.walkState.nodes['shot_image:scene_1_shot_4']).toBeDefined();
+  });
+
+  // issue #158: the event-derived cascade goes blind when a runner recorded a
+  // wrong/stale upstream dep (e.g. comfy.klein's phantom 'shot_image_prompt').
+  // Passing the bundle makes invalidateNodes follow the authoritative static
+  // inputs[] graph, so a prompt invalidation reliably reaches its image + clip.
+  it('cascades over the bundle inputs[] graph when a bundle is passed (issue #158)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed' },
+      a_image: { status: 'completed' },
+      a_clip: { status: 'completed' },
+    });
+    // No event log here, so the event-derived cascade alone would only clear a_prompt.
+    await invalidateNodes({ projectDir, nodeIds: ['a_prompt'], bundle: chainBundle() });
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined();
+    expect(after.walkState.nodes.a_image).toBeUndefined(); // structural downstream reached
+    expect(after.walkState.nodes.a_clip).toBeUndefined(); // transitively reached
+  });
+
+  it('WITHOUT a bundle, the cascade leaves structural downstream stale (the #158 bug, counter-test)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed' },
+      a_image: { status: 'completed' },
+    });
+    await invalidateNodes({ projectDir, nodeIds: ['a_prompt'] });
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined(); // target cleared
+    // With no bundle AND no recorded event dep, the downstream image survives —
+    // exactly the silent failure that left the ghost-hand image un-regenerated.
+    expect(after.walkState.nodes.a_image).toBeDefined();
   });
 
   it('errors clearly when project.json is missing', async () => {

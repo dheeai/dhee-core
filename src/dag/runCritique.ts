@@ -103,7 +103,9 @@ export async function runCritique(opts: RunCritiqueOpts): Promise<RunCritiqueRes
   writeFileSync(projectPath, JSON.stringify(project, null, 2), 'utf8');
 
   // 4. Invalidate the target — walker re-fires it on next dispatch.
-  const inv = await invalidateNodes({ projectDir, nodeIds: [key] });
+  //    Pass the bundle so the cascade follows the authoritative static
+  //    inputs[] graph, not just event-recorded deps (issue #158).
+  const inv = await invalidateNodes({ projectDir, nodeIds: [key], bundle });
   // If the node had no walkState entry yet (never ran), invalidate
   // returns it in `notFound`. That's fine — the critique is still
   // applied for the next regen.

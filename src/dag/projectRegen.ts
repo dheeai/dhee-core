@@ -36,6 +36,42 @@ import type {
   RunProjectViaBundleOpts,
   RunProjectViaBundleResult,
 } from '../server/runners/runProjectViaBundle.js';
+import type { DagBundle } from './schema.js';
+
+/**
+ * Transitive downstream node ids via the bundle's STATIC inputs[].from
+ * graph. Authoritative and never stale — unlike the event-recorded
+ * dependency graph, which a runner can poison by recording a wrong/stale
+ * upstream id (issue #158: comfy.klein recorded a phantom
+ * 'shot_image_prompt' dep, so the event-derived cascade missed the real
+ * image node and the critique never re-rendered it). Returns bare node
+ * ids (excludes the requested targets themselves).
+ */
+function bundleStructuralDownstream(bundle: DagBundle, requested: string[]): string[] {
+  const downstream = new Map<string, string[]>();
+  for (const node of bundle.nodes) {
+    for (const input of node.inputs) {
+      const list = downstream.get(input.from) ?? [];
+      if (!list.includes(node.id)) list.push(node.id);
+      downstream.set(input.from, list);
+    }
+  }
+  const out = new Set<string>();
+  const seen = new Set<string>();
+  const queue: string[] = [];
+  for (const r of requested) {
+    const bare = r.includes(':') ? r.split(':')[0]! : r;
+    if (!seen.has(bare)) { seen.add(bare); queue.push(bare); }
+  }
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const next of downstream.get(cur) ?? []) {
+      if (!out.has(next)) out.add(next);
+      if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+  }
+  return [...out];
+}
 
 export type RunProjectViaBundleFn = (opts: RunProjectViaBundleOpts) => Promise<RunProjectViaBundleResult>;
 
@@ -63,6 +99,12 @@ export interface InvalidateNodesOpts {
   nodeIds: string[];
   /** Optional audit tag (e.g. 'inspector-menu', 'chat'). Not persisted today; reserved for telemetry. */
   source?: string;
+  /** When provided, the cascade ALSO follows the bundle's static
+   *  inputs[].from graph (authoritative, never stale), unioned with the
+   *  event-derived cascade. Without this, a runner that recorded a
+   *  wrong/stale upstream id silently breaks the cascade — the apply
+   *  then disagrees with the bundle-graph preview (issue #158). */
+  bundle?: DagBundle;
 }
 
 export interface InvalidateNodesResult {
@@ -152,6 +194,19 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
   } catch {
     // Event log unreadable — fall back to requested keys only.
     cascadeKeys = [...opts.nodeIds];
+  }
+
+  // Union in the bundle's STATIC structural downstream (issue #158). The
+  // event-derived cascade above is item-precise but goes blind when a
+  // runner recorded a wrong/stale upstream id (e.g. comfy.klein's phantom
+  // 'shot_image_prompt' dep), silently leaving the dependent image
+  // `completed`. The bundle inputs[] graph never goes stale, so a prompt
+  // critique reliably reaches its image + everything downstream — matching
+  // what computeCascadeImpact already shows in the preview.
+  if (opts.bundle) {
+    const set = new Set(cascadeKeys);
+    for (const n of bundleStructuralDownstream(opts.bundle, opts.nodeIds)) set.add(n);
+    cascadeKeys = [...set];
   }
 
   // Open the event log ONCE for the whole invalidation. Every cascaded
