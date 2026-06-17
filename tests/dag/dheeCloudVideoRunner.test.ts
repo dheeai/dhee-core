@@ -193,4 +193,30 @@ describe('dhee.cloud.video runner', () => {
       error: 'dhee.cloud.video: expected artifact to be a base64 data URL',
     });
   });
+
+  it('surfaces non-JSON Dhee Cloud failures with status and response body', async () => {
+    process.env.DHEE_CLOUD_URL = 'https://cloud.dhee.test';
+    process.env.DHEE_CLOUD_TOKEN = 'desktop-token';
+    const fetchMock = vi.fn(async () =>
+      new Response('<html><body>Gateway Timeout</body></html>', {
+        status: 504,
+        statusText: 'Gateway Timeout',
+        headers: { 'content-type': 'text/html' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runner.run(makeCtx({
+      prompt: 'Slow camera push',
+      model: 'bytedance/seedance-2.0',
+      outputPath: 'out/video.mp4',
+    }));
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        'dhee.cloud.video: Dhee Cloud request failed (504 Gateway Timeout) ' +
+        'with non-JSON response (text/html): <html><body>Gateway Timeout</body></html>',
+    });
+  });
 });

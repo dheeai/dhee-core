@@ -360,8 +360,29 @@ async function readJsonResponse(response, label) {
   try {
     return { ok: true, value: JSON.parse(raw) };
   } catch {
-    return { ok: false, error: `${label}: response was not valid JSON` };
+    const contentType = response.headers?.get?.('content-type');
+    const contentHint = contentType ? ` (${contentType})` : '';
+    const snippet = responseBodySnippet(raw);
+    if (!response.ok) {
+      return {
+        ok: false,
+        error:
+          `${label}: Dhee Cloud request failed ` +
+          `(${response.status} ${response.statusText || 'HTTP error'}) ` +
+          `with non-JSON response${contentHint}${snippet ? `: ${snippet}` : ''}`,
+      };
+    }
+    return {
+      ok: false,
+      error:
+        `${label}: response was not valid JSON${contentHint}` +
+        `${snippet ? `: ${snippet}` : ''}`,
+    };
   }
+}
+
+function responseBodySnippet(raw) {
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 500);
 }
 
 function readProviderError(body) {
