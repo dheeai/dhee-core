@@ -86,6 +86,59 @@ describe('regenerateNode', () => {
     expect(after.walkState.lastInvalidatedIds).toContain('story');
   });
 
+  // issue #158 (regen path): regenerateNode must load the project's bundle and
+  // cascade over the static inputs[].from graph, like runCritique does. Without
+  // it, `dhee regen <upstream>` cleared only the target and the walker logged
+  // the downstream consumers as "already completed" — e.g. regenerating an audio
+  // node never re-rendered the comfy.ltx_director clip that consumed it.
+  it('cascades to structural downstream via the loaded bundle graph (issue #158)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed', outputPath: 'p.json' },
+      a_image: { status: 'completed', outputPath: 'i.png' },
+      a_clip: { status: 'completed', outputPath: 'c.mp4' },
+    });
+    const runSpy = vi.fn().mockResolvedValue({ ok: true });
+
+    const result = await regenerateNode({
+      projectDir,
+      nodeId: 'a_prompt',
+      runProjectViaBundle: runSpy,
+      loadBundleForProject: () => chainBundle(),
+    });
+
+    expect(result.ok).toBe(true);
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined(); // target
+    expect(after.walkState.nodes.a_image).toBeUndefined(); // structural downstream
+    expect(after.walkState.nodes.a_clip).toBeUndefined(); // transitively reached
+  });
+
+  it('WITHOUT a loadable bundle, downstream stays stale (the #158 regen bug, counter-test)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed', outputPath: 'p.json' },
+      a_image: { status: 'completed', outputPath: 'i.png' },
+      a_clip: { status: 'completed', outputPath: 'c.mp4' },
+    });
+    const runSpy = vi.fn().mockResolvedValue({ ok: true });
+
+    const result = await regenerateNode({
+      projectDir,
+      nodeId: 'a_prompt',
+      runProjectViaBundle: runSpy,
+      // simulate the bundle being unloadable → fall back to event-derived cascade,
+      // which has no recorded deps in this fixture, so downstream is NOT reached.
+      loadBundleForProject: () => {
+        throw new Error('no bundle');
+      },
+    });
+
+    expect(result.ok).toBe(true); // regen still succeeds (graceful fallback)
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined(); // target cleared
+    expect(after.walkState.nodes.a_image).toBeDefined(); // downstream left stale
+    expect(after.walkState.nodes.a_clip).toBeDefined(); // downstream left stale
+  });
+
   it('handles a per-item invalidation by deleting only the matching nodeId:itemId entry', async () => {
     projectDir = makeProject({
       'shot_image:scene_1_shot_3': {

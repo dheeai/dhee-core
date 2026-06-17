@@ -26,9 +26,10 @@
  * from the runner module's load order (and so tests can use a stub).
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { cascadeInvalidationKeys, type CascadeTarget } from './cascadeInvalidationKeys.js';
+import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
 import { openEventLog } from './eventLog/EventLog.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
 import { isWalkLocked } from './projectWalkLock.js';
@@ -84,6 +85,15 @@ export interface RegenerateNodeOpts {
   signal?: AbortSignal;
   /** Defaults to lazy-loaded `runProjectViaBundle`. Override for tests. */
   runProjectViaBundle?: RunProjectViaBundleFn;
+  /**
+   * Loads the project's bundle so the invalidation cascade follows the
+   * authoritative static `inputs[].from` graph (issue #158) instead of
+   * the event-recorded deps, which a runner can leave incomplete (e.g.
+   * comfy.ltx_director clips not recording their audio upstream — that
+   * left `regen <audio>` failing to re-render the dependent clip).
+   * Defaults to reading project.json's bundleSource. Override for tests.
+   */
+  loadBundleForProject?: (projectDir: string) => DagBundle | Promise<DagBundle>;
 }
 
 export interface RegenerateNodeResult {
@@ -332,6 +342,28 @@ export async function invalidateNodes(opts: InvalidateNodesOpts): Promise<Invali
  * The invalidation is persisted BEFORE the dispatch so that if the
  * runner fails mid-flight, a retry picks up where this call left off.
  */
+/**
+ * Default bundle loader for regenerateNode — reads project.json's
+ * bundleSource and resolves the manifest. `loadBundle` is dynamically
+ * imported to avoid the walker ↔ projectRegen import cycle (walker.ts
+ * re-exports invalidateNodes/regenerateNode from this module).
+ */
+async function defaultLoadBundleForProject(projectDir: string): Promise<DagBundle> {
+  const pj = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8')) as { bundleSource?: string };
+  if (typeof pj.bundleSource !== 'string') {
+    throw new Error('project.json has no bundleSource field.');
+  }
+  const bundleDir = resolveBundleDir(parseBundleSource(pj.bundleSource));
+  let manifestPath = bundleDir;
+  try {
+    if (statSync(bundleDir).isDirectory()) manifestPath = join(bundleDir, 'bundle.json');
+  } catch {
+    /* fall through — treat bundleDir as the manifest path */
+  }
+  const { loadBundle } = await import('./walker.js');
+  return loadBundle(manifestPath);
+}
+
 export async function regenerateNode(opts: RegenerateNodeOpts): Promise<RegenerateNodeResult> {
   const key = opts.itemId ? `${opts.nodeId}:${opts.itemId}` : opts.nodeId;
 
@@ -351,9 +383,20 @@ export async function regenerateNode(opts: RegenerateNodeOpts): Promise<Regenera
     };
   }
 
+  // Load the bundle so the cascade follows the authoritative static
+  // inputs[].from graph (#158). If it can't be loaded, fall back to the
+  // event-derived cascade rather than failing the regen outright.
+  let bundle: DagBundle | undefined;
+  try {
+    bundle = await (opts.loadBundleForProject ?? defaultLoadBundleForProject)(opts.projectDir);
+  } catch {
+    bundle = undefined;
+  }
+
   const inv = await invalidateNodes({
     projectDir: opts.projectDir,
     nodeIds: [key],
+    ...(bundle ? { bundle } : {}),
   });
   if (inv.error) return { ok: false, error: inv.error };
 
