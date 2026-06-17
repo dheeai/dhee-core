@@ -35,6 +35,8 @@ interface KenBurnsConfig {
   fps?: number;
   width?: number;
   height?: number;
+  fit?: 'cover' | 'contain';
+  padColor?: string;
   outputPath?: string;
   forceRerun?: boolean;
 }
@@ -88,8 +90,17 @@ export function buildKenBurnsFilter(opts: {
   fps: number;
   width: number;
   height: number;
+  /** 'cover' (default) scales+crops to fill — best for photos. 'contain'
+   *  scales to FIT and pads, so a mismatched-aspect still (e.g. a landscape
+   *  screenshot in a 9:16 frame) is shown WHOLE with letterbox bars — nothing
+   *  cropped, pixel-exact. */
+  fit?: 'cover' | 'contain';
+  /** Pad/letterbox colour for fit:'contain'. Default near-black. */
+  padColor?: string;
 }): string {
   const { motion, zoom, totalFrames, fps, width, height } = opts;
+  const fit = opts.fit ?? 'cover';
+  const padColor = opts.padColor ?? '0x111319';
   const sw = width * 4;
   const sh = height * 4;
   // Per-frame zoom increment to reach `zoom` over the clip.
@@ -113,8 +124,12 @@ export function buildKenBurnsFilter(opts: {
     case 'in':
     default: break;
   }
+  const fitChain =
+    fit === 'contain'
+      ? `scale=${sw}:${sh}:force_original_aspect_ratio=decrease,pad=${sw}:${sh}:(${sw}-iw)/2:(${sh}-ih)/2:${padColor}`
+      : `scale=${sw}:${sh}:force_original_aspect_ratio=increase,crop=${sw}:${sh}`;
   return (
-    `scale=${sw}:${sh}:force_original_aspect_ratio=increase,crop=${sw}:${sh},` +
+    `${fitChain},` +
     `zoompan=z='${z}':d=${totalFrames}:x='${x}':y='${y}':s=${width}x${height}:fps=${fps},` +
     `format=yuv420p`
   );
@@ -192,7 +207,11 @@ export function createFfmpegKenBurnsRunner(): Runner {
       return { ok: true, outputPath: cfg.outputPath, metadata: { skipped: true, reason: 'output_exists' } };
     }
 
-    const filter = buildKenBurnsFilter({ motion, zoom, totalFrames, fps, width, height });
+    const filter = buildKenBurnsFilter({
+      motion, zoom, totalFrames, fps, width, height,
+      ...(cfg.fit ? { fit: cfg.fit } : {}),
+      ...(cfg.padColor ? { padColor: cfg.padColor } : {}),
+    });
     const args: string[] = [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-loop', '1', '-framerate', String(fps), '-i', imagePath,

@@ -19,6 +19,21 @@ describe('buildKenBurnsFilter', () => {
     expect(f).toContain('scale=5120:2880');
   });
 
+  it('fit:cover (default) scales-to-fill and crops', () => {
+    const f = buildKenBurnsFilter({ ...base, motion: 'in' });
+    expect(f).toContain('force_original_aspect_ratio=increase');
+    expect(f).toContain('crop=5120:2880');
+    expect(f).not.toContain('pad=');
+  });
+
+  it('fit:contain scales-to-FIT and pads (whole still shown, nothing cropped)', () => {
+    const f = buildKenBurnsFilter({ ...base, motion: 'in', fit: 'contain', padColor: '0x111319' });
+    expect(f).toContain('force_original_aspect_ratio=decrease');
+    expect(f).toContain('pad=5120:2880');
+    expect(f).toContain('0x111319');
+    expect(f).not.toContain('crop=');
+  });
+
   it('zoom-in ramps zoom UP toward the target', () => {
     const f = buildKenBurnsFilter({ ...base, motion: 'in' });
     expect(f).toContain("z='min(zoom+");
