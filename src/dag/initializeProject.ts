@@ -24,7 +24,7 @@
  * throwing, so the IPC layer can surface the cause cleanly without
  * try/catch noise.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
@@ -138,6 +138,15 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
         : {}),
     },
   };
+
+  // Seed the bundle's shipped assets (its inputs/ dir) into the project BEFORE
+  // applying user inputs, so a bundle can ship "talent" — a default creator
+  // photo, a reference voice, a default brief — that just works without the
+  // user supplying it. User-provided inputs (next step) overwrite the matching
+  // seeded files, so seeded assets act as defaults. No-op for bundles without
+  // an inputs/ dir (e.g. the narrative bundles, which generate everything).
+  const bundleDir = resolveBundleRootDir(bundleId);
+  if (bundleDir) seedBundleAssets(bundleDir, projectDir);
 
   if (bundle.inputs && bundle.inputs.length > 0) {
     const result = applyBundleInputs(projectDir, project, bundle.inputs, inputs);
@@ -333,6 +342,38 @@ function prePopulateProvidedOutputs(
       },
     });
   }
+}
+
+/** Resolve a built-in bundle's root DIRECTORY (null for single-file `.json`
+ * bundles or unresolvable ids). Used to locate shipped assets to seed. */
+function resolveBundleRootDir(bundleId: string): string | null {
+  try {
+    const dirOrJson = resolveBundleDir(parseBundleSource(`built-in:${bundleId}`));
+    return statSync(dirOrJson).isDirectory() ? dirOrJson : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy a bundle's shipped `inputs/` assets into the project's `inputs/` dir.
+ * Shallow (bundle inputs/ are flat files), binary-safe (copyFileSync). Returns
+ * the seeded filenames. No-op when the bundle has no `inputs/` dir. Called
+ * BEFORE applyBundleInputs so user-provided inputs overwrite the seeded
+ * defaults. Exported for unit testing.
+ */
+export function seedBundleAssets(bundleDir: string, projectDir: string): string[] {
+  const srcInputs = join(bundleDir, 'inputs');
+  if (!existsSync(srcInputs) || !statSync(srcInputs).isDirectory()) return [];
+  const destInputs = join(projectDir, 'inputs');
+  mkdirSync(destInputs, { recursive: true });
+  const seeded: string[] = [];
+  for (const entry of readdirSync(srcInputs, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    copyFileSync(join(srcInputs, entry.name), join(destInputs, entry.name));
+    seeded.push(entry.name);
+  }
+  return seeded;
 }
 
 function loadBundleManifest(bundleId: string): DagBundle | null {
