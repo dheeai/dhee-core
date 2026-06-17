@@ -31,6 +31,15 @@ import { retryTransient } from './transientRetry.js';
 interface PriorShot { shotNumber: number; itemId?: string; outputAbs: string }
 interface ShotPromptJSON {
   chosenBaseShotNumber?: number;
+  /**
+   * Optional EXPLICIT base-image selector. When set, the runner resolves
+   * it against the setting map (then character map) and uses it as the
+   * edit base — overriding the "first setting" fallback. This lets a
+   * non-chain caller (e.g. per-setting plate generation) target THE
+   * correct base in a multi-setting project: the plate prompt emits
+   * baseId = its settingId. Ignored when a prior shot is chosen.
+   */
+  baseId?: string;
   view: string;
   elevation: string;
   distance: string;
@@ -59,6 +68,58 @@ interface ChainConfig {
 
 import { resolveEndpointUrl } from './endpointResolver.js';
 
+/** A value has the Qwen camera-token prompt shape if it carries the
+ * azimuth `view` + the change `deltaText` (the two fields the runner
+ * needs to build `<sks> {view} … , {deltaText}`). */
+function isQwenPrompt(v: unknown): v is ShotPromptJSON {
+  return !!v && typeof v === 'object'
+    && typeof (v as Record<string, unknown>)['view'] === 'string'
+    && typeof (v as Record<string, unknown>)['deltaText'] === 'string';
+}
+
+/** Locate the upstream prompt JSON by shape. Prefers the conventional
+ * 'shot_image_prompt' input; otherwise returns the first shape-matching
+ * input value (so plate_prompt / any node emitting the camera-token shape
+ * drives this runner without a hardcoded key). */
+function findQwenPrompt(inputs: Record<string, unknown>): ShotPromptJSON | null {
+  if (isQwenPrompt(inputs['shot_image_prompt'])) return inputs['shot_image_prompt'];
+  for (const v of Object.values(inputs)) if (isQwenPrompt(v)) return v;
+  return null;
+}
+
+/**
+ * Pure base-image selection (no fs): priors (LLM-chosen, then most-recent)
+ * → explicit baseId (setting then character) → first setting → first
+ * character. Returns the chosen path (or null) + a human source label.
+ * Exported for unit testing — the runner does the existsSync check.
+ */
+export function selectQwenBase(
+  promptJSON: Pick<ShotPromptJSON, 'chosenBaseShotNumber' | 'baseId'>,
+  priors: PriorShot[],
+  setMap: Record<string, string>,
+  charMap: Record<string, string>,
+): { path: string | null; source: string } {
+  if (promptJSON.chosenBaseShotNumber !== undefined && priors.length > 0) {
+    const picked = priors.find((p) => p.shotNumber === promptJSON.chosenBaseShotNumber);
+    if (picked) return { path: picked.outputAbs, source: `prior shot ${picked.shotNumber}` };
+  }
+  if (priors.length > 0) {
+    return {
+      path: priors[0]!.outputAbs,
+      source: `prior shot ${priors[0]!.shotNumber} (fallback: LLM choice ${promptJSON.chosenBaseShotNumber ?? '<unset>'} not in priors)`,
+    };
+  }
+  if (promptJSON.baseId) {
+    if (setMap[promptJSON.baseId]) return { path: setMap[promptJSON.baseId]!, source: `setting '${promptJSON.baseId}' (explicit baseId)` };
+    if (charMap[promptJSON.baseId]) return { path: charMap[promptJSON.baseId]!, source: `character '${promptJSON.baseId}' (explicit baseId)` };
+  }
+  const settings = Object.values(setMap);
+  const chars = Object.values(charMap);
+  if (settings.length > 0) return { path: settings[0]!, source: 'setting (no prior shot)' };
+  if (chars.length > 0) return { path: chars[0]!, source: 'character (no prior shot)' };
+  return { path: null, source: '' };
+}
+
 async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   const cfg = ctx.node.runner.config as unknown as ChainConfig;
   if (!cfg.workflowPath || !cfg.outputPath) {
@@ -76,36 +137,21 @@ async function runQwenEditChain(ctx: RunnerContext): Promise<RunnerResult> {
   }
 
   // ── Read upstream inputs ──
-  const promptJSON = ctx.inputs['shot_image_prompt'] as ShotPromptJSON | undefined;
-  if (!promptJSON || typeof promptJSON !== 'object') {
-    return { ok: false, error: 'comfy.qwen_edit_chain: missing shot_image_prompt upstream' };
+  // Resolve the prompt JSON by SHAPE, not by a hardcoded input key, so this
+  // runner drives any node whose upstream emits the Qwen camera-token shape
+  // ({view, distance, deltaText, …}) — e.g. shot_image_prompt for shots OR
+  // plate_prompt for per-setting plates. Prefer the conventional
+  // 'shot_image_prompt' key, else the first shape-matching input.
+  const promptJSON = findQwenPrompt(ctx.inputs);
+  if (!promptJSON) {
+    return { ok: false, error: 'comfy.qwen_edit_chain: no upstream prompt with Qwen camera-token shape ({view, distance, deltaText, …})' };
   }
   const priors = (ctx.inputs['shot_image'] as PriorShot[] | undefined) ?? [];
   const charMap = (ctx.inputs['character_image'] as Record<string, string> | undefined) ?? {};
   const setMap = (ctx.inputs['setting_image'] as Record<string, string> | undefined) ?? {};
 
   // ── Pick the chain base ──
-  let baseImagePath: string | null = null;
-  let baseSource = '';
-  if (promptJSON.chosenBaseShotNumber !== undefined && priors.length > 0) {
-    const picked = priors.find((p) => p.shotNumber === promptJSON.chosenBaseShotNumber);
-    if (picked) {
-      baseImagePath = picked.outputAbs;
-      baseSource = `prior shot ${picked.shotNumber}`;
-    }
-  }
-  if (!baseImagePath && priors.length > 0) {
-    // No explicit choice or chosen number not found → take most recent (priors[0] is DESC).
-    baseImagePath = priors[0]!.outputAbs;
-    baseSource = `prior shot ${priors[0]!.shotNumber} (fallback: LLM choice ${promptJSON.chosenBaseShotNumber ?? '<unset>'} not in priors)`;
-  }
-  if (!baseImagePath) {
-    // Fall back to first setting image, then first character.
-    const settings = Object.values(setMap);
-    const chars = Object.values(charMap);
-    if (settings.length > 0) { baseImagePath = settings[0]!; baseSource = 'setting (no prior shot)'; }
-    else if (chars.length > 0) { baseImagePath = chars[0]!; baseSource = 'character (no prior shot)'; }
-  }
+  const { path: baseImagePath, source: baseSource } = selectQwenBase(promptJSON, priors, setMap, charMap);
   if (!baseImagePath || !existsSync(baseImagePath)) {
     return { ok: false, error: `comfy.qwen_edit_chain: no usable base image (priors=${priors.length}, settings=${Object.keys(setMap).length}, chars=${Object.keys(charMap).length})` };
   }
