@@ -21,7 +21,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { comfyQwenEditChainRunner } from '../../../src/dag/runners/comfyQwenEditChain.js';
+import { comfyQwenEditChainRunner, selectQwenBase } from '../../../src/dag/runners/comfyQwenEditChain.js';
 import type { RunnerContext, NodeDef } from '../../../src/dag/schema.js';
 
 let projectDir: string;
@@ -102,13 +102,13 @@ describe('comfy.qwen_edit_chain — early validation', () => {
       makeCtx({ ...baseCfg(), forceRerun: true }, {}),
     );
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/missing shot_image_prompt upstream/);
+    if (!r.ok) expect(r.error).toMatch(/no upstream prompt with Qwen camera-token shape/);
   });
 
   it('fails when shot_image_prompt upstream is missing', async () => {
     const r = await comfyQwenEditChainRunner.run(makeCtx(baseCfg(), {}));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/missing shot_image_prompt upstream/);
+    if (!r.ok) expect(r.error).toMatch(/no upstream prompt with Qwen camera-token shape/);
   });
 
   it('fails when shot_image_prompt is not an object', async () => {
@@ -116,7 +116,68 @@ describe('comfy.qwen_edit_chain — early validation', () => {
       makeCtx(baseCfg(), { shot_image_prompt: 'not-an-object' }),
     );
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/missing shot_image_prompt upstream/);
+    if (!r.ok) expect(r.error).toMatch(/no upstream prompt with Qwen camera-token shape/);
+  });
+
+  it('resolves the prompt by SHAPE from a non-"shot_image_prompt" input (e.g. plate_prompt)', async () => {
+    // The camera-token prompt arrives under a different key. The runner must
+    // still find it by shape and proceed PAST prompt-resolution to base-pick
+    // (proven by the "no usable base image" error, not the missing-prompt one).
+    const r = await comfyQwenEditChainRunner.run(
+      makeCtx(baseCfg(), { plate_prompt: validPrompt() }),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).not.toMatch(/no upstream prompt/);
+      expect(r.error).toMatch(/no usable base image/);
+    }
+  });
+
+  // Counter-test: an input that is an object but LACKS the camera-token
+  // fields must NOT be mistaken for the prompt.
+  it('does NOT treat a non-camera-token object as the prompt', async () => {
+    const r = await comfyQwenEditChainRunner.run(
+      makeCtx(baseCfg(), { some_other_json: { imagePrompt: 'a Klein-shaped prompt' } }),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/no upstream prompt with Qwen camera-token shape/);
+  });
+});
+
+describe('selectQwenBase — base-image priority', () => {
+  const setMap = { interview_room: '/s/interview_room.png', lobby: '/s/lobby.png' };
+  const charMap = { hero: '/c/hero.png' };
+
+  it('explicit baseId selects THE matching setting (multi-setting plate case)', () => {
+    const r = selectQwenBase({ baseId: 'lobby' }, [], setMap, charMap);
+    expect(r.path).toBe('/s/lobby.png');
+    expect(r.source).toMatch(/explicit baseId/);
+  });
+
+  it('baseId falls back to a character when no setting matches', () => {
+    const r = selectQwenBase({ baseId: 'hero' }, [], {}, charMap);
+    expect(r.path).toBe('/c/hero.png');
+    expect(r.source).toMatch(/character 'hero' \(explicit baseId\)/);
+  });
+
+  it('a prior shot OUTRANKS baseId (chain stays a chain)', () => {
+    const r = selectQwenBase(
+      { baseId: 'lobby', chosenBaseShotNumber: 5 },
+      [{ shotNumber: 5, outputAbs: '/p/shot5.png' }],
+      setMap,
+      charMap,
+    );
+    expect(r.path).toBe('/p/shot5.png');
+  });
+
+  it('without baseId or priors, falls back to the FIRST setting', () => {
+    const r = selectQwenBase({}, [], setMap, charMap);
+    expect(r.path).toBe('/s/interview_room.png');
+  });
+
+  it('returns null when nothing is available', () => {
+    const r = selectQwenBase({}, [], {}, {});
+    expect(r.path).toBeNull();
   });
 });
 
