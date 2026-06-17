@@ -28,6 +28,7 @@ import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
 import { resolveEndpointUrl } from './endpointResolver.js';
+import { unloadLocalLlmForComfy } from './gpuCoordinator.js';
 import { getProjectCacheScope } from '../projectIdentity.js';
 
 // ── Shared types ───────────────────────────────────────────────────────
@@ -447,6 +448,9 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
 
   // ── Queue + await ──
   if (ctx.signal?.aborted) return { ok: false, error: tag('aborted before queue') };
+  // Single-GPU swap: unload the local LLM/VLM off the shared GPU before this
+  // render (no-op unless DHEE_SINGLE_GPU=1). Best-effort; never blocks the render.
+  await unloadLocalLlmForComfy(undefined, ctx.log);
   let queueResult: { outputs: Array<{ filename: string; subfolder?: string }> };
   try {
     queueResult = await retryTransient(() => client.queueAndWait(workflow, ctx.signal), {

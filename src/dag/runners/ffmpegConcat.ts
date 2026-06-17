@@ -129,7 +129,8 @@ function resolveWatermarkOpacity(): number | undefined {
   return Math.min(1, Math.max(0, n));
 }
 
-async function reencodePass(
+// Exported for the behavioral pix_fmt regression test (WhatsApp playback).
+export async function reencodePass(
   ctx: RunnerContext,
   inputPath: string,
   outputPath: string,
@@ -148,6 +149,13 @@ async function reencodePass(
     '-c:v', 'libx264',
     '-preset', 'fast',
     '-crf', '20',
+    // Force 4:2:0 chroma + High profile. The watermark/overlay filtergraph
+    // outputs an RGB/4:4:4-friendly format, and without an explicit -pix_fmt
+    // libx264 preserves it as yuv444p (High 4:4:4 Predictive) — which phones
+    // and WhatsApp's H.264 decoder cannot play, so the final mp4 won't open
+    // when shared. yuv420p is the universally-decodable format.
+    '-pix_fmt', 'yuv420p',
+    '-profile:v', 'high',
     '-c:a', 'copy',
     '-movflags', '+faststart',
     outputPath,

@@ -43,6 +43,7 @@ import { dirname, resolve } from 'node:path';
 import OpenAI from 'openai';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { getVLMConfig } from '../../core/llm/getVLMConfig.js';
+import { freeComfyForLlm } from './gpuCoordinator.js';
 
 interface JudgeConfig {
   outputPath: string;
@@ -296,6 +297,10 @@ async function run(ctx: RunnerContext): Promise<RunnerResult> {
     `vlm.judge: attempt ${currentAttempt} — judging ${imageValue.split('/').pop()} with ${resolved.model} (threshold=${cfg.passThreshold ?? 0.7})`,
   );
 
+  // Single-GPU swap: free ComfyUI's VRAM before loading the VLM (no-op unless
+  // DHEE_SINGLE_GPU=1). Keeps a local VLM from fighting Comfy for the GPU.
+  await freeComfyForLlm(undefined, ctx.log);
+
   const client = new OpenAI({ baseURL: resolved.baseUrl, apiKey: resolved.apiKey });
   let raw = '';
   try {
@@ -303,6 +308,11 @@ async function run(ctx: RunnerContext): Promise<RunnerResult> {
       model: resolved.model,
       temperature: 0.1,
       max_tokens: cfg.maxTokens ?? 1200,
+      // Local Qwen3 VLMs (e.g. qwen-35b) are THINKING models: with thinking ON
+      // they burn the token budget on reasoning_content and frequently leave
+      // `content` empty → parse failures + huge latency. We only want the JSON
+      // verdict, so disable thinking. Harmless to providers that ignore it.
+      chat_template_kwargs: { enable_thinking: false },
       messages: [
         { role: 'system', content: systemPrompt },
         {
@@ -314,7 +324,9 @@ async function run(ctx: RunnerContext): Promise<RunnerResult> {
         },
       ],
     } as never);
-    raw = completion.choices[0]?.message?.content ?? '';
+    const msg = completion.choices[0]?.message as { content?: string; reasoning_content?: string } | undefined;
+    // Fall back to reasoning_content if a thinking path still emptied content.
+    raw = msg?.content || msg?.reasoning_content || '';
   } catch (e) {
     return { ok: false, error: `vlm.judge: VLM call failed: ${(e as Error).message}` };
   }

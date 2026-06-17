@@ -23,9 +23,16 @@ export interface ShotPromptShape {
 }
 
 export interface ShotReferenceInput {
-  /** The shot's itemId (e.g. 'scene_1_shot_3'). Always recorded as the
-   *  shot_image_prompt input dep. */
+  /** The shot's itemId (e.g. 'scene_1_shot_3'). Recorded as the prompt
+   *  input dep's itemId. */
   promptItemId: string;
+  /** The ACTUAL upstream prompt node id whose output this image consumes
+   *  (e.g. 'shot_image_prompt', 'host_frame_prompt'). Defaults to
+   *  'shot_image_prompt' for back-compat. Recording the real node id is
+   *  what lets cascade-invalidation reach this image when its prompt is
+   *  regenerated/critiqued — hardcoding 'shot_image_prompt' silently
+   *  broke the cascade in non-narrative bundles (issue #158). */
+  promptNodeId?: string;
   prompt: ShotPromptShape | null;
 }
 
@@ -41,8 +48,12 @@ const TYPE_TO_NODE: Record<string, string> = {
 };
 
 export function extractShotReferences(opts: ShotReferenceInput): NodeDependency[] {
+  const promptNodeId =
+    opts.promptNodeId && opts.promptNodeId.trim().length > 0
+      ? opts.promptNodeId.trim()
+      : 'shot_image_prompt';
   const out: NodeDependency[] = [
-    { nodeId: 'shot_image_prompt', itemId: opts.promptItemId, role: 'input' },
+    { nodeId: promptNodeId, itemId: opts.promptItemId, role: 'input' },
   ];
   const refs = opts.prompt?.references;
   if (!Array.isArray(refs)) return out;

@@ -18,6 +18,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { invalidateNodes, regenerateNode } from '../../src/dag/projectRegen.js';
+import type { DagBundle } from '../../src/dag/schema.js';
+
+// Minimal 3-node chain bundle: prompt -> image -> clip, wired via inputs[].from.
+// Only `nodes[].id` and `nodes[].inputs[].from` are read by the structural cascade.
+function chainBundle(): DagBundle {
+  return {
+    id: 'chain', version: '1.0.0', goal: 'a_clip',
+    nodes: [
+      { id: 'a_prompt', inputs: [], runner: { tool: 'llm.generate', config: {} }, outputs: { format: 'json', pattern: 'p.json' } },
+      { id: 'a_image', inputs: [{ from: 'a_prompt', usage: 'input' }], runner: { tool: 'comfy.klein', config: {} }, outputs: { format: 'image', pattern: 'i.png' } },
+      { id: 'a_clip', inputs: [{ from: 'a_image', usage: 'input' }], runner: { tool: 'comfy.ltx_director', config: {} }, outputs: { format: 'video', pattern: 'c.mp4' } },
+    ],
+  } as unknown as DagBundle;
+}
 
 let projectDir: string;
 
@@ -70,6 +84,59 @@ describe('regenerateNode', () => {
     const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
     expect(after.walkState.nodes.story).toBeUndefined();
     expect(after.walkState.lastInvalidatedIds).toContain('story');
+  });
+
+  // issue #158 (regen path): regenerateNode must load the project's bundle and
+  // cascade over the static inputs[].from graph, like runCritique does. Without
+  // it, `dhee regen <upstream>` cleared only the target and the walker logged
+  // the downstream consumers as "already completed" — e.g. regenerating an audio
+  // node never re-rendered the comfy.ltx_director clip that consumed it.
+  it('cascades to structural downstream via the loaded bundle graph (issue #158)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed', outputPath: 'p.json' },
+      a_image: { status: 'completed', outputPath: 'i.png' },
+      a_clip: { status: 'completed', outputPath: 'c.mp4' },
+    });
+    const runSpy = vi.fn().mockResolvedValue({ ok: true });
+
+    const result = await regenerateNode({
+      projectDir,
+      nodeId: 'a_prompt',
+      runProjectViaBundle: runSpy,
+      loadBundleForProject: () => chainBundle(),
+    });
+
+    expect(result.ok).toBe(true);
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined(); // target
+    expect(after.walkState.nodes.a_image).toBeUndefined(); // structural downstream
+    expect(after.walkState.nodes.a_clip).toBeUndefined(); // transitively reached
+  });
+
+  it('WITHOUT a loadable bundle, downstream stays stale (the #158 regen bug, counter-test)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed', outputPath: 'p.json' },
+      a_image: { status: 'completed', outputPath: 'i.png' },
+      a_clip: { status: 'completed', outputPath: 'c.mp4' },
+    });
+    const runSpy = vi.fn().mockResolvedValue({ ok: true });
+
+    const result = await regenerateNode({
+      projectDir,
+      nodeId: 'a_prompt',
+      runProjectViaBundle: runSpy,
+      // simulate the bundle being unloadable → fall back to event-derived cascade,
+      // which has no recorded deps in this fixture, so downstream is NOT reached.
+      loadBundleForProject: () => {
+        throw new Error('no bundle');
+      },
+    });
+
+    expect(result.ok).toBe(true); // regen still succeeds (graceful fallback)
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined(); // target cleared
+    expect(after.walkState.nodes.a_image).toBeDefined(); // downstream left stale
+    expect(after.walkState.nodes.a_clip).toBeDefined(); // downstream left stale
   });
 
   it('handles a per-item invalidation by deleting only the matching nodeId:itemId entry', async () => {
@@ -224,6 +291,37 @@ describe('invalidateNodes', () => {
     const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
     expect(after.walkState.nodes['shot_image:scene_1_shot_3']).toBeUndefined();
     expect(after.walkState.nodes['shot_image:scene_1_shot_4']).toBeDefined();
+  });
+
+  // issue #158: the event-derived cascade goes blind when a runner recorded a
+  // wrong/stale upstream dep (e.g. comfy.klein's phantom 'shot_image_prompt').
+  // Passing the bundle makes invalidateNodes follow the authoritative static
+  // inputs[] graph, so a prompt invalidation reliably reaches its image + clip.
+  it('cascades over the bundle inputs[] graph when a bundle is passed (issue #158)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed' },
+      a_image: { status: 'completed' },
+      a_clip: { status: 'completed' },
+    });
+    // No event log here, so the event-derived cascade alone would only clear a_prompt.
+    await invalidateNodes({ projectDir, nodeIds: ['a_prompt'], bundle: chainBundle() });
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined();
+    expect(after.walkState.nodes.a_image).toBeUndefined(); // structural downstream reached
+    expect(after.walkState.nodes.a_clip).toBeUndefined(); // transitively reached
+  });
+
+  it('WITHOUT a bundle, the cascade leaves structural downstream stale (the #158 bug, counter-test)', async () => {
+    projectDir = makeProject({
+      a_prompt: { status: 'completed' },
+      a_image: { status: 'completed' },
+    });
+    await invalidateNodes({ projectDir, nodeIds: ['a_prompt'] });
+    const after = JSON.parse(readFileSync(join(projectDir, 'project.json'), 'utf8'));
+    expect(after.walkState.nodes.a_prompt).toBeUndefined(); // target cleared
+    // With no bundle AND no recorded event dep, the downstream image survives —
+    // exactly the silent failure that left the ghost-hand image un-regenerated.
+    expect(after.walkState.nodes.a_image).toBeDefined();
   });
 
   it('errors clearly when project.json is missing', async () => {
