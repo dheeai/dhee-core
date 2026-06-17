@@ -684,7 +684,7 @@ function getByDotPath(obj: unknown, path: string): unknown {
  * Record<id, value> ready to merge into every node's ctx.inputs.
  * Throws on missing required inputs.
  */
-function resolveBundleInputs(
+export function resolveBundleInputs(
   decls: BundleInputDecl[] | undefined,
   projectDir: string,
 ): Record<string, unknown> {
@@ -708,12 +708,19 @@ function resolveBundleInputs(
         }
         continue;
       }
-      const raw = readFileSync(p, 'utf-8');
-      out[d.id] = d.path.endsWith('.json')
-        ? (() => {
-            try { return JSON.parse(raw); } catch { return raw; }
-          })()
-        : raw;
+      // Binary assets (images / audio / video) resolve to their absolute
+      // PATH so a runner can upload or animate them. Text files resolve to
+      // their CONTENT (so prompt templates / TTS read the text directly).
+      if (/\.(png|jpe?g|webp|gif|bmp|wav|mp3|flac|m4a|ogg|mp4|mov|webm|mkv)$/i.test(d.path)) {
+        out[d.id] = p;
+      } else {
+        const raw = readFileSync(p, 'utf-8');
+        out[d.id] = d.path.endsWith('.json')
+          ? (() => {
+              try { return JSON.parse(raw); } catch { return raw; }
+            })()
+          : raw;
+      }
     } else if (d.kind === 'project') {
       if (!projectJson) {
         if (d.required !== false && d.default === undefined) {
