@@ -35,4 +35,15 @@ describe('buildXfadeGraph', () => {
     const { filter } = buildXfadeGraph([5, 5], 'wipeleft', 0.4);
     expect(filter).toContain('xfade=transition=wipeleft:duration=0.4');
   });
+
+  it('normalizes every input to the target size when given (mixed-dim clips)', () => {
+    const { filter } = buildXfadeGraph([5, 5], 'fade', 0.5, { width: 768, height: 1280 });
+    // both inputs scaled-to-cover + cropped to the common target before xfade
+    expect((filter.match(/scale=768:1280:force_original_aspect_ratio=increase,crop=768:1280,setsar=1/g) ?? []).length).toBe(2);
+  });
+
+  it('WITHOUT a target, inputs are not rescaled (counter-test, back-compat)', () => {
+    const { filter } = buildXfadeGraph([5, 5], 'fade', 0.5);
+    expect(filter).not.toContain('force_original_aspect_ratio');
+  });
 });

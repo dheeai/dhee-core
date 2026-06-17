@@ -25,7 +25,7 @@
  */
 import { existsSync, mkdirSync, copyFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { ffmpegBin, ffprobeBin } from './ffmpegBin.js';
 import { resolveWatermarkPath, buildWatermarkOverlayFilter } from '../../core/timeline/watermark.js';
@@ -56,6 +56,19 @@ function probeDurationSec(inputPath: string): Promise<number | null> {
   });
 }
 
+function probeDims(inputPath: string): { width: number; height: number } | null {
+  try {
+    const out = spawnSync(ffprobeBin(), [
+      '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
+      '-of', 'csv=s=x:p=0', inputPath,
+    ], { encoding: 'utf-8' }).stdout.trim();
+    const [w, h] = out.split('x').map((n) => parseInt(n, 10));
+    return Number.isFinite(w) && Number.isFinite(h) && w! > 0 && h! > 0 ? { width: w!, height: h! } : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Build an xfade (video) + acrossfade (audio) filtergraph that chains N clips
  * with a crossfade of `d` seconds at each junction. Returns the filter_complex
@@ -64,12 +77,24 @@ function probeDurationSec(inputPath: string): Promise<number | null> {
  * xfade offset for the k-th junction = (merged length so far) − d
  *   = sum(dur[0..k-1]) − k*d   (prefix sum minus k overlaps).
  */
-export function buildXfadeGraph(durations: number[], transition: string, d: number): { filter: string; vLabel: string; aLabel: string } {
+export function buildXfadeGraph(
+  durations: number[],
+  transition: string,
+  d: number,
+  /** When set, every input is scaled-to-cover + cropped to these dims first.
+   *  xfade requires all inputs to share width/height; mixed-runner clips often
+   *  differ (e.g. LTX rounds to a latent-multiple 768 while a Ken Burns clip is
+   *  true-9:16 720), so normalizing here keeps the crossfade valid. */
+  target?: { width: number; height: number },
+): { filter: string; vLabel: string; aLabel: string } {
   const n = durations.length;
   const parts: string[] = [];
-  // Normalize each clip's timebase so xfade is happy.
+  const norm = target
+    ? `scale=${target.width}:${target.height}:force_original_aspect_ratio=increase,crop=${target.width}:${target.height},setsar=1,`
+    : '';
+  // Normalize each clip's size (optional) + timebase so xfade is happy.
   for (let i = 0; i < n; i++) {
-    parts.push(`[${i}:v]settb=AVTB,format=yuv420p[v${i}]`);
+    parts.push(`[${i}:v]${norm}settb=AVTB,format=yuv420p[v${i}]`);
     parts.push(`[${i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`);
   }
   let prevV = `v0`;
@@ -235,7 +260,18 @@ async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
       if (dur == null) return { ok: false, error: `ffmpeg.concat: could not probe duration of ${p} (needed for '${transition}' transitions)` };
       durations.push(dur);
     }
-    const { filter, vLabel, aLabel } = buildXfadeGraph(durations, transition, d);
+    // Probe all input dims and normalize to the common MAX size — xfade rejects
+    // mismatched dims (e.g. a 720×1280 Ken Burns cutaway among 768×1280 LTX clips).
+    let target: { width: number; height: number } | undefined;
+    const dims = cfg.inputs.map((p) => probeDims(p));
+    if (dims.every((x) => x) && new Set(dims.map((x) => `${x!.width}x${x!.height}`)).size > 1) {
+      target = {
+        width: Math.max(...dims.map((x) => x!.width)),
+        height: Math.max(...dims.map((x) => x!.height)),
+      };
+      ctx.log(`ffmpeg.concat: clips differ in size — normalizing all to ${target.width}x${target.height} before xfade`);
+    }
+    const { filter, vLabel, aLabel } = buildXfadeGraph(durations, transition, d, target);
     const xfadeTarget = needsReencode ? `${outputAbs}.xfade.tmp.mp4` : outputAbs;
     const inputArgs = cfg.inputs.flatMap((p) => ['-i', p]);
     ctx.log(`ffmpeg.concat: ${transition} crossfade (${d}s) across ${cfg.inputs.length} clips → ${needsReencode ? '<temp>' : cfg.outputPath}`);
