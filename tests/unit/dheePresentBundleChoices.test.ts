@@ -15,6 +15,9 @@
  *  6. Duplicates allowed but deduped in output (defensive).
  */
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { makePresentBundleChoicesTool } from '../../src/agent/pi/tools/dheePresentBundleChoices.js';
 
 interface ToolLike {
@@ -66,5 +69,45 @@ describe('dhee_present_bundle_choices', () => {
     const r = await tool.execute('t', { bundleIds: ['a', 'b', 'a'] });
     const parsed = JSON.parse(r.content[0].text);
     expect(parsed.bundleIds).toEqual(['a', 'b']);
+  });
+
+  it('7. includes runtime support metadata for bundle choice cards', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dhee-bundle-choices-'));
+    const savedUserDir = process.env['DHEE_USER_BUNDLES_DIR'];
+    try {
+      process.env['DHEE_USER_BUNDLES_DIR'] = dir;
+      mkdirSync(join(dir, 'cloudy'), { recursive: true });
+      writeFileSync(
+        join(dir, 'cloudy', 'bundle.json'),
+        JSON.stringify({
+          id: 'cloudy',
+          version: '0.1.0',
+          displayName: 'Cloudy',
+          summary: 'Cloud capable.',
+          runtimeSupport: {
+            modes: ['local', 'dhee_cloud'],
+            providers: ['comfy'],
+          },
+        }),
+      );
+
+      const tool = makePresentBundleChoicesTool() as unknown as ToolLike;
+      const r = await tool.execute('t', { bundleIds: ['cloudy'] });
+      const parsed = JSON.parse(r.content[0].text);
+
+      expect(parsed.bundles[0]).toMatchObject({
+        id: 'cloudy',
+        displayName: 'Cloudy',
+        summary: 'Cloud capable.',
+        runtimeSupport: {
+          modes: ['local', 'dhee_cloud'],
+          providers: ['comfy'],
+        },
+      });
+    } finally {
+      if (savedUserDir === undefined) delete process.env['DHEE_USER_BUNDLES_DIR'];
+      else process.env['DHEE_USER_BUNDLES_DIR'] = savedUserDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

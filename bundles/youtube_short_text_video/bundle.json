@@ -6,6 +6,10 @@
   "techLine": "LLM PLAN + FFMPEG VERTICAL MP4",
   "engineCompat": ">=0.1.0",
   "description": "A portable Dhee bundle for creating a 30-second YouTube Short. It writes a real vertical MP4 using the existing LLM planning runner and FFmpeg clip/concat runners, so it can run without ComfyUI, GPU setup, or external image/video APIs.",
+  "runtimeSupport": {
+    "modes": ["local", "dhee_cloud"],
+    "providers": ["llm", "ffmpeg"]
+  },
   "dependencies": {
     "runners": {
       "llm.generate": ">=0.1.0",

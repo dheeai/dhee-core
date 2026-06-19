@@ -16,6 +16,10 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { getBundleSearchRoots } from './bundleSource.js';
 import { findNpmBundles } from './ecosystem.js';
+import {
+  bundleRuntimeSupport,
+  type BundleRuntimeSupport,
+} from './bundleRuntimeSupport.js';
 import type { BundleInputDecl, DagBundle } from './schema.js';
 
 export interface BundleSummary {
@@ -26,6 +30,7 @@ export interface BundleSummary {
   techLine?: string;
   description?: string;
   inputs?: BundleInputDecl[];
+  runtimeSupport: BundleRuntimeSupport;
   /**
    * True iff the bundle.json explicitly declared BOTH displayName AND
    * summary (i.e. the author opted-in to user-facing presentation).
@@ -107,6 +112,7 @@ function readBundleSummary(manifestPath: string): BundleSummary | null {
       version: parsed.version,
       displayName,
       summary,
+      runtimeSupport: bundleRuntimeSupport(parsed),
       pickerEligible: declaredDisplayName !== null && declaredSummary !== null,
       ...(parsed.techLine ? { techLine: parsed.techLine } : {}),
       ...(description ? { description } : {}),

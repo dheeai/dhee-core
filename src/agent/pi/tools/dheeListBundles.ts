@@ -14,6 +14,11 @@ import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
 import { getBundleSearchRoots } from '../../../dag/bundleSource.js';
 import { titleizeBundleId, summaryOf } from '../../../dag/bundleDisplay.js';
+import {
+  bundleRuntimeSupport,
+  type BundleRuntimeSupport,
+} from '../../../dag/bundleRuntimeSupport.js';
+import type { DagBundle } from '../../../dag/schema.js';
 
 export interface ListBundlesDeps {
   /**
@@ -33,6 +38,7 @@ export interface BundleEntry {
   displayName: string;
   /** Short tagline for the picker card (≤120 chars; derived from description if bundle.json omits). */
   summary: string;
+  runtimeSupport: BundleRuntimeSupport;
 }
 
 function textResult(text: string) {
@@ -45,6 +51,8 @@ interface BundleJsonShape {
   description?: string;
   displayName?: string;
   summary?: string;
+  runtimeSupport?: unknown;
+  nodes?: DagBundle['nodes'];
 }
 
 function readBundleJson(path: string): BundleEntry | null {
@@ -68,6 +76,7 @@ function readBundleJson(path: string): BundleEntry | null {
       description,
       displayName,
       summary,
+      runtimeSupport: bundleRuntimeSupport(parsed),
     };
   } catch {
     return null;

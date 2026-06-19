@@ -4,6 +4,10 @@
   "license": "MIT",
   "engineCompat": ">=0.1.0",
   "description": "Klein-based variant of narrative_qwen_chain_review. Same review loop and LTX relay video synthesis, but shot images come from Klein (comfy.klein) instead of the Qwen Edit chain. Each shot image is judged by a VLM (xiaomi/mimo-v2.5 by default); on fail, the walker re-runs shot_image_prompt with the judge's critique applied. Up to 3 total attempts per shot.",
+  "runtimeSupport": {
+    "modes": ["local", "dhee_cloud"],
+    "providers": ["comfy", "llm", "ffmpeg"]
+  },
   "reviewLoopMax": 1,
   "dependencies": {
     "runners": {

@@ -49,6 +49,10 @@ describe('listBundles', () => {
       displayName: 'My Bundle',
       summary: 'Does a thing well.',
       description: 'A longer description that should not override the explicit summary.',
+      runtimeSupport: {
+        modes: ['local', 'dhee_cloud'],
+        providers: ['comfy'],
+      },
     });
     const b = byId('uq_explicit_xyz');
     expect(b).toBeDefined();
@@ -59,6 +63,10 @@ describe('listBundles', () => {
     expect(b!.description).toBe(
       'A longer description that should not override the explicit summary.',
     );
+    expect(b!.runtimeSupport).toEqual({
+      modes: ['local', 'dhee_cloud'],
+      providers: ['comfy'],
+    });
   });
 
   it('titleizes the id for displayName when none is declared, preserving known acronyms', () => {
@@ -180,6 +188,22 @@ describe('listBundles', () => {
     const b = byId('uq_extras_zzz');
     expect(b!.techLine).toBe('LTX + Qwen');
     expect(b!.inputs).toEqual([{ id: 'story', type: 'text', label: 'Story' }]);
+  });
+
+  it('infers runtimeSupport from runner tools when metadata is absent', () => {
+    writeBundle('uq_runtime_fallback_zzz', {
+      id: 'uq_runtime_fallback_zzz',
+      version: '0.1.0',
+      nodes: [
+        { id: 'text', runner: { tool: 'llm.generate' } },
+        { id: 'clip', runner: { tool: 'ffmpeg.concat' } },
+      ],
+    });
+    const b = byId('uq_runtime_fallback_zzz');
+    expect(b!.runtimeSupport).toEqual({
+      modes: ['local', 'dhee_cloud'],
+      providers: ['llm', 'ffmpeg'],
+    });
   });
 
   it('first-seen-wins: a top-level .json manifest file is also scanned', () => {
