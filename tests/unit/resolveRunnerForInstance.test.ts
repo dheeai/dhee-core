@@ -295,4 +295,77 @@ describe('resolveRunnerForInstance', () => {
     });
     expect(r.tool).toBe('comfy.image');
   });
+
+  it('11. node-scope swap applies to every item, but instance-scope wins for the exact item', () => {
+    const dir = tmp();
+    const log = openEventLog(dir);
+    log.append({
+      kind: 'runner.swapped',
+      actor: 'user',
+      branchId: 'main',
+      payload: {
+        nodeId: 'shot_video',
+        itemId: 'scene_1_shot_2',
+        scope: 'instance',
+        fromTool: 'openrouter.video',
+        toTool: 'comfy.fl2v',
+        reason: 'fix one shot',
+      },
+    });
+    log.append({
+      kind: 'runner.swapped',
+      actor: 'user',
+      branchId: 'main',
+      payload: {
+        nodeId: 'shot_video',
+        scope: 'node',
+        fromTool: 'openrouter.video',
+        toTool: 'dhee.cloud.video',
+        reason: 'new default',
+      },
+    });
+
+    const exact = resolveRunnerForInstance({
+      projectDir: dir,
+      nodeId: 'shot_video',
+      itemId: 'scene_1_shot_2',
+      fallbackTool: 'openrouter.video',
+    });
+    const sibling = resolveRunnerForInstance({
+      projectDir: dir,
+      nodeId: 'shot_video',
+      itemId: 'scene_1_shot_3',
+      fallbackTool: 'openrouter.video',
+    });
+
+    expect(exact.tool).toBe('comfy.fl2v');
+    expect(exact.scope).toBe('instance');
+    expect(sibling.tool).toBe('dhee.cloud.video');
+    expect(sibling.scope).toBe('node');
+  });
+
+  it('12. generatedConfigOverride merges before user configOverride', () => {
+    const dir = tmp();
+    openEventLog(dir).append({
+      kind: 'runner.swapped',
+      actor: 'user',
+      branchId: 'main',
+      payload: {
+        nodeId: 'shot_video',
+        scope: 'node',
+        fromTool: 'openrouter.video',
+        toTool: 'dhee.cloud.video',
+        reason: 'new default',
+        generatedConfigOverride: { promptInput: 'generated_prompt', seed: 1 },
+        configOverride: { seed: 99 },
+      },
+    });
+    const r = resolveRunnerForInstance({
+      projectDir: dir,
+      nodeId: 'shot_video',
+      itemId: 'scene_1_shot_2',
+      fallbackTool: 'openrouter.video',
+    });
+    expect(r.configOverride).toEqual({ promptInput: 'generated_prompt', seed: 99 });
+  });
 });

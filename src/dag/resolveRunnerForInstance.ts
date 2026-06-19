@@ -9,10 +9,10 @@
  *
  * Matching rules:
  *   - nodeId must match exactly.
- *   - itemId equality is strict: a swap on `shot_image` (no itemId)
- *     applies to bare `shot_image` dispatches only, NOT to
- *     `shot_image:scene_1_shot_3`. Symmetrically, a swap on
- *     `shot_image:scene_1_shot_3` doesn't apply to bare queries.
+ *   - scope='instance' applies only to the exact itemId.
+ *   - scope='node' applies to every instance of that node.
+ *   - legacy events with no scope keep the old strict itemId behavior.
+ *   - instance-scope wins over node-scope, regardless of seq.
  *   - When `branchId` is given, only events with the same `branchId`
  *     are considered. Otherwise events from all branches contribute
  *     (legacy callers).
@@ -40,27 +40,51 @@ export interface ResolvedRunner {
   tool: string;
   /** Optional config to merge on top of `node.runner.config`. */
   configOverride?: Record<string, unknown>;
+  runtimeBindings?: Array<{ configKey: string; fromInput: string }>;
+  forced?: boolean;
+  scope?: 'node' | 'instance' | 'legacy';
+  eventSeq?: number;
 }
 
 export function resolveRunnerForInstance(
   opts: ResolveRunnerForInstanceOpts,
 ): ResolvedRunner {
   const log = openEventLog(opts.projectDir);
-  let chosen: DheeEvent<'runner.swapped'> | null = null;
+  let instanceChosen: DheeEvent<'runner.swapped'> | null = null;
+  let nodeChosen: DheeEvent<'runner.swapped'> | null = null;
   for (const e of log.read()) {
     if (e.kind !== 'runner.swapped') continue;
     if (opts.branchId && e.branchId !== opts.branchId) continue;
     const ev = e as DheeEvent<'runner.swapped'>;
     if (ev.payload.nodeId !== opts.nodeId) continue;
-    // Strict itemId equality: undefined matches undefined; any other
-    // mismatch is a no-match.
+    if (ev.payload.scope === 'node') {
+      if (!nodeChosen || ev.seq > nodeChosen.seq) nodeChosen = ev;
+      continue;
+    }
+    if (ev.payload.scope === 'instance') {
+      if ((ev.payload.itemId ?? undefined) !== (opts.itemId ?? undefined)) continue;
+      if (!instanceChosen || ev.seq > instanceChosen.seq) instanceChosen = ev;
+      continue;
+    }
+    // Legacy strict itemId equality: undefined matches undefined; any
+    // other mismatch is a no-match. This preserves the old item-only
+    // behavior for events emitted before scope existed.
     if ((ev.payload.itemId ?? undefined) !== (opts.itemId ?? undefined)) continue;
-    if (!chosen || ev.seq > chosen.seq) chosen = ev;
+    if (!instanceChosen || ev.seq > instanceChosen.seq) instanceChosen = ev;
   }
+  const chosen = instanceChosen ?? nodeChosen;
   if (!chosen) return { tool: opts.fallbackTool };
-  const out: ResolvedRunner = { tool: chosen.payload.toTool };
-  if (chosen.payload.configOverride) {
-    out.configOverride = chosen.payload.configOverride;
-  }
+  const configOverride = {
+    ...(chosen.payload.generatedConfigOverride ?? {}),
+    ...(chosen.payload.configOverride ?? {}),
+  };
+  const out: ResolvedRunner = {
+    tool: chosen.payload.toTool,
+    ...(Object.keys(configOverride).length > 0 ? { configOverride } : {}),
+    ...(chosen.payload.runtimeBindings ? { runtimeBindings: chosen.payload.runtimeBindings } : {}),
+    ...(chosen.payload.forced ? { forced: true } : {}),
+    scope: chosen.payload.scope ?? 'legacy',
+    eventSeq: chosen.seq,
+  };
   return out;
 }

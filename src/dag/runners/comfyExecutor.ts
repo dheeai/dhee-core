@@ -48,6 +48,7 @@ export interface ComfyImageClient {
   queueAndWait(
     workflow: Record<string, unknown>,
     signal?: AbortSignal,
+    options?: { workflowId?: string },
   ): Promise<{
     outputs: Array<{ filename: string; subfolder?: string; nodeId?: string }>;
   }>;
@@ -80,6 +81,8 @@ export interface ExecuteComfyOptions {
   parameterMappings?: ComfyImageParameterMapping[];
   /** Named endpoint (ENDPOINT_<name>). */
   endpoint?: string;
+  /** Billing/catalog workflow id sent through Comfy Cloud extra_data. */
+  workflowId?: string;
   /** Output path, relative to projectDir. */
   outputPath: string;
   /** Prompt text (for the node + CAS key). */
@@ -124,11 +127,14 @@ export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: s
       const r = await client.uploadImage(filePath, 'input', true);
       return { name: r.name };
     },
-    async queueAndWait(workflow, signal) {
+    async queueAndWait(workflow, signal, options) {
       const { outputs, promptId } = await client.queueAndWaitWS(
         workflow,
         undefined,
-        signal ? { signal } : {},
+        {
+          ...(signal ? { signal } : {}),
+          ...(options?.workflowId ? { workflowId: options.workflowId } : {}),
+        },
       );
       let resolved = outputs;
       if (resolved.length === 0 && promptId) {
@@ -154,19 +160,25 @@ export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: s
 
 function loadManifest(
   manifestAbs: string,
-): { ok: true; mappings: ComfyImageParameterMapping[]; requirements: InputRequirement[] } | { ok: false; error: string } {
+): { ok: true; mappings: ComfyImageParameterMapping[]; requirements: InputRequirement[]; workflowId?: string } | { ok: false; error: string } {
   if (!existsSync(manifestAbs)) {
     return { ok: false, error: `workflow manifest not found at ${manifestAbs}` };
   }
   try {
     const m = JSON.parse(readFileSync(manifestAbs, 'utf-8')) as {
+      id?: unknown;
       parameterMappings?: ComfyImageParameterMapping[];
       inputRequirements?: InputRequirement[];
     };
     if (!m.parameterMappings || !Array.isArray(m.parameterMappings)) {
       return { ok: false, error: `manifest at ${manifestAbs} has no parameterMappings array` };
     }
-    return { ok: true, mappings: m.parameterMappings, requirements: m.inputRequirements ?? [] };
+    return {
+      ok: true,
+      mappings: m.parameterMappings,
+      requirements: m.inputRequirements ?? [],
+      ...(typeof m.id === 'string' && m.id.trim() ? { workflowId: m.id.trim() } : {}),
+    };
   } catch (err) {
     return { ok: false, error: `failed to parse manifest at ${manifestAbs}: ${(err as Error).message}` };
   }
@@ -325,6 +337,7 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
 
   let mappings: ComfyImageParameterMapping[];
   let requirements: InputRequirement[] = [];
+  let workflowId = opts.workflowId;
   if (opts.parameterMappings) {
     mappings = opts.parameterMappings;
   } else {
@@ -332,6 +345,7 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
     if (!m.ok) return { ok: false, error: tag(m.error) };
     mappings = m.mappings;
     requirements = m.requirements;
+    workflowId ??= m.workflowId;
   }
 
   // ── Required-input enforcement (manifest-driven, no per-workflow heuristic) ──
@@ -453,11 +467,18 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
   await unloadLocalLlmForComfy(undefined, ctx.log);
   let queueResult: { outputs: Array<{ filename: string; subfolder?: string }> };
   try {
-    queueResult = await retryTransient(() => client.queueAndWait(workflow, ctx.signal), {
+    queueResult = await retryTransient(
+      () => client.queueAndWait(
+        workflow,
+        ctx.signal,
+        workflowId ? { workflowId } : undefined,
+      ),
+      {
       signal: ctx.signal,
       log: ctx.log,
       label: `${tool} queue`,
-    });
+      },
+    );
   } catch (err) {
     return { ok: false, error: tag((err as Error).message) };
   }

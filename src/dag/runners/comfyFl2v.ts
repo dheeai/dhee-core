@@ -54,6 +54,7 @@ export function createComfyFl2vRunner(opts?: {
       properties: {
         workflowPath: { type: 'string' },
         manifestPath: { type: 'string' },
+        workflowId: { type: 'string' },
         parameterMappings: { type: 'array' },
         endpoint: { type: 'string' },
         prompt: { type: 'string' },
@@ -104,6 +105,7 @@ export function createComfyFl2vRunner(opts?: {
         ? { parameterMappings: cfg['parameterMappings'] as never }
         : {}),
       ...(typeof cfg['endpoint'] === 'string' ? { endpoint: cfg['endpoint'] as string } : {}),
+      ...(typeof cfg['workflowId'] === 'string' ? { workflowId: cfg['workflowId'] as string } : {}),
       outputPath: cfg['outputPath'] as string,
       ...(prompt !== undefined ? { prompt } : {}),
       imageInputs,

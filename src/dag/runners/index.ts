@@ -59,6 +59,42 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     runner: llmGenerateRunner,
   },
   {
+    manifest: {
+      tool: 'dhee.cloud.text',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Dhee Cloud Text',
+      description:
+        'Canonical Dhee Cloud text runner alias. Uses the existing LLM generation runner with the desktop cloud LLM route when that lane is enabled.',
+    },
+    runner: llmGenerateRunner,
+  },
+  {
+    manifest: {
+      tool: 'dhee.cloud.image',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Dhee Cloud Image',
+      description:
+        'Canonical Dhee Cloud image runner alias backed by the existing Comfy text-to-image runner and cloud workflow manifests.',
+    },
+    runner: comfyTtiRunner,
+  },
+  {
+    manifest: {
+      tool: 'dhee.cloud.video',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Dhee Cloud Video',
+      description:
+        'Canonical Dhee Cloud video runner alias backed by the existing Comfy video runner and cloud workflow manifests.',
+    },
+    runner: comfyFl2vRunner,
+  },
+  {
     // Bound to the Flux 2 Klein edit workflow. Endpoint URL resolved at
     // runner.run() time from ENDPOINT_<name> env (same as the other comfy
     // runners), validated with an actionable error pointing at Settings.

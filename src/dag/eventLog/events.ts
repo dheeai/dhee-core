@@ -152,10 +152,30 @@ export interface RunnerSwapSuggestedPayload {
 export interface RunnerSwappedPayload {
   nodeId: string;
   itemId?: string;
+  /**
+   * Missing on legacy events. Legacy events keep strict old behavior:
+   * itemId must exactly match the dispatch itemId.
+   */
+  scope?: 'node' | 'instance';
   fromTool: string;
   toTool: string;
   reason: string;
+  forced?: boolean;
   configOverride?: Record<string, unknown>;
+  /**
+   * Compatibility-generated config values. Merged before configOverride
+   * so user-provided config wins.
+   */
+  generatedConfigOverride?: Record<string, unknown>;
+  runtimeBindings?: Array<{
+    configKey: string;
+    fromInput: string;
+  }>;
+  compatibility?: {
+    status?: string;
+    reason?: string;
+    warning?: string;
+  };
 }
 
 export interface CritiqueAddedPayload {

@@ -29,6 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
 import { openEventLog } from './eventLog/EventLog.js';
+import type { RunnerOverrideInput } from './runnerCompatibility.js';
 import type { BundleInputDecl, DagBundle, NodeDef } from './schema.js';
 
 export type ProjectReferenceImagePurpose =
@@ -57,6 +58,8 @@ export interface InitializeProjectParams {
   name: string;
   /** Bundle id to pin (e.g. "narrative_prompt_relay"). */
   bundleId: string;
+  /** Source URI for built-in/user/npm bundles. Defaults to `built-in:${bundleId}`. */
+  bundleSource?: string;
   /** Optional human-readable description. */
   description?: string;
   /**
@@ -81,6 +84,7 @@ export interface InitializeProjectParams {
    * src/dag/projectFeatures.ts.
    */
   budgetCapUsd?: number;
+  runnerOverrides?: RunnerOverrideInput[];
 }
 
 export type InitializeProjectResult =
@@ -92,10 +96,12 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     projectDir,
     name,
     bundleId,
+    bundleSource,
     description,
     inputs = {},
     referenceImages = [],
     budgetCapUsd,
+    runnerOverrides = [],
   } = params;
 
   if (!existsSync(projectDir)) {
@@ -111,15 +117,24 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     };
   }
 
-  const bundle = loadBundleManifest(bundleId);
+  const effectiveBundleSource = bundleSource ?? `built-in:${bundleId}`;
+  const bundle = loadBundleManifest(bundleId, effectiveBundleSource);
   if (!bundle) {
-    return { ok: false, error: `Bundle '${bundleId}' could not be loaded.` };
+    return { ok: false, error: `Bundle '${effectiveBundleSource}' could not be loaded.` };
+  }
+  for (const override of runnerOverrides) {
+    if (!bundle.nodes.some((node) => node.id === override.nodeId)) {
+      return { ok: false, error: `Runner override references unknown node '${override.nodeId}'.` };
+    }
+    if (typeof override.toTool !== 'string' || override.toTool.trim().length === 0) {
+      return { ok: false, error: `Runner override for '${override.nodeId}' has no toTool.` };
+    }
   }
 
   const project: Record<string, unknown> = {
     projectId: randomUUID(),
     name,
-    bundleSource: `built-in:${bundleId}`,
+    bundleSource: effectiveBundleSource,
     ...(description ? { description } : {}),
     createdAt: new Date().toISOString(),
     // Per-project feature flags (docs/feature-flags.md). Seeded with
@@ -145,7 +160,7 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
   // user supplying it. User-provided inputs (next step) overwrite the matching
   // seeded files, so seeded assets act as defaults. No-op for bundles without
   // an inputs/ dir (e.g. the narrative bundles, which generate everything).
-  const bundleDir = resolveBundleRootDir(bundleId);
+  const bundleDir = resolveBundleRootDir(bundleId, effectiveBundleSource);
   if (bundleDir) seedBundleAssets(bundleDir, projectDir);
 
   if (bundle.inputs && bundle.inputs.length > 0) {
@@ -169,6 +184,7 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
   prePopulateProvidedOutputs(projectDir, project, bundle, inputs);
 
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2), 'utf8');
+  appendInitialRunnerOverrides(projectDir, bundle, runnerOverrides);
   return { ok: true, projectDir };
 }
 
@@ -346,9 +362,9 @@ function prePopulateProvidedOutputs(
 
 /** Resolve a built-in bundle's root DIRECTORY (null for single-file `.json`
  * bundles or unresolvable ids). Used to locate shipped assets to seed. */
-function resolveBundleRootDir(bundleId: string): string | null {
+function resolveBundleRootDir(bundleId: string, bundleSource?: string): string | null {
   try {
-    const dirOrJson = resolveBundleDir(parseBundleSource(`built-in:${bundleId}`));
+    const dirOrJson = resolveBundleDir(parseBundleSource(bundleSource ?? `built-in:${bundleId}`));
     return statSync(dirOrJson).isDirectory() ? dirOrJson : null;
   } catch {
     return null;
@@ -376,9 +392,9 @@ export function seedBundleAssets(bundleDir: string, projectDir: string): string[
   return seeded;
 }
 
-function loadBundleManifest(bundleId: string): DagBundle | null {
+function loadBundleManifest(bundleId: string, bundleSource?: string): DagBundle | null {
   try {
-    const source = parseBundleSource(`built-in:${bundleId}`);
+    const source = parseBundleSource(bundleSource ?? `built-in:${bundleId}`);
     const dirOrJson = resolveBundleDir(source);
     const manifestPath = statSync(dirOrJson).isDirectory()
       ? join(dirOrJson, 'bundle.json')
@@ -387,6 +403,34 @@ function loadBundleManifest(bundleId: string): DagBundle | null {
     return JSON.parse(readFileSync(manifestPath, 'utf8')) as DagBundle;
   } catch {
     return null;
+  }
+}
+
+function appendInitialRunnerOverrides(
+  projectDir: string,
+  bundle: DagBundle,
+  overrides: RunnerOverrideInput[],
+): void {
+  if (overrides.length === 0) return;
+  const log = openEventLog(projectDir);
+  for (const override of overrides) {
+    const node = bundle.nodes.find((candidate) => candidate.id === override.nodeId);
+    if (!node) continue;
+    log.append({
+      branchId: 'main',
+      actor: 'user',
+      kind: 'runner.swapped',
+      payload: {
+        nodeId: override.nodeId,
+        scope: 'node',
+        fromTool: node.runner.tool,
+        toTool: override.toTool,
+        reason: override.reason ?? 'selected during project setup',
+        ...(override.configOverride ? { configOverride: override.configOverride } : {}),
+        ...(override.generatedConfigOverride ? { generatedConfigOverride: override.generatedConfigOverride } : {}),
+        ...(override.runtimeBindings ? { runtimeBindings: override.runtimeBindings } : {}),
+      },
+    });
   }
 }
 

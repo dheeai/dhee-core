@@ -29,6 +29,7 @@ import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 import { resolveRunnerForInstance } from './resolveRunnerForInstance.js';
 import { withLocalResource, type LocalResourceSnapshot } from './localResourceState.js';
 import { resolveEndpointUrl } from './runners/endpointResolver.js';
+import { inferNodeRunnerCompatibility } from './runnerCompatibility.js';
 
 function formatSrtTime(totalSeconds: number): string {
   const ms = Math.floor((totalSeconds % 1) * 1000);
@@ -63,6 +64,25 @@ export {
   initWalkState,
   pruneStaleEntries,
 } from './walkState.js';
+export {
+  inferNodeRunnerCompatibility,
+  listRunnerCatalog,
+  loadBundleForRunnerPlan,
+  previewBundleRunnerPlan,
+  previewBundleRunnerPlanFromSource,
+  switchRunnerForProject,
+} from './runnerCompatibility.js';
+export type {
+  BundleRunnerPlan,
+  BundleRunnerPlanNode,
+  RunnerCatalogEntry,
+  RunnerCompatibilityResult,
+  RunnerDefaults,
+  RunnerOverrideInput,
+  RuntimeBinding,
+  SwitchRunnerRequest,
+  SwitchRunnerResult,
+} from './runnerCompatibility.js';
 export type { WalkState, NodeStateEntry, NodeRunStatus } from './walkState.js';
 export {
   findByCapability,
@@ -1455,6 +1475,32 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       if (resolved.configOverride) {
         Object.assign(cfg, resolved.configOverride);
       }
+      if (effectiveTool !== node.runner.tool && !resolved.forced) {
+        const compatibility = inferNodeRunnerCompatibility({
+          bundle: opts.bundle,
+          node,
+          toTool: effectiveTool,
+          effectiveConfig: cfg,
+        });
+        if (!compatibility.ok) {
+          const err = `runner swap blocked: ${compatibility.reason}`;
+          log(`✗ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''}: ${err}`);
+          inst.status = 'failed';
+          if (state) {
+            state.nodes[stateKey] = { status: 'failed', error: err };
+            persistState();
+          }
+          return { ok: false, error: err, instances: allInstances };
+        }
+        if (compatibility.warning) {
+          opts.onNotification?.({ level: 'warn', message: compatibility.warning });
+        }
+      } else if (effectiveTool !== node.runner.tool && resolved.forced) {
+        opts.onNotification?.({
+          level: 'warn',
+          message: `Forced runner switch active for ${node.id}: ${node.runner.tool} → ${effectiveTool}. Compatibility was not enforced.`,
+        });
+      }
       // Apply project-level aspect-ratio + resolution to the runner
       // config's width + height (if both are numbers). Bundle authors
       // declare baseline dimensions tuned for 16:9 at the runner's max
@@ -1640,6 +1686,25 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         }
       }
 
+      if (resolved.runtimeBindings && resolved.runtimeBindings.length > 0) {
+        for (const binding of resolved.runtimeBindings) {
+          const bound = resolvedInputs[binding.fromInput];
+          if (bound === undefined || bound === null || bound === '') {
+            const err =
+              `runner swap binding failed: ${binding.configKey} expected input '${binding.fromInput}', ` +
+              `but ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} did not resolve it.`;
+            log(`✗ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''}: ${err}`);
+            inst.status = 'failed';
+            if (state) {
+              state.nodes[stateKey] = { status: 'failed', error: err };
+              persistState();
+            }
+            return { ok: false, error: err, instances: allInstances };
+          }
+          (cfg as Record<string, unknown>)[binding.configKey] = bound;
+        }
+      }
+
       const ctx: RunnerContext = {
         projectDir: opts.projectDir,
         ...(opts.bundleDir ? { bundleDir: opts.bundleDir } : {}),
@@ -1816,7 +1881,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         const costUsd = typeof md['costUsd'] === 'number' ? (md['costUsd'] as number) : undefined;
         const generationTool = typeof md['generationTool'] === 'string'
           ? (md['generationTool'] as string)
-          : node.runner.tool;
+          : effectiveTool;
         const versionId = `v${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
         // Dependency source-of-truth: if the runner stamped a precise
         // dep list on metadata.dependencies, prefer it. Otherwise fall
