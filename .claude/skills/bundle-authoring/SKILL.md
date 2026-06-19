@@ -30,8 +30,17 @@ write walker code.
 
 The authoritative schema is **`src/dag/schema.ts`** (`DagBundle`,
 `NodeDef`, `NodeInput`, …). The conceptual companion is
-**`docs/bundles-for-beginners.md`**. The best templates are the live
-bundles under **`src/dag/bundles/`** — copy the closest one and adapt.
+**`docs/bundles-for-beginners.md`**. Copy the closest existing bundle and
+adapt it — see the **Catalog** below for what exists.
+
+> **Where bundles live (two roots, both on the loader's search chain).**
+> `listBundles()` / `bundleSource.ts` resolve in order:
+> `DHEE_APP_BUNDLES_DIR` → **`~/.kshana/bundles/`** → **`dhee-core/src/dag/bundles/`**.
+> - **New bundles you author go in `~/.kshana/bundles/<id>/`** (each its own git
+>   repo). This is the working rule — do NOT add new bundles to dhee-core.
+> - `dhee-core/src/dag/bundles/` still holds the older in-repo *template*
+>   bundles (loadable, good copy-from bases). Copy FROM either root; PLACE the
+>   new one under `~/.kshana/bundles/`.
 
 > **Golden rule:** the walker and runners stay generic; per-bundle and
 > per-workflow knowledge lives in *data* (bundle.json + the workflow
@@ -55,7 +64,10 @@ Don't start from a blank file. Match the shape you want:
 | Any of the above + a VLM review loop | the `*_review` variants |
 
 ```bash
-cp -r src/dag/bundles/narrative_prompt_relay src/dag/bundles/<your_bundle_id>
+# copy a template (from either root) into the user bundle dir:
+cp -r src/dag/bundles/narrative_prompt_relay ~/.kshana/bundles/<your_bundle_id>
+# …or clone a richer live one, e.g. a talking-head/UGC base:
+cp -r ~/.kshana/bundles/ugc_ad_software ~/.kshana/bundles/<your_bundle_id>
 ```
 
 A bundle directory holds:
@@ -71,6 +83,51 @@ A bundle directory holds:
 
 A bundle may also be a **single `.json` file** (no sibling assets) when it
 has no prompts/workflows of its own.
+
+---
+
+## Catalog — bundles that exist today
+
+> Snapshot (refresh anytime):
+> ```bash
+> for d in ~/.kshana/bundles/*/ ~/Projects/dhee-core/src/dag/bundles/*/; do \
+>   python3 -c "import json,sys;b=json.load(open('$d/bundle.json'));print(f\"{b['id']:28} {b.get('summary','')[:90]}\")" 2>/dev/null; done
+> ```
+
+**`~/.kshana/bundles/` — the live / user bundles (richest copy-from bases):**
+
+| id | what it is | distinctive runners |
+|----|------------|---------------------|
+| `ugc_ad` | base UGC brand ad: talking-head creator → product shot → close holding product | klein, ltx_director, tts |
+| `ugc_ad_ideogram` | `ugc_ad` with an Ideogram-rendered product shot | klein, ltx_director, tts |
+| `ugc_ad_software` | software/app ad: talking head + pixel-exact screenshots (Ken Burns) + screenshot inset close | klein, ltx_director, tts, kenburns, overlay |
+| `ugc_ad_software_desktop` | ~1-min 16:9 software ad; screenshot pops in, expands fullscreen, collapses back | + demo_overlay |
+| `ugc_ad_product` | product-hero ad: REAL product as a real-pixel CARD over themed mood B-roll (label never regenerated) | tti, tts, kenburns, overlay |
+| `ugc_ad_product_v2` | SAM3 matte → boogu mid/far composite → LTX motion (label sub-readable by design) | matte, boogu, ltx_director |
+| `ugc_ad_product_v3` | generate-then-restore: boogu close-embed + LTX I2V + track-replace label re-stamp; safe real-pixel close | matte, boogu, ltx_director, **cv.track_replace** |
+| `ugc_ad_product_v4` | real-world story film (3 shots); boogu placement + LTX scene-to-life + track-replace; optional actors | matte, boogu, ltx_director, cv.track_replace |
+| `ugc_ad_product_v5` | Wan-VACE scene-around-product + real-product paste-back (one step) | matte, **comfy.vace_place** |
+| `ugc_ad_tub` | v3 base + rotating-cylinder hero for curved tubs (real wrap label) | **cv.cylinder_wrap** |
+| `narrative_hindi_lipsync` | per-shot control; dialogue + composed scenes | klein, fl2v, tti |
+| `narrative_id_relay` | cinematic story video, LTX identity-locked characters (ID + dual-char loras) | ltx_director |
+| `narrative_id_relay_review` | `id_relay` + VLM review/tuning loop (ends at `shot_image_review`, no video) | + vlm.judge |
+| `narrative_speech_shot_by_shot` | consistency-hardened: per-scene staging, angle plates, per-shot state, VLM adherence loop, OmniVoice designed voices + LTX talking-head lipsync | qwen_edit_chain, boogu, vlm.judge, tts, ltx_director |
+| `local_bundle_test` | qwen-chain clone for local Comfy testing | — |
+
+**`dhee-core/src/dag/bundles/` — older in-repo templates (copy-from bases):**
+
+| id | shape |
+|----|-------|
+| `narrative_text_only` | story → plans, no media |
+| `ltx_prompt_relay.json` | single-file minimal LTX relay |
+| `narrative_prompt_relay` | images + relay video |
+| `narrative_shot_by_shot` | per-shot image→video |
+| `narrative_qwen_chain_relay` | iterative edit-chain shots |
+| `narrative_klein_relay_review` / `narrative_qwen_chain_review` | the above + a VLM review loop |
+| `narrative_text_video` | text → video |
+
+For the runner side of the catalog (what each `tool` does + where its code
+lives), see the **runner-authoring** skill's "Catalog — runners that exist today."
 
 ---
 

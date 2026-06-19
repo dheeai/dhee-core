@@ -37,6 +37,51 @@ registered in **`src/dag/runners/index.ts`**.
 
 ---
 
+## Catalog — runners that exist today
+
+> Refresh the registered list anytime:
+> ```bash
+> grep -oE "tool: '[a-z.]+_?[a-z]*'" ~/Projects/dhee-core/src/dag/runners/index.ts | sort -u
+> ls ~/.kshana/runners/          # external dhee-runner-* packages installed locally
+> ```
+
+**Built-in / core** — code in `dhee-core/src/dag/runners/`, registered in
+`index.ts`. (Bound = legitimately knows one workflow family; Generic =
+behavior independent of workflow.)
+
+| tool | file | kind | does |
+|------|------|------|------|
+| `llm.generate` | `llmGenerate.ts` | generic | text / JSON generation (`tier`, `outputSchema`) |
+| `comfy.tti` | `comfyTti.ts` | bound | text→image (Z-Image etc.), no refs |
+| `comfy.klein` | `comfyKlein.ts` | bound | Flux-2 Klein reference-edit (base + ≤3 refs; prunes absent ref branches) |
+| `comfy.fl2v` | `comfyFl2v.ts` | bound | first/last-frame → video |
+| `comfy.ltx_director` | `comfyLtxDirector.ts` | bound | LTX-2 multi-shot relay + talking-head lipsync. **Audio-driven clip length, clamped ~41s; hard 1000-frame cap PER RUN** |
+| `comfy.qwen_edit_chain` | `comfyQwenEditChain.ts` | bound | iterative edit-chain shots |
+| `ffmpeg.concat` | `ffmpegConcat.ts` | generic | stitch clips + xfade; passes each clip's own audio. **No music-bed/`amix` mixing** |
+| `ffmpeg.shot_clip` | `ffmpegShotClip.ts` | generic | build a single shot clip |
+| `ffmpeg.kenburns` | `ffmpegKenBurns.ts` | generic | pan/zoom (Ken Burns) over a still/clip |
+| `ffmpeg.overlay` | `ffmpegOverlay.ts` | generic | composite an image over a video (real-pixel card/inset) |
+| `ffmpeg.demo_overlay` | `ffmpegDemoOverlay.ts` | generic | talking-head + screenshot pop-in/expand choreography |
+| `vlm.judge` | `vlmJudge.ts` | generic | pass/fail review of an image (review-loop bundles) |
+
+**External packages** — `dhee-runner-*`, discovered ESLint-plugin-style.
+For the RUN path they must be symlinked into `dhee-core/node_modules/`
+(see project CLAUDE.md "Runner discovery"); source lives in `~/.kshana/runners/`.
+
+| tool | package | installed in `~/.kshana/runners/`? | does |
+|------|---------|-----------------------------------|------|
+| `comfy.tts` | `dhee-runner-tts` | ✅ | Qwen3 voice-clone TTS (any language; `language` is a workflow-node field set via `fields`, not a runner param; no text-length cap / no chunking) |
+| `comfy.matte` | `dhee-runner-matte` | ✅ | SAM-3 concept-prompted matte (extract product/subject) — CPU |
+| `comfy.boogu` | `dhee-runner-boogu` | ✅ | model composite / place a subject into a scene |
+| `comfy.vace_place` | `dhee-runner-vace` | ✅ | Wan-VACE: generate scene+motion around a kept subject |
+| `cv.track_replace` | `dhee-runner-track-replace` | ❌ declared by `ugc_ad_product_v3/v4`, `ugc_ad_tub` | per-frame homography re-paste of a real label (CPU, no GPU) |
+| `cv.cylinder_wrap` | `dhee-runner-cylinder` | ❌ declared by `ugc_ad_tub` | wrap a real label on a rotating cylinder |
+
+For which bundles use which runner, see the **bundle-authoring** skill's
+"Catalog — bundles that exist today."
+
+---
+
 ## 1. The contract (`@dhee/runner-sdk`)
 
 The canonical types + primitives live in **`@dhee/runner-sdk`**
