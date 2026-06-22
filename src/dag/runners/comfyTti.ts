@@ -67,6 +67,7 @@ export function createComfyTtiRunner(opts?: {
         manifestPath: { type: 'string' },
         parameterMappings: { type: 'array' },
         endpoint: { type: 'string' },
+        workflowId: { type: 'string' },
         prompt: { type: 'string' },
         outputPath: { type: 'string' },
         seed: { type: 'integer' },

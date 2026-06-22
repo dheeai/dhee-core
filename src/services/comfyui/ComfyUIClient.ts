@@ -260,7 +260,6 @@ export class ComfyUIClient {
 
   constructor(config: Partial<ComfyUIClientConfig> = {}) {
     const merged = { ...buildDefaultConfig(), ...config };
-    const hasExplicitBaseUrl = config.baseUrl !== undefined;
     // Normalize baseUrl: strip trailing slash AND a trailing `/api` segment
     // so `getPath` (which prepends `/api` in cloud mode) doesn't produce
     // a double `/api/api/...` path. Users routinely set
@@ -270,9 +269,17 @@ export class ComfyUIClient {
     this.outputDir = merged.outputDir;
     this.timeout = merged.timeout;
     this.apiKey = merged.apiKey;
+    // Cloud mode is authoritative from env (COMFY_MODE=cloud →
+    // getComfyConfig sets isCloud) regardless of whether an explicit
+    // baseUrl was passed. Previously, an explicit baseUrl (e.g. the
+    // dhee Cloud proxy) made us ignore env isCloud and fall back to
+    // isComfyCloudUrl(baseUrl) alone — which is false for the proxy,
+    // so cloud-specific paths (/history_v2, /api prefix, queue
+    // semantics) were skipped and /history 404'd on cloud.comfy.org.
+    // The dhee proxy forwards to cloud.comfy.org, so it IS cloud.
     this.isCloud =
       config.isCloud ??
-      ((!hasExplicitBaseUrl && Boolean(merged.isCloud)) || isComfyCloudUrl(this.baseUrl));
+      (Boolean(merged.isCloud) || isComfyCloudUrl(this.baseUrl));
     this.cloudApiKey = merged.apiKey;
     this.useBearerCloudAuth = !!this.apiKey && !isComfyCloudUrl(this.baseUrl);
 

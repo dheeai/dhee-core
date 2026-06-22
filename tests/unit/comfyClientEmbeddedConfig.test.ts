@@ -80,6 +80,39 @@ describe('ComfyUIClient — env read at construction time', () => {
     });
   });
 
+  it('treats the dhee website Comfy route as cloud even with an EXPLICIT baseUrl (runner path)', async () => {
+    // Regression: comfy.tti/klein/fl2v pass an explicit baseUrl (the
+    // proxy) into the constructor. Previously that made the constructor
+    // ignore env isCloud and fall back to isComfyCloudUrl(proxy)=false,
+    // so getHistory polled /history (not /history_v2) and cloud.comfy.org
+    // 404'd — generated images could never be retrieved.
+    const { ComfyUIClient } = await import('../../src/services/comfyui/ComfyUIClient.js');
+
+    process.env['COMFY_MODE'] = 'cloud';
+    process.env['COMFYUI_BASE_URL'] = 'http://localhost:3000/comfy/api';
+    process.env['COMFY_CLOUD_API_KEY'] = 'desktop-jwt';
+
+    let calledUrl = '';
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      calledUrl = String(url);
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    try {
+      const client = new ComfyUIClient({
+        outputDir: '/tmp',
+        baseUrl: 'http://localhost:3000/comfy/api', // explicit, like the runners
+      });
+
+      expect((client as unknown as { isCloud: boolean }).isCloud).toBe(true);
+      await (client as { getHistory: (id: string) => Promise<unknown> }).getHistory('prompt-1');
+      // The load-bearing assertion: cloud history path, not local /history.
+      expect(calledUrl).toBe('http://localhost:3000/comfy/api/history_v2/prompt-1');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
   it('keeps X-API-Key auth for direct Comfy Cloud requests', async () => {
     const { ComfyUIClient } = await import('../../src/services/comfyui/ComfyUIClient.js');
 

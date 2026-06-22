@@ -301,6 +301,7 @@
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
           "endpoint": "public.cloud",
+          "workflowId": "zimage_cloud",
           "width": 1024,
           "height": 1024
         }
@@ -390,6 +391,7 @@
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
           "endpoint": "public.cloud",
+          "workflowId": "zimage_cloud",
           "width": 1920,
           "height": 1080
         }
@@ -504,6 +506,7 @@
           "workflowPath": "workflows/klein.json",
           "manifestPath": "workflows/klein.manifest.json",
           "endpoint": "public.cloud",
+          "workflowId": "flux2_klein_edit_cloud",
           "width": 1920,
           "height": 1080
         }
