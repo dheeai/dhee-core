@@ -10,17 +10,35 @@
  * Resolution order:
  *   1. `dhee_FFMPEG_PATH` / `dhee_FFPROBE_PATH` env override — lets a
  *      host (the desktop) or a power user pin a specific binary.
- *   2. The bundled @*-installer binary. When running inside a packaged
- *      Electron app the installer path points into `app.asar` (read-only,
- *      not executable); rewrite it to the unpacked sibling.
- *   3. Bare `ffmpeg` / `ffprobe` on PATH (dev fallback).
+ *   2. The bundled @*-installer binary (chmod +x if pnpm stripped execute
+ *      bits). When running inside a packaged Electron app the installer path
+ *      points into `app.asar` (read-only, not executable); rewrite it to the
+ *      unpacked sibling.
+ *   3. Bare `ffmpeg` / `ffprobe` on PATH (dev / CI fallback).
  *
  * Before this, the runners spawned a bare `'ffmpeg'` and failed with
  * `spawn ffmpeg ENOENT` in the wild.
  */
+import { accessSync, chmodSync, constants } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+
+/** Return path when executable; chmod once if needed; null when unusable. */
+function ensureUsableBin(path: string): string | null {
+  try {
+    accessSync(path, constants.X_OK);
+    return path;
+  } catch {
+    try {
+      chmodSync(path, 0o755);
+      accessSync(path, constants.X_OK);
+      return path;
+    } catch {
+      return null;
+    }
+  }
+}
 
 /** Read the `.path` from an @*-installer package, asar-corrected. null if absent. */
 function installerPath(pkg: string): string | null {
@@ -42,7 +60,9 @@ function installerPath(pkg: string): string | null {
 function resolve(envKey: string, pkg: string, bareFallback: string): string {
   const env = process.env[envKey];
   if (env && env.trim()) return env.trim();
-  return installerPath(pkg) ?? bareFallback;
+  const installed = installerPath(pkg);
+  if (installed) return ensureUsableBin(installed) ?? bareFallback;
+  return bareFallback;
 }
 
 /** Path to the ffmpeg binary. */
