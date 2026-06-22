@@ -9,7 +9,6 @@
  */
 import type { Runner } from '../schema.js';
 import { comfyKleinRunner } from './comfyKlein.js';
-import { comfyImageEditRunner } from './comfyImageEdit.js';
 import { comfyTtiRunner } from './comfyTti.js';
 import { comfyFl2vRunner } from './comfyFl2v.js';
 import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
@@ -73,22 +72,6 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Drives the Flux 2 Klein edit workflow: a base reference image plus up to 3 optional references threaded through a ReferenceLatent chain. Absent optional references are pruned from the graph; uploads + parameter injection + output download handled by the shared executor.',
     },
     runner: comfyKleinRunner,
-  },
-  {
-    // Generic, model-agnostic image-edit API over ANY ComfyUI edit workflow
-    // (Qwen-Image-Edit, Klein, Boogu, …). Interface: images[] + prompt +
-    // additionalArgs(loras, steps, cfg, seed, width, height, negativePrompt).
-    // All workflow-shape knowledge lives in the manifest's editConfig (data).
-    manifest: {
-      tool: 'comfy.image_edit',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy Image Edit (generic)',
-      description:
-        'Model-agnostic image-edit runner: drives any ComfyUI edit workflow behind a uniform images[]+prompt+additionalArgs interface. LoRA name/strength passable via additionalArgs; per-workflow node mapping in the manifest editConfig.',
-    },
-    runner: comfyImageEditRunner,
   },
   {
     manifest: {
