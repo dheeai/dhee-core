@@ -137,7 +137,34 @@ describe('dhee_list_bundles', () => {
       description: '',
       displayName: 'No Desc',
       summary: '',
+      runtimeSupport: {
+        modes: ['local'],
+        providers: [],
+      },
     }]);
+  });
+
+  it('includes runtime support metadata in each entry', async () => {
+    const dir = setupBundlesDir({
+      'cloudy/bundle.json': JSON.stringify({
+        id: 'cloudy',
+        version: '0.1.0',
+        displayName: 'Cloudy',
+        summary: 'Cloud capable.',
+        description: 'Cloud capable.',
+        runtimeSupport: {
+          modes: ['local', 'dhee_cloud'],
+          providers: ['comfy', 'openrouter'],
+        },
+      }),
+    });
+    made.push(dir);
+    const r = await callTool(dir);
+    const parsed = JSON.parse(r.content[0].text);
+    expect(parsed[0].runtimeSupport).toEqual({
+      modes: ['local', 'dhee_cloud'],
+      providers: ['comfy', 'openrouter'],
+    });
   });
 
   it('8. tool output is parseable JSON in `text` content', async () => {

@@ -111,6 +111,10 @@ function probe(path: string, entries: string): string {
   return execFileSync(ffprobeBin(), ['-v', 'error', '-select_streams', 'v:0',
     '-show_entries', entries, '-of', 'default=nw=1:nk=1', path], { encoding: 'utf-8' }).trim();
 }
+function probeDuration(path: string): number {
+  return parseFloat(execFileSync(ffprobeBin(), ['-v', 'error', '-show_entries', 'format=duration',
+    '-of', 'default=nw=1:nk=1', path], { encoding: 'utf-8' }).trim()) || 0;
+}
 function runFFmpeg(args: string[]): Promise<{ ok: boolean; stderr: string }> {
   return new Promise((res) => {
     const p = spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -171,6 +175,8 @@ export function createFfmpegDemoOverlayRunner(): Runner {
     // Defaults chosen to work on the bundled ffmpeg 4.4 (no 'zoomin' there).
     // rectcrop = a centered rectangle grows to reveal the next clip → reads as
     // the overlay box expanding to fill, then a box closing back to the inset.
+    const expandDur = cfg.expandDur ?? 1;
+    const collapseDur = cfg.collapseDur ?? 1;
     const expandT = cfg.expandTransition ?? 'rectcrop';
     const collapseT = cfg.collapseTransition ?? 'rectcrop';
     const ow = Math.round(W * scale);
@@ -202,14 +208,20 @@ export function createFfmpegDemoOverlayRunner(): Runner {
         '-loop', '1', '-i', shot, '-filter_complex', insetOv(0), '-map', '[v]',
         '-t', seg.clip3Dur.toFixed(3), '-r', String(fps), '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', c3]);
       if (!r.ok) { cleanup(); return { ok: false, error: `demo_overlay clip3: ${r.stderr.slice(-300)}` }; }
+      // xfade offsets must fit the *actual* encoded clip lengths — frame rounding on
+      // Linux can shave ~1 frame off -t targets, and xfade rejects offset > dur − transition.
+      const c1Dur = probeDuration(c1);
+      const expandOffset = Math.min(seg.expandOffset, Math.max(0, c1Dur - expandDur - 0.001));
       // xfade expand: c1 → full
       r = await runFFmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', c1, '-i', full, '-filter_complex',
-        `[0:v][1:v]xfade=transition=${expandT}:duration=${(cfg.expandDur ?? 1).toFixed(2)}:offset=${seg.expandOffset.toFixed(3)}[v]`,
+        `[0:v][1:v]xfade=transition=${expandT}:duration=${expandDur.toFixed(2)}:offset=${expandOffset.toFixed(3)}[v]`,
         '-map', '[v]', '-r', String(fps), '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', ab]);
       if (!r.ok) { cleanup(); return { ok: false, error: `demo_overlay expand: ${r.stderr.slice(-300)}` }; }
+      const abDur = probeDuration(ab);
+      const collapseOffset = Math.max(0, abDur - collapseDur - 0.001);
       // xfade collapse: ab → c3
       r = await runFFmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', ab, '-i', c3, '-filter_complex',
-        `[0:v][1:v]xfade=transition=${collapseT}:duration=${(cfg.collapseDur ?? 1).toFixed(2)}:offset=${seg.collapseOffset.toFixed(3)}[v]`,
+        `[0:v][1:v]xfade=transition=${collapseT}:duration=${collapseDur.toFixed(2)}:offset=${collapseOffset.toFixed(3)}[v]`,
         '-map', '[v]', '-r', String(fps), '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', vid]);
       if (!r.ok) { cleanup(); return { ok: false, error: `demo_overlay collapse: ${r.stderr.slice(-300)}` }; }
       // Mux the base's continuous audio over the assembled video

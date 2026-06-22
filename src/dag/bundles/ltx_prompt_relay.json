@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "engineCompat": ">=0.1.0",
   "description": "LTX 2.3 prompt relay — renders each scene as one or more chunk clips via the LTX Director workflow, then concats them into a single final video. The bundle handles auto-chunking under the 1000-frame LTX cap.",
+  "runtimeSupport": {
+    "modes": ["local", "dhee_cloud"],
+    "providers": ["comfy", "ffmpeg"]
+  },
   "dependencies": {
     "runners": {
       "comfy.ltx_director": ">=0.1.0",

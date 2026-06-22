@@ -20,6 +20,11 @@ import { Type } from 'typebox';
 import { defineTool } from '@mariozechner/pi-coding-agent';
 import { getBundleSearchRoots } from '../../../dag/bundleSource.js';
 import { titleizeBundleId, summaryOf } from '../../../dag/bundleDisplay.js';
+import {
+  bundleRuntimeSupport,
+  type BundleRuntimeSupport,
+} from '../../../dag/bundleRuntimeSupport.js';
+import type { DagBundle } from '../../../dag/schema.js';
 
 const Params = Type.Object({
   bundleIds: Type.Array(
@@ -47,6 +52,7 @@ interface BundleMeta {
   id: string;
   displayName: string;
   summary: string;
+  runtimeSupport?: BundleRuntimeSupport;
 }
 
 /**
@@ -68,6 +74,8 @@ function lookupBundleMeta(id: string): BundleMeta {
           displayName?: string;
           summary?: string;
           description?: string;
+          runtimeSupport?: unknown;
+          nodes?: DagBundle['nodes'];
         };
         const displayName =
           typeof parsed.displayName === 'string' && parsed.displayName.trim().length > 0
@@ -77,7 +85,7 @@ function lookupBundleMeta(id: string): BundleMeta {
           ...(parsed.summary !== undefined ? { summary: parsed.summary } : {}),
           ...(parsed.description !== undefined ? { description: parsed.description } : {}),
         });
-        return { id, displayName, summary };
+        return { id, displayName, summary, runtimeSupport: bundleRuntimeSupport(parsed) };
       } catch {
         // continue to next candidate / root
       }

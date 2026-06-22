@@ -7,6 +7,10 @@
   "techLine": "KLEIN + FL2V · PER-SHOT RENDER",
   "engineCompat": ">=0.1.0",
   "description": "Full narrative pipeline with per-shot FL2V video synthesis on cloud Comfy.",
+  "runtimeSupport": {
+    "modes": ["local", "dhee_cloud"],
+    "providers": ["comfy", "llm", "ffmpeg"]
+  },
   "dependencies": {
     "runners": {
       "llm.generate": ">=0.1.0",

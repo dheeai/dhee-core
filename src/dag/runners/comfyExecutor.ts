@@ -104,16 +104,51 @@ export interface ExecuteComfyOptions {
   /** Dependency list to stamp onto metadata (precise upstream refs). */
   dependencies?: unknown;
   /** Injected Comfy client factory (tests stub this). */
-  clientFactory: (opts: { baseUrl?: string; outputDir: string }) => ComfyImageClient;
+  clientFactory: (opts: { baseUrl?: string; outputDir: string; workflowId?: string }) => ComfyImageClient;
 }
 
 const KLEIN_FALLBACK_FILENAME = 'dag';
 
+/**
+ * Fallback map from the workflow FILE to the billing workflowId used by the
+ * dhee website (COMFY_GPU_RUNTIME_RATE_PROFILES). A bundle node SHOULD declare
+ * `workflowId` explicitly in its runner config; this is the safety net so that
+ * bundles which don't still bill correctly.
+ *
+ * Why it's needed: zimage_tti workflows have GENERIC node class_types
+ * (KSampler, UNETLoader, …) — the billing classifier can't recognize "zimage"
+ * from class_types alone, so the job would fall into `unknown_partner` and
+ * fail to price. klein/ltx/fl2v/qwen workflows DO carry recognizable
+ * class_types (Flux2Scheduler/LTXDirector/FluxKontext) so they classify via
+ * classType already, but we map them too for explicitness.
+ */
+const BILLING_WORKFLOW_ID_BY_PATH: ReadonlyArray<{ test: RegExp; workflowId: string }> = [
+  { test: /zimage/i, workflowId: 'zimage_cloud' },
+  { test: /klein/i, workflowId: 'flux2_klein_edit_cloud' },
+  { test: /fl2v/i, workflowId: 'ltx23_fl2v_cloud' },
+];
+
+function deriveBillingWorkflowId(workflowPath: string | undefined): string | undefined {
+  if (!workflowPath) return undefined;
+  for (const { test, workflowId } of BILLING_WORKFLOW_ID_BY_PATH) {
+    if (test.test(workflowPath)) return workflowId;
+  }
+  return undefined;
+}
+
 // ── Default client factory (uses ComfyUIClient) ────────────────────────
 
-export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: string }): ComfyImageClient {
-  const isCloud = opts.baseUrl?.includes('cloud.comfy.org') ?? false;
+export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: string; workflowId?: string }): ComfyImageClient {
+  // Cloud when the URL is cloud.comfy.org OR env says cloud mode (the
+  // dhee Cloud proxy isn't a cloud.comfy.org URL but forwards to it,
+  // so COMFY_MODE=cloud is the reliable signal there). The constructor
+  // re-derives isCloud the same way; this just keeps the factory's own
+  // decision consistent so it also passes the api key explicitly.
+  const isCloud =
+    (opts.baseUrl?.includes('cloud.comfy.org') ?? false) ||
+    process.env['COMFY_MODE'] === 'cloud';
   const cloudKey = isCloud ? process.env['COMFY_CLOUD_API_KEY'] : undefined;
+  const workflowId = opts.workflowId;
   const client = new ComfyUIClient({
     outputDir: opts.outputDir,
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
@@ -128,7 +163,7 @@ export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: s
       const { outputs, promptId } = await client.queueAndWaitWS(
         workflow,
         undefined,
-        signal ? { signal } : {},
+        { ...(workflowId ? { workflowId } : {}), ...(signal ? { signal } : {}) },
       );
       let resolved = outputs;
       if (resolved.length === 0 && promptId) {
@@ -398,7 +433,21 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
   // ── Build client ──
   const outDir = dirname(outAbs);
   mkdirSync(outDir, { recursive: true });
-  const client = opts.clientFactory({ ...(baseUrl ? { baseUrl } : {}), outputDir: outDir });
+  // workflowId travels in extra_data.dhee_workflow_id so the dhee website
+  // proxy can bill the job (classifyComfyWorkflow keys GPU-runtime rates by
+  // it, e.g. 'zimage_cloud'). Declared per-node in the bundle config, with a
+  // workflowPath-derived fallback so bundles that omit it still bill.
+  const configRecord = ctx.node.runner.config as Record<string, unknown> | undefined;
+  const explicitWorkflowId =
+    configRecord && typeof configRecord['workflowId'] === 'string'
+      ? String(configRecord['workflowId'])
+      : undefined;
+  const workflowId = explicitWorkflowId ?? deriveBillingWorkflowId(opts.workflowPath);
+  const client = opts.clientFactory({
+    ...(baseUrl ? { baseUrl } : {}),
+    outputDir: outDir,
+    ...(workflowId ? { workflowId } : {}),
+  });
 
   // ── Upload present images ──
   const uploadedNames: Record<string, string> = {};

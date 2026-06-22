@@ -59,7 +59,7 @@ describe('ffmpeg.demo_overlay behavioral', () => {
     // write to the temp dir directly
     (ctx as { node: { runner: { config: { outputPath: string } } } }).node.runner.config.outputPath = 'out.mp4';
     const r = await runner.run(ctx);
-    expect(r.ok).toBe(true);
+    expect(r.ok, r.error).toBe(true);
     expect(existsSync(out)).toBe(true);
     const dur = parseFloat(spawnSync(ffprobeBin(), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', out], { encoding: 'utf8' }).stdout.trim());
     expect(dur).toBeGreaterThan(10.5);

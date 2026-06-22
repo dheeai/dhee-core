@@ -7,6 +7,10 @@
   "techLine": "LTX-2 RELAY · DIRECTOR CHAIN",
   "engineCompat": ">=0.1.0",
   "description": "Full narrative pipeline from story to final video, with LTX Director relay synthesis for the video stage on a local Comfy endpoint. Best fit: cinematic story-driven content with deliberate motion — characters speaking, single actions, moments held on screen. Not suited to fast action (sword fights mid-swing, car chases, frantic combat). When the source story implies fast action, the pipeline decomposes it into slower, single-action beats rather than rendering the action in one shot.",
+  "runtimeSupport": {
+    "modes": ["local", "dhee_cloud"],
+    "providers": ["comfy", "llm", "ffmpeg"]
+  },
   "dependencies": {
     "runners": {
       "llm.generate": ">=0.1.0",
@@ -297,6 +301,7 @@
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
           "endpoint": "public.cloud",
+          "workflowId": "zimage_cloud",
           "width": 1024,
           "height": 1024
         }
@@ -386,6 +391,7 @@
           "workflowPath": "workflows/zimage_tti.json",
           "manifestPath": "workflows/zimage_tti.manifest.json",
           "endpoint": "public.cloud",
+          "workflowId": "zimage_cloud",
           "width": 1920,
           "height": 1080
         }
@@ -500,6 +506,7 @@
           "workflowPath": "workflows/klein.json",
           "manifestPath": "workflows/klein.manifest.json",
           "endpoint": "public.cloud",
+          "workflowId": "flux2_klein_edit_cloud",
           "width": 1920,
           "height": 1080
         }
