@@ -20,6 +20,13 @@ import { ffmpegOverlayRunner } from './ffmpegOverlay.js';
 import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
+// Dhee Cloud media runners — first-party runners for the Dhee Cloud media
+// proxy lane (image/video generation via /api/cloud/media/*). Implemented
+// as committed dist modules under runners/dhee-cloud-* (same shape as the
+// @dhee_ai/openrouter-runners npm package, which remains the distributable
+// copy for external hosts).
+import { manifest as dheeCloudImageManifest, runner as dheeCloudImageRunner } from '../../../runners/dhee-cloud-image/dist/index.js';
+import { manifest as dheeCloudVideoManifest, runner as dheeCloudVideoRunner } from '../../../runners/dhee-cloud-video/dist/index.js';
 import {
   RunnerRegistry,
   getGlobalRegistry,
@@ -196,6 +203,14 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Sends an image to a vision-language model for pass/fail review. On fail, stamps pendingCritiques[refineNode:itemId] so the walker’s review-loop wrapper invalidates the upstream prompt-LLM and re-walks with the critique applied. Verdict JSON is written to outputPath. VLM endpoint resolved from runner config or VLM_PROVIDER/VLM_API_KEY/VLM_MODEL env. Pair with bundle-level reviewLoopMax to bound retry budget per dispatch.',
     },
     runner: vlmJudgeRunner,
+  },
+  {
+    manifest: dheeCloudImageManifest,
+    runner: dheeCloudImageRunner,
+  },
+  {
+    manifest: dheeCloudVideoManifest,
+    runner: dheeCloudVideoRunner,
   },
 ];
 
