@@ -20,14 +20,15 @@ discovers `eslint-plugin-*` / `eslint-config-*`.
 
 ## Naming convention (ESLint-style)
 
-| Artifact | Unscoped | Scoped |
-|----------|----------|--------|
-| A package that provides **runner(s)** | `dhee-runner-<name>` | `@<scope>/dhee-runner-<name>` or `@<scope>/dhee-runner` |
-| A package that provides **bundle(s)** | `dhee-bundle-<name>` | `@<scope>/dhee-bundle-<name>` or `@<scope>/dhee-bundle` |
+| Artifact | Unscoped | Scoped (`dhee-` kept) | Scoped (`dhee-` dropped) |
+|----------|----------|-------|---------|
+| A package that provides **runner(s)** | `dhee-runner-<name>` | `@<scope>/dhee-runner-<name>` or `@<scope>/dhee-runner` | `@<scope>/runner-<name>` |
+| A package that provides **bundle(s)** | `dhee-bundle-<name>` | `@<scope>/dhee-bundle-<name>` or `@<scope>/dhee-bundle` | `@<scope>/bundle-<name>` |
 
 Examples: `dhee-runner-runway`, `dhee-runner-musicgen`,
 `@acme/dhee-runner`; `dhee-bundle-anime-storybook`, `dhee-bundle-podcast`,
-`@acme/dhee-bundle`.
+`@acme/dhee-bundle`. The official Dhee packages use the scoped dropped-`dhee-`
+form under `@dhee_ai` — e.g. `@dhee_ai/runner-tts`, `@dhee_ai/bundle-infographics`.
 
 **Discovery match** (mirrors ESLint's `eslint-plugin-` matcher):
 
@@ -47,7 +48,7 @@ name it for its primary artifact and declare both entry points (below).
   "name": "dhee-runner-runway",
   "version": "1.2.0",
   "keywords": ["dhee-runner"],          // REQUIRED guard — see below
-  "dependencies": { "@dhee/runner-sdk": "^0.1.0" },  // the contract runners build on
+  "dependencies": { "@dhee_ai/runner-sdk": "^0.1.0" },  // the contract runners build on
   "dhee": {                               // declares what this package exports
     "runners": "./dist/index.js",         // module exporting `runners` (see below)
     "bundles": "./bundles"                // dir OR module exporting bundles
@@ -59,7 +60,7 @@ name it for its primary artifact and declare both entry points (below).
   matches on the name pattern AND requires the keyword, so an unrelated
   `dhee-runner-utils` helper lib isn't auto-loaded. (ESLint trusts the
   name alone; we add the keyword guard deliberately.)
-- **`@dhee/runner-sdk`** is the package a runner builds against —
+- **`@dhee_ai/runner-sdk`** is the package a runner builds against —
   `defineRunner`, the canonical types, and the shared primitives
   (`resolveEndpointUrl`, `retryTransient`, `computeInputsHash`). A runner
   depends ONLY on the SDK, never on `dhee-core` internals (enforced by the
@@ -72,10 +73,10 @@ name it for its primary artifact and declare both entry points (below).
 
 The module named by `dhee.runners` exports an array of
 `{ manifest, runner }` pairs, built with the SDK's `defineRunner`
-(`RunnerManifest` + `Runner` come from `@dhee/runner-sdk`):
+(`RunnerManifest` + `Runner` come from `@dhee_ai/runner-sdk`):
 
 ```ts
-import { defineRunner, type RunnerManifest } from '@dhee/runner-sdk';
+import { defineRunner, type RunnerManifest } from '@dhee_ai/runner-sdk';
 
 export const manifest: RunnerManifest = {
   tool: 'runway.gen3', version: '1.2.0', engineCompat: '>=0.1.0',

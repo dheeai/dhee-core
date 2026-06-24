@@ -50,11 +50,11 @@
   },
   "109": {
     "inputs": {
-      "text": ""
+      "value": ""
     },
-    "class_type": "Text Multiline",
+    "class_type": "PrimitiveStringMultiline",
     "_meta": {
-      "title": "Text Multiline"
+      "title": "Text String (Multiline)"
     }
   },
   "110": {

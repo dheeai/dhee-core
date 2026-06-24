@@ -160,7 +160,7 @@ export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: s
       return { name: r.name };
     },
     async queueAndWait(workflow, signal) {
-      const { outputs, promptId } = await client.queueAndWaitWS(
+      const { outputs, promptId, result } = await client.queueAndWaitWS(
         workflow,
         undefined,
         { ...(workflowId ? { workflowId } : {}), ...(signal ? { signal } : {}) },
@@ -170,8 +170,16 @@ export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: s
         try {
           resolved = await client.getOutputImages(promptId);
         } catch {
-          // keep empty; executor surfaces "no outputs"
+          // keep empty; the run-time error (if any) is surfaced just below
         }
+      }
+      // Comfy reported a run-time failure AND nothing came back: surface the
+      // real reason (missing model, bad input, vendor-node ServiceError, …)
+      // instead of letting the executor degrade it to a generic
+      // "no outputs (failed silently)". Throwing here flows through the
+      // executor's queue try/catch into a tool-tagged RunnerResult.
+      if (resolved.length === 0 && result?.status === 'error') {
+        throw new Error(result.errorMessage ?? 'ComfyUI reported an execution error (no detail provided)');
       }
       return {
         outputs: resolved.map((o) => ({ filename: o.filename, subfolder: o.subfolder })),

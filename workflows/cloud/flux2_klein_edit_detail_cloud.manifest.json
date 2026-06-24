@@ -56,7 +56,7 @@
     {
       "input": "prompt",
       "nodeId": "109",
-      "field": "text"
+      "field": "value"
     },
     {
       "input": "base_image",

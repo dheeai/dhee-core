@@ -24,8 +24,18 @@ import { pathToFileURL } from 'node:url';
 import { RunnerRegistry, getGlobalRegistry, type RunnerManifest } from './runners/registry.js';
 import type { Runner } from './schema.js';
 
-/** Matches `dhee-runner`, `dhee-runner-foo`, `@scope/dhee-bundle-bar`, … */
-export const ECOSYSTEM_PKG_RE = /^(@[^/]+\/)?dhee-(runner|bundle)(-.+)?$/;
+/**
+ * Matches ecosystem runner/bundle packages by NAME:
+ *   - `dhee-runner`, `dhee-runner-foo`, `dhee-bundle-bar`            (unscoped, `dhee-` required)
+ *   - `@scope/dhee-runner-foo`, `@scope/dhee-bundle-bar`             (scoped, `dhee-` prefix kept)
+ *   - `@scope/runner-foo`, `@scope/bundle-bar`                       (scoped, `dhee-` dropped — the
+ *                                                                     modern `@dhee_ai/runner-*` /
+ *                                                                     `@dhee_ai/bundle-*` form)
+ * Unscoped names without the `dhee-` prefix are intentionally NOT matched
+ * (too broad — any package literally named `runner-something`). The
+ * `dhee-runner` / `dhee-bundle` keyword guard in `maybeAdd` still applies.
+ */
+export const ECOSYSTEM_PKG_RE = /^(?:@[^/]+\/(?:dhee-)?|dhee-)(runner|bundle)(-.+)?$/;
 
 interface DheeField {
   runners?: string;

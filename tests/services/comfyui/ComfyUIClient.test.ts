@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ComfyUIClient, isComfyCloudUrl } from '../../../src/services/comfyui/ComfyUIClient.js';
+import {
+  ComfyUIClient,
+  formatComfySubmitError,
+  isComfyCloudUrl,
+} from '../../../src/services/comfyui/ComfyUIClient.js';
 import WebSocket from 'ws';
 
 vi.mock('ws', () => {
@@ -32,6 +36,49 @@ vi.mock('ws', () => {
   }
 
   return { default: MockWebSocket };
+});
+
+describe('formatComfySubmitError', () => {
+  it('summarizes a prompt_outputs_failed_validation body node-by-node with the offending value', () => {
+    const body = JSON.stringify({
+      error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation' },
+      node_errors: {
+        '84': {
+          class_type: 'DualCLIPLoader',
+          errors: [
+            {
+              type: 'value_not_in_list',
+              message: 'Value not in list',
+              details: "clip_name1: 'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors' not in []",
+            },
+          ],
+        },
+      },
+    });
+
+    const msg = formatComfySubmitError(400, body);
+
+    expect(msg).toContain('ComfyUI rejected the workflow (400');
+    expect(msg).toContain('node 84 DualCLIPLoader');
+    expect(msg).toContain("gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors");
+    expect(msg).toContain('value_not_in_list');
+    // The actionable hint that points at the real cause (model not installed).
+    expect(msg).toContain('not installed on this endpoint');
+    // Must keep the status code so transient-retry never mistakes it for a blip.
+    expect(msg).toContain('400');
+  });
+
+  it('keeps the raw body for non-validation failures (e.g. 401 auth)', () => {
+    const body = JSON.stringify({ code: 'UNAUTHORIZED', message: 'authentication required' });
+    const msg = formatComfySubmitError(401, body);
+    expect(msg).toBe(`ComfyUI returned 401: ${body}`);
+    expect(msg).toContain('authentication required');
+  });
+
+  it('falls back to the raw body when the response is not JSON', () => {
+    const msg = formatComfySubmitError(502, '<html>Bad Gateway</html>');
+    expect(msg).toBe('ComfyUI returned 502: <html>Bad Gateway</html>');
+  });
 });
 
 describe('ComfyUIClient cloud detection', () => {
@@ -189,6 +236,41 @@ describe('ComfyUIClient request behavior', () => {
     expect(url).toBe('https://example.com/comfy/api/prompt');
     expect(headers.get('Authorization')).toBe('Bearer bearer-token');
     expect(headers.get('X-API-Key')).toBeNull();
+  });
+
+  it('throws a readable node-by-node error when /prompt returns a 400 validation body', async () => {
+    const body = JSON.stringify({
+      error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation' },
+      node_errors: {
+        '84': {
+          class_type: 'DualCLIPLoader',
+          errors: [
+            {
+              type: 'value_not_in_list',
+              details: "clip_name1: 'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors' not in []",
+            },
+          ],
+        },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => body,
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const client = new ComfyUIClient({
+      baseUrl: 'http://localhost:8188',
+      outputDir: '/tmp',
+      timeout: 300,
+      apiKey: undefined,
+      isCloud: false,
+    });
+
+    await expect(
+      client.queueWorkflow({ '84': { class_type: 'DualCLIPLoader', inputs: {} } }),
+    ).rejects.toThrow(/ComfyUI rejected the workflow \(400.*node 84 DualCLIPLoader.*value_not_in_list/s);
   });
 
   it('requires COMFY_CLOUD_API_KEY for Comfy Cloud urls', () => {
@@ -458,6 +540,57 @@ describe('ComfyUIClient.waitForCompletion local error detection', () => {
     const result = await client.waitForCompletion(promptId, undefined, 1);
     expect(result.status).toBe('error');
     expect(result.prompt_id).toBe(promptId);
+  }, 4000);
+
+  it('extracts the execution_error exception_message into errorMessage (so the real cause surfaces)', async () => {
+    // The LTXDirector node re-submits an internal sub-prompt; when it
+    // references a model the endpoint lacks, Comfy records an execution_error
+    // with the full "Value not in list" detail. The HTTP-poll path used to
+    // drop it, leaving callers with a bare status:error and no reason.
+    const promptId = 'ltx-director-1';
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      if (String(url).includes(`/history/${promptId}`)) {
+        return {
+          ok: true,
+          json: async () => ({
+            [promptId]: {
+              status: {
+                status_str: 'error',
+                completed: false,
+                messages: [
+                  ['execution_start', { prompt_id: promptId }],
+                  [
+                    'execution_error',
+                    {
+                      node_id: '46',
+                      exception_type: 'RuntimeError',
+                      exception_message:
+                        "Failed to send prompt request: request returned error status 400: clip_name1: 'gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors' is not a valid value",
+                    },
+                  ],
+                ],
+              },
+              outputs: {},
+            },
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const client = new ComfyUIClient({
+      baseUrl: 'http://localhost:8188',
+      outputDir: '/tmp',
+      timeout: 300,
+      apiKey: undefined,
+      isCloud: false,
+    });
+
+    const result = await client.waitForCompletion(promptId, undefined, 1);
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toContain('RuntimeError');
+    expect(result.errorMessage).toContain('gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors');
+    expect(result.errorMessage).toContain('node=46');
   }, 4000);
 });
 

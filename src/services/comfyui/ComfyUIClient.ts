@@ -63,6 +63,100 @@ function enrichFetchError(err: unknown, url: string, method: string): Error {
   return wrapped;
 }
 
+/**
+ * Turn a non-OK `POST /prompt` response body into a human-readable, actionable
+ * error.
+ *
+ * ComfyUI rejects an un-runnable workflow with HTTP 400 and a structured body:
+ *
+ *   { "error": { "type": "prompt_outputs_failed_validation", ... },
+ *     "node_errors": { "84": { "class_type": "DualCLIPLoader",
+ *       "errors": [{ "type": "value_not_in_list",
+ *                    "details": "clip_name1: 'gemma_…heretic…' not in [...]" }] } } }
+ *
+ * The most common cause is a model/file the workflow references not being
+ * installed on the TARGET endpoint (e.g. a local-only checkpoint sent to Comfy
+ * Cloud) — `value_not_in_list`. Dumping the raw JSON buries the one actionable
+ * fact (which node, which field, which value), and the downstream symptom is a
+ * generic "no output" that misdirects debugging toward auth/connectivity. This
+ * collapses the body into a one-line, node-by-node summary so the failure is
+ * self-explanatory in the run log. Non-validation errors (401 auth, 404, …)
+ * fall through to the raw body unchanged.
+ */
+export function formatComfySubmitError(status: number, body: string): string {
+  const fallback = `ComfyUI returned ${status}: ${body}`;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return fallback;
+  }
+  const obj = parsed as {
+    error?: { type?: string; message?: string };
+    node_errors?: Record<
+      string,
+      { class_type?: string; errors?: Array<{ type?: string; message?: string; details?: string }> }
+    >;
+  };
+  const nodeErrors =
+    obj.node_errors && typeof obj.node_errors === 'object' ? obj.node_errors : undefined;
+  if (!nodeErrors || Object.keys(nodeErrors).length === 0) {
+    // Not a node-level validation failure (e.g. 401 auth, 404) — keep the
+    // raw body so nothing actionable is lost.
+    return fallback;
+  }
+  const clip = (s: string): string => (s.length > 300 ? `${s.slice(0, 297)}…` : s);
+  const nodeLines: string[] = [];
+  for (const [nodeId, info] of Object.entries(nodeErrors)) {
+    const cls = info?.class_type ? ` ${info.class_type}` : '';
+    const errs = Array.isArray(info?.errors) ? info.errors : [];
+    if (errs.length === 0) {
+      nodeLines.push(`node ${nodeId}${cls}: validation failed`);
+      continue;
+    }
+    for (const e of errs) {
+      const detail =
+        (e?.details && e.details.trim()) || (e?.message && e.message.trim()) || 'validation failed';
+      const kind = e?.type ? ` [${e.type}]` : '';
+      nodeLines.push(`node ${nodeId}${cls}: ${clip(detail)}${kind}`);
+    }
+  }
+  const headline =
+    (obj.error?.message && obj.error.message.trim()) ||
+    (obj.error?.type && obj.error.type.trim()) ||
+    'prompt outputs failed validation';
+  const hint = nodeLines.some((l) => l.includes('value_not_in_list'))
+    ? ' — a model/file the workflow references is not installed on this endpoint'
+    : '';
+  return `ComfyUI rejected the workflow (${status}: ${headline})${hint}: ${nodeLines.join('; ')}`;
+}
+
+/**
+ * Pull the most actionable error string out of a /history entry's
+ * `status.messages`. ComfyUI records an `['execution_error', {...}]` tuple when
+ * a node throws at RUN time (distinct from submit-time validation): the payload
+ * carries `exception_type`, `exception_message`, and `node_id`. The HTTP-poll
+ * completion path only ever saw `status_str === 'error'` and returned a bare
+ * error with no reason — which is how a real cause (e.g. the LTXDirector node's
+ * internal sub-prompt failing with "Value not in list") got reduced downstream
+ * to a generic "no output". Returns undefined when no execution_error is found.
+ */
+function extractHistoryErrorMessage(
+  messages: Array<[string, Record<string, unknown>]> | undefined,
+): string | undefined {
+  if (!messages) return undefined;
+  for (const [kind, payload] of messages) {
+    if (kind !== 'execution_error' || !payload) continue;
+    const parts: string[] = [];
+    if (typeof payload['exception_type'] === 'string') parts.push(payload['exception_type']);
+    if (typeof payload['exception_message'] === 'string') parts.push(payload['exception_message']);
+    const nodeId = payload['node_id'] ?? payload['node'];
+    if (nodeId !== undefined && nodeId !== null) parts.push(`node=${String(nodeId)}`);
+    if (parts.length) return parts.join(' — ');
+  }
+  return undefined;
+}
+
 export interface ComfyUIClientConfig {
   baseUrl: string;
   outputDir: string;
@@ -519,7 +613,7 @@ export class ComfyUIClient {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`ComfyUI returned ${response.status}: ${errorText}`);
+      throw new Error(formatComfySubmitError(response.status, errorText));
     }
 
     const result = (await response.json()) as { prompt_id?: string };
@@ -731,10 +825,15 @@ export class ComfyUIClient {
             // the node stays wedged `in_progress`. Surface it as an error.
             if (history.status?.status_str === 'error') {
               const kinds = (history.status?.messages ?? []).map((m) => m[0]);
+              const errorMessage = extractHistoryErrorMessage(history.status?.messages);
               debugLog(
-                `[waitForCompletion] prompt ${promptId} reported status_str=error in /history — failing. message kinds=${JSON.stringify(kinds)}`,
+                `[waitForCompletion] prompt ${promptId} reported status_str=error in /history — failing. message kinds=${JSON.stringify(kinds)}${errorMessage ? ` detail=${errorMessage}` : ''}`,
               );
-              return { status: 'error', prompt_id: promptId };
+              return {
+                status: 'error',
+                prompt_id: promptId,
+                ...(errorMessage ? { errorMessage } : {}),
+              };
             }
 
             const outputs = history.outputs || {};

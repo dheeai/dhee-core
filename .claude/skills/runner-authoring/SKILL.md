@@ -70,7 +70,7 @@ For the RUN path they must be symlinked into `dhee-core/node_modules/`
 
 | tool | package | installed in `~/.kshana/runners/`? | does |
 |------|---------|-----------------------------------|------|
-| `comfy.tts` | `dhee-runner-tts` | ✅ | Qwen3 voice-clone TTS (any language; `language` is a workflow-node field set via `fields`, not a runner param; no text-length cap / no chunking) |
+| `comfy.tts` | `@dhee_ai/runner-tts` | ✅ | Qwen3 voice-clone TTS (any language; `language` is a workflow-node field set via `fields`, not a runner param; no text-length cap / no chunking) |
 | `comfy.matte` | `dhee-runner-matte` | ✅ | SAM-3 concept-prompted matte (extract product/subject) — CPU |
 | `comfy.boogu` | `dhee-runner-boogu` | ✅ | model composite / place a subject into a scene |
 | `comfy.vace_place` | `dhee-runner-vace` | ✅ | Wan-VACE: generate scene+motion around a kept subject |

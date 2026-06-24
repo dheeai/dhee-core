@@ -18,7 +18,7 @@
   "workflowFile": "flux2_klein_edit_consistency_cloud.json",
   "format": "api",
   "parameterMappings": [
-    { "input": "prompt", "nodeId": "109", "field": "text" },
+    { "input": "prompt", "nodeId": "109", "field": "value" },
     { "input": "base_image", "nodeId": "76", "field": "image" },
     { "input": "reference_image_1", "nodeId": "81", "field": "image" },
     { "input": "reference_image_2", "nodeId": "82", "field": "image" },

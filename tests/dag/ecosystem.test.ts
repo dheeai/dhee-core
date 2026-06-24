@@ -53,9 +53,15 @@ beforeEach(() => {
   // A scoped runner package.
   pkg('@acme/dhee-runner', { keywords: ['dhee-runner'], dhee: { runners: './r.mjs' } },
     { 'r.mjs': RUNNER_MODULE('acme.x') });
+  // A scoped runner with the modern dropped-`dhee-` form (@dhee_ai/runner-*).
+  pkg('@dhee_ai/runner-tts', { keywords: ['dhee-runner'], dhee: { runners: './r.mjs' } },
+    { 'r.mjs': RUNNER_MODULE('comfy.tts') });
   // A bundle package (multi-bundle layout: subdir per bundle).
   pkg('dhee-bundle-baz', { keywords: ['dhee-bundle'], dhee: { bundles: './bundles' } },
     { 'bundles/baz_pipeline/bundle.json': JSON.stringify({ id: 'baz_pipeline', version: '0.1.0', displayName: 'Baz', summary: 'A baz.', goal: 'n', nodes: [] }) });
+  // A scoped bundle with the modern dropped-`dhee-` form (@dhee_ai/bundle-*).
+  pkg('@dhee_ai/bundle-infographics', { keywords: ['dhee-bundle'], dhee: { bundles: './bundles' } },
+    { 'bundles/infographics/bundle.json': JSON.stringify({ id: 'infographics', version: '0.1.0', displayName: 'Infographics', summary: 'Info.', goal: 'n', nodes: [] }) });
   // Name matches but NO keyword → must be skipped by the guard.
   pkg('dhee-runner-nokeyword', { dhee: { runners: './x.mjs' } }, { 'x.mjs': RUNNER_MODULE('no.key') });
   // Keyword present but entry file missing → error, must not poison others.
@@ -73,11 +79,13 @@ afterEach(() => {
 });
 
 describe('findEcosystemPackages', () => {
-  it('finds keyword-guarded dhee-runner-* / dhee-bundle-* (incl. scoped), skips others', () => {
+  it('finds keyword-guarded dhee-runner-* / dhee-bundle-* (incl. scoped + dropped-prefix), skips others', () => {
     const names = findEcosystemPackages().map((p) => p.name).sort();
     expect(names).toContain('dhee-runner-foo');
     expect(names).toContain('@acme/dhee-runner');
+    expect(names).toContain('@dhee_ai/runner-tts'); // scoped, dhee- dropped
     expect(names).toContain('dhee-bundle-baz');
+    expect(names).toContain('@dhee_ai/bundle-infographics'); // scoped, dhee- dropped
     expect(names).toContain('dhee-runner-broken'); // matched + keyworded; fails later at load
     expect(names).not.toContain('dhee-runner-nokeyword'); // keyword guard
     expect(names).not.toContain('react'); // name doesn't match
@@ -88,9 +96,10 @@ describe('discoverNpmRunners', () => {
   it('registers runners from matching packages, including scoped', async () => {
     const reg = new RunnerRegistry();
     const res = await discoverNpmRunners(reg);
-    expect(res.registered.sort()).toEqual(['acme.x', 'foo.bar']);
+    expect(res.registered.sort()).toEqual(['acme.x', 'comfy.tts', 'foo.bar']);
     expect(reg.get('foo.bar')).toBeDefined();
     expect(reg.get('acme.x')).toBeDefined();
+    expect(reg.get('comfy.tts')).toBeDefined(); // from @dhee_ai/runner-tts
   });
 
   it('does not throw on a broken package — collects the error and registers the rest', async () => {
@@ -105,7 +114,7 @@ describe('discoverNpmRunners', () => {
     await discoverNpmRunners(reg);
     const second = await discoverNpmRunners(reg);
     expect(second.registered).toEqual([]);
-    expect(second.skipped.sort()).toEqual(['acme.x', 'foo.bar']);
+    expect(second.skipped.sort()).toEqual(['acme.x', 'comfy.tts', 'foo.bar']);
   });
 });
 

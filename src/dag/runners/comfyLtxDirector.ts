@@ -748,15 +748,30 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
 
   ctx.log(`comfy.ltx_director: submitting (${cfg.shots.length} shots, ${totalFrames} frames = ${(totalFrames / fps).toFixed(2)}s @ ${fps}fps)`);
   const startTime = Date.now();
-  const { promptId, outputs: wsOutputs } = await retryTransient(
-    () =>
-      client.queueAndWaitWS(workflow, (p) => {
-        if (p.percentage !== undefined && p.message) {
-          ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
-        }
-      }),
-    { signal: ctx.signal, log: ctx.log, label: 'comfy.ltx_director queue' },
-  );
+  // The queue call can fail at SUBMIT time when ComfyUI rejects the workflow
+  // (HTTP 400 with node_errors — e.g. a model the workflow references isn't
+  // installed on this endpoint). ComfyUIClient turns that into a readable,
+  // node-by-node message; catch it here so it surfaces as a tool-tagged
+  // RunnerResult rather than an unhandled throw the walker has to interpret.
+  let promptId: string;
+  let wsOutputs: Awaited<ReturnType<typeof client.queueAndWaitWS>>['outputs'];
+  let completion: Awaited<ReturnType<typeof client.queueAndWaitWS>>['result'];
+  try {
+    const res = await retryTransient(
+      () =>
+        client.queueAndWaitWS(workflow, (p) => {
+          if (p.percentage !== undefined && p.message) {
+            ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
+          }
+        }),
+      { signal: ctx.signal, log: ctx.log, label: 'comfy.ltx_director queue' },
+    );
+    promptId = res.promptId;
+    wsOutputs = res.outputs;
+    completion = res.result;
+  } catch (err) {
+    return { ok: false, error: `comfy.ltx_director: ${(err as Error).message}` };
+  }
   ctx.log(`  complete in ${Math.floor((Date.now() - startTime) / 1000)}s (prompt_id=${promptId})`);
 
   const histImages = await client.getOutputImages(promptId);
@@ -766,6 +781,16 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     .filter((i) => !seen.has(i.filename) && (seen.add(i.filename), true));
 
   if (allOutputs.length === 0) {
+    // When Comfy reported a run-time error (e.g. the LTXDirector node's own
+    // internal sub-prompt failed validation: "Value not in list" for a model
+    // the endpoint doesn't have), surface THAT instead of the generic
+    // "no video output" — otherwise the real cause is invisible.
+    if (completion?.status === 'error') {
+      return {
+        ok: false,
+        error: `comfy.ltx_director: ${completion.errorMessage ?? 'Comfy reported an execution error (no detail provided)'}`,
+      };
+    }
     return { ok: false, error: 'comfy.ltx_director: no video output from Comfy' };
   }
 

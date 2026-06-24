@@ -110,6 +110,14 @@
       "js-yaml@<=4.1.1": ">=4.2.0",
       "@babel/core@<=7.29.0": ">=7.29.6",
       "protobufjs@<=7.6.0": ">=7.6.1"
+    },
+    "packageExtensions": {
+      "sharp": {
+        "dependencies": {
+          "node-addon-api": "^8.8.0",
+          "node-gyp": "^12.3.0"
+        }
+      }
     }
   },
   "engines": {

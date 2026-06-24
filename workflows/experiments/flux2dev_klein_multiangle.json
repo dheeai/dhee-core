@@ -50,11 +50,11 @@
   },
   "109": {
     "inputs": {
-      "text": "<sks> back eye-level shot wide, your scene description here"
+      "value": "<sks> back eye-level shot wide, your scene description here"
     },
-    "class_type": "Text Multiline",
+    "class_type": "PrimitiveStringMultiline",
     "_meta": {
-      "title": "Text Multiline"
+      "title": "Text String (Multiline)"
     }
   },
   "92:61": {
