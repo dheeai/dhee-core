@@ -35,6 +35,15 @@ export interface NodeStateEntry {
   /** Arbitrary runner-emitted metadata (e.g. cached:true, model:'gpt-4'). */
   metadata?: Record<string, unknown>;
   /**
+   * Content hash of the node's DEFINITION at completion — runner config +
+   * the CONTENTS of referenced bundle files (promptTemplate, workflowPath,
+   * outputSchema, manifestPath, scriptPath) + wiring. On the next run a
+   * pre-walk sweep recomputes this; if it differs (a template/workflow/
+   * config edit), the node and its downstream are invalidated and re-run,
+   * so edits are picked up without a manual project wipe. See dhee-core#171.
+   */
+  defFingerprint?: string;
+  /**
    * Who produced this artifact. Default is the runner tool name (the
    * walker fills this on completion). The special value 'user' marks
    * the entry as user-overridden via dhee_write_node_content — the

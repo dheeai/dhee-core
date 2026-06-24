@@ -64,6 +64,7 @@ export {
   pruneStaleEntries,
 } from './walkState.js';
 export type { WalkState, NodeStateEntry, NodeRunStatus } from './walkState.js';
+import { computeNodeDefFingerprint, invalidateStaleNodeDefinitions } from './nodeFingerprint.js';
 export {
   findByCapability,
   findInstanceByCapability,
@@ -931,6 +932,25 @@ export async function walkBundle(opts: WalkerOptions): Promise<WalkResult> {
     return { ok: false, error: msg, instances: [] };
   }
   try {
+    // Pre-walk: re-run nodes whose DEFINITION changed since they last
+    // completed (edited prompt template / workflow / schema / config).
+    // The walker is otherwise state-as-truth and would cache-skip them,
+    // forcing a manual project wipe (dhee-core#171). Best-effort — a
+    // detection failure must not block the walk.
+    if (opts.bundleSource) {
+      try {
+        await invalidateStaleNodeDefinitions({
+          projectDir: opts.projectDir,
+          bundle: opts.bundle,
+          bundleDir: opts.bundleDir,
+          log: opts.log,
+        });
+      } catch (e) {
+        (opts.log ?? ((m: string) => console.log(m)))(
+          `walker: stale-node-definition sweep failed (${(e as Error).message}); continuing without it.`,
+        );
+      }
+    }
     return await walkBundleWithReviewLoop(opts, 0);
   } finally {
     lock.release();
@@ -1357,6 +1377,16 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             inst.outputRel = prior.outputPath;
             inst.outputAbs = priorAbs;
             if (prior.metadata) inst.metadata = prior.metadata;
+            // Backfill the definition fingerprint for entries completed
+            // before this feature existed, so the NEXT edit to this node
+            // is detected by the pre-walk sweep (dhee-core#171). The
+            // pre-walk sweep already re-ran any node whose fingerprint
+            // changed, so a cache-skip here means "definition unchanged"
+            // — safe to stamp the current fingerprint.
+            if (prior.defFingerprint === undefined) {
+              prior.defFingerprint = computeNodeDefFingerprint(node, opts.bundleDir);
+              persistState();
+            }
             log(`◌ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} (already completed)`);
             continue;
           }
@@ -1801,6 +1831,10 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           status: 'completed',
           outputPath: result.outputPath,
           completedAt: Date.now(),
+          // Fingerprint the node DEFINITION so a later run can detect an
+          // edited template / workflow / config and re-run instead of
+          // cache-skipping it (dhee-core#171).
+          defFingerprint: computeNodeDefFingerprint(node, opts.bundleDir),
           ...(inst.itemId !== undefined ? { itemId: inst.itemId } : {}),
           ...(result.metadata ? { metadata: result.metadata } : {}),
         };
