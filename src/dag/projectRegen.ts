@@ -48,7 +48,7 @@ import type { DagBundle } from './schema.js';
  * image node and the critique never re-rendered it). Returns bare node
  * ids (excludes the requested targets themselves).
  */
-function bundleStructuralDownstream(bundle: DagBundle, requested: string[]): string[] {
+export function bundleStructuralDownstream(bundle: DagBundle, requested: string[]): string[] {
   const downstream = new Map<string, string[]>();
   for (const node of bundle.nodes) {
     for (const input of node.inputs) {
