@@ -22,10 +22,11 @@
 import 'dotenv/config';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { dirname, join, basename, resolve } from 'node:path';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
-import { ffprobeBin } from './ffmpegBin.js';
+import { ffmpegBin, ffprobeBin } from './ffmpegBin.js';
 import { retryTransient } from './transientRetry.js';
 import { resolveRelayInputs } from '../projectResolvers.js';
 import { REPO_ROOT } from '../../agent/pi/paths.js';
@@ -244,6 +245,58 @@ export function alignToLTX(rawFrames: number[]): number[] {
   const rounded = rawFrames.map((f) => Math.max(8, Math.round(f / 8) * 8));
   rounded[0] = rounded[0]! + 1;
   return rounded;
+}
+
+/** Snap n to the nearest multiple of m (never below m). LTX requires pixel
+ *  dimensions divisible by 32; the bundles express intent (854×480, 1280×720)
+ *  which are NOT divisible by 32, so we align here for deterministic output. */
+export function snapToMultiple(n: number, m: number): number {
+  return Math.max(m, Math.round(n / m) * m);
+}
+
+/**
+ * Normalize a first-frame image to exactly targetW×targetH using a "cover"
+ * fit: scale up to fully cover the target box, then center-crop the excess.
+ * This guarantees every segment anchor shares ONE aspect ratio, which is what
+ * stops the LTXDirector node from collapsing mixed-aspect first-frames (e.g.
+ * a 1024×1024 zimage still next to an 848×480 klein still) into a square
+ * 512×512 output. Idempotent: returns the original path when the image already
+ * matches the target. Falls back to the original path on any ffmpeg/ffprobe
+ * error so a normalization failure never blocks the render.
+ */
+export function normalizeFirstFrame(
+  srcPath: string,
+  targetW: number,
+  targetH: number,
+  log: (m: string) => void,
+): string {
+  let curW = 0;
+  let curH = 0;
+  try {
+    const out = execFileSync(
+      ffprobeBin(),
+      ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', srcPath],
+      { encoding: 'utf-8' },
+    ).trim();
+    const parts = out.split(',');
+    curW = parseInt(parts[0] ?? '0', 10);
+    curH = parseInt(parts[1] ?? '0', 10);
+  } catch {
+    return srcPath;
+  }
+  if (curW === targetW && curH === targetH) return srcPath;
+  const dst = join(tmpdir(), `dhee-ltx-norm-${targetW}x${targetH}-${basename(srcPath)}`);
+  try {
+    execFileSync(
+      ffmpegBin(),
+      ['-y', '-i', srcPath, '-vf', `scale=${targetW}:${targetH}:force_original_aspect_ratio=increase,crop=${targetW}:${targetH}`, dst],
+      { stdio: 'ignore' },
+    );
+    log(`comfy.ltx_director: normalized ${basename(srcPath)} ${curW}×${curH} → ${targetW}×${targetH}`);
+    return dst;
+  } catch {
+    return srcPath;
+  }
 }
 
 export interface ResolvedLtxDirectorConfig extends LtxDirectorConfig {
@@ -547,8 +600,12 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   }
 
   const fps = cfg.fps ?? 24;
-  const width = cfg.width ?? 854;
-  const height = cfg.height ?? 480;
+  // Snap to multiples of 32 — LTX requires pixel dimensions divisible by 32
+  // (divisible_by on the node), and the bundle's configured width/height
+  // (854×480, 1280×720) express 16:9 intent but aren't themselves aligned.
+  // Aligning here also matches the target we normalize first-frames to below.
+  const width = snapToMultiple(cfg.width ?? 854, 32);
+  const height = snapToMultiple(cfg.height ?? 480, 32);
 
   const segmentFrames = alignToLTX(cfg.shots.map((s) => s.duration * fps));
   const totalFrames = segmentFrames.reduce((a, b) => a + b, 0);
@@ -635,8 +692,13 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   ctx.log(`comfy.ltx_director: uploading ${cfg.firstFrames.length} first-frame images...`);
   const uploadedNames: string[] = [];
   for (let i = 0; i < cfg.firstFrames.length; i++) {
+    // Normalize each anchor to the exact target W×H (cover + center-crop) so
+    // all segments share one aspect ratio. Mixed-aspect first-frames (e.g. a
+    // square zimage still next to a 16:9 klein still) otherwise collapse the
+    // LTXDirector output to a square. See normalizeFirstFrame.
+    const uploadPath = normalizeFirstFrame(cfg.firstFrames[i]!, width, height, ctx.log);
     const u = await retryTransient(
-      () => client.uploadImage(cfg.firstFrames[i]!, 'input', true),
+      () => client.uploadImage(uploadPath, 'input', true),
       { signal: ctx.signal, log: ctx.log, label: `comfy.ltx_director upload shot_${cfg.shots[i]!.shotNumber}` },
     );
     ctx.log(`  shot ${cfg.shots[i]!.shotNumber}: ${basename(cfg.firstFrames[i]!)} → ${u.name}`);
@@ -731,6 +793,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   director.inputs['use_custom_audio'] = useCustomAudio;
   director.inputs['custom_width'] = width;
   director.inputs['custom_height'] = height;
+  director.inputs['resize_method'] = 'crop';
   director.inputs['divisible_by'] = 32;
   director.inputs['img_compression'] = 18;
 
