@@ -45,6 +45,14 @@ export interface ShotInput {
 
 export interface LtxDirectorConfig {
   workflowPath: string;
+  /**
+   * Cloud variant of {@link workflowPath}, used when the resolved endpoint is
+   * Comfy Cloud (the local graph references model files absent from cloud,
+   * e.g. the gemma_3_12B heretic encoder). Resolved bundle-relative then
+   * REPO_ROOT; falls back to {@link workflowPath} when unset or the file
+   * doesn't resolve. Local runs are unaffected (the endpoint URL isn't cloud).
+   */
+  workflowPathCloud?: string;
   shots?: ShotInput[];
   firstFrames?: string[];
   globalPrompt?: string;
@@ -131,6 +139,7 @@ export interface LtxDirectorConfig {
  * `ENDPOINT_self_local`.
  */
 import { resolveEndpointUrl } from './endpointResolver.js';
+import { resolveWorkflowPath } from '../workflowPathResolver.js';
 
 // ── Prompt-shaping helpers (ported verbatim from probe-ltx-director.ts) ──
 
@@ -332,7 +341,10 @@ function readPromptFromScenePromptInput(
   }
 }
 
-function resolveWorkflowPath(ctx: RunnerContext, workflowPath: string): string {
+/** Resolve the CANONICAL (non-cloud) workflow path: absolute passthrough,
+ *  else bundle-relative if it exists, else REPO_ROOT-relative. Cloud-aware
+ *  selection happens later in runComfyLtxDirector via resolveWorkflowPath. */
+function resolveCanonicalWorkflowPath(ctx: RunnerContext, workflowPath: string): string {
   if (workflowPath.startsWith('/')) return workflowPath;
   const bundleRel = ctx.bundleDir ? resolve(ctx.bundleDir, workflowPath) : undefined;
   return bundleRel && existsSync(bundleRel) ? bundleRel : resolve(REPO_ROOT, workflowPath);
@@ -347,7 +359,7 @@ export function resolveLtxDirectorConfigFromInputs(
       ok: true,
       cfg: {
         ...cfg,
-        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        workflowPath: resolveCanonicalWorkflowPath(ctx, cfg.workflowPath),
         shots: cfg.shots,
         firstFrames: cfg.firstFrames,
         globalPrompt: cfg.globalPrompt,
@@ -394,7 +406,7 @@ export function resolveLtxDirectorConfigFromInputs(
       ok: true,
       cfg: {
         ...cfg,
-        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        workflowPath: resolveCanonicalWorkflowPath(ctx, cfg.workflowPath),
         shots: [{ shotNumber: 1, duration, description: prompt }],
         firstFrames: [imagePath],
         globalPrompt: prompt,
@@ -469,7 +481,7 @@ export function resolveLtxDirectorConfigFromInputs(
       ok: true,
       cfg: {
         ...cfg,
-        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        workflowPath: resolveCanonicalWorkflowPath(ctx, cfg.workflowPath),
         shots: resolvedShots,
         firstFrames,
         globalPrompt: scenePrompt.prompt ?? `Scene ${sceneNumber}`,
@@ -491,7 +503,7 @@ export function resolveLtxDirectorConfigFromInputs(
       ok: true,
       cfg: {
         ...cfg,
-        workflowPath: resolveWorkflowPath(ctx, cfg.workflowPath),
+        workflowPath: resolveCanonicalWorkflowPath(ctx, cfg.workflowPath),
         shots: resolved.shots,
         firstFrames: resolved.firstFrames,
         globalPrompt: resolved.globalPrompt,
@@ -597,6 +609,24 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     ctx.log(`comfy.ltx_director: routing to endpoint '${cfg.endpoint}' → ${resolved}`);
   }
 
+  // Backend-aware workflow selection: when the resolved endpoint is Comfy
+  // Cloud and a cloud variant is available, use it — the local graph
+  // references model files absent from cloud (e.g. the gemma_3_12B heretic
+  // text encoder). Falls back to the canonical workflowPath otherwise, so
+  // local runs and bundles without a cloud variant are unaffected.
+  const workflowPath = resolveWorkflowPath({
+    workflowPath: rawCfg.workflowPath,
+    bundleDir: ctx.bundleDir,
+    endpointUrl: endpointBaseUrl,
+    workflowPathCloud: rawCfg.workflowPathCloud,
+  });
+  if (!existsSync(workflowPath)) {
+    return { ok: false, error: `comfy.ltx_director: workflow not found: ${workflowPath}` };
+  }
+  if (workflowPath !== cfg.workflowPath) {
+    ctx.log(`comfy.ltx_director: cloud endpoint → using ${workflowPath}`);
+  }
+
   const client = new ComfyUIClient({
     outputDir,
     ...(endpointBaseUrl ? { baseUrl: endpointBaseUrl } : {}),
@@ -656,7 +686,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     audioSegments,
   };
 
-  const baseWorkflow = JSON.parse(readFileSync(cfg.workflowPath, 'utf-8')) as Record<
+  const baseWorkflow = JSON.parse(readFileSync(workflowPath, 'utf-8')) as Record<
     string,
     { inputs: Record<string, unknown>; class_type: string }
   >;
@@ -675,7 +705,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     const { applyEndpointAliases, defaultAliasesDir } = await import('../workflowAliases.js');
     const aliasRes = await applyEndpointAliases({
       workflow: workflow as never,
-      workflowKey: cfg.workflowPath.split('/').slice(-2).join('/'),
+      workflowKey: workflowPath.split('/').slice(-2).join('/'),
       aliasesDir: defaultAliasesDir(),
       endpointUrl: endpointBaseUrl,
       log: (m) => ctx.log(`comfy.ltx_director: ${m}`),
@@ -785,7 +815,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     JSON.stringify(
       {
         runner: 'comfy.ltx_director',
-        workflow: cfg.workflowPath,
+        workflow: workflowPath,
         globalPrompt: cfg.globalPrompt,
         localPrompts,
         segmentFrames,
@@ -829,6 +859,7 @@ function describe(): RunnerDescription {
       required: ['workflowPath', 'outputPath'],
       properties: {
         workflowPath: { type: 'string', description: 'Path to LTX Director Comfy workflow JSON' },
+        workflowPathCloud: { type: 'string', description: 'Cloud variant workflow (used when endpoint resolves to Comfy Cloud). Omit to use workflowPath everywhere.' },
         shots: { type: 'array', items: { type: 'object' } },
         firstFrames: { type: 'array', items: { type: 'string' } },
         globalPrompt: { type: 'string' },
