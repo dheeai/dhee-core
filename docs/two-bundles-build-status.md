@@ -36,7 +36,7 @@ fresh project.
 
 - **Phase 0**: RunnerRegistry, RunnerManifest, bundle source URI
   parser (built-in:, user:, registry:), custom runner discovery via
-  `~/.kshana/runners/`. 29 tests. (commit `ee23742`)
+  `~/.dhee/runners/`. 29 tests. (commit `ee23742`)
 - **Phase 1**: `llm.generate` runner — universal LLM runner with
   tier routing, JSON schema validation, skip-if-output-exists,
   abort signal. 13 tests. (commit `504a1dc`)

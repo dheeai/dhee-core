@@ -256,7 +256,7 @@ declarative, single-vocabulary, no glue.
   selection — future overrides could include workflow variant,
   reference image set, sampling params, etc.
 - A worked-example template for the future
-  `~/.kshana/runners/<thing>/` ecosystem — NB3 and NBP are the first
+  `~/.dhee/runners/<thing>/` ecosystem — NB3 and NBP are the first
   built-in non-Comfy runners and exercise the SDK boundary.
 
 ## Out of scope (deliberately)

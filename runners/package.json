@@ -1,0 +1,14 @@
+{
+  "name": "dhee-core-dev-runners",
+  "private": true,
+  "description": "Dev-only: installs published Dhee runner packages so the engine's npm-runner discovery (DHEE_NODE_MODULES_DIRS) finds them when running dhee-core/dhee-desktop from source. Not shipped.",
+  "dependencies": {
+    "@dhee_ai/runner-boogu": "^0.1.0",
+    "@dhee_ai/runner-captions": "^0.1.1",
+    "@dhee_ai/runner-matte": "^0.1.0",
+    "@dhee_ai/runner-tts": "^0.1.1",
+    "@dhee_ai/runner-video-graphics": "^0.1.0",
+    "dhee-runner-openrouter-image": "^0.1.0",
+    "dhee-runner-tts": "^0.1.0"
+  }
+}

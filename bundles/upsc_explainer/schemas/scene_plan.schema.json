@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "title",
+    "scenes",
+    "beats"
+  ],
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "ltx_beat_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ids of the dynamic BEATS to animate as LTX motion — sparse (~one per 1-2 minutes); the rest are Ken Burns stills."
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "role"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "role": {
+            "type": "string",
+            "description": "The scene's function/label in the arc (free-form: hook, why, how, types, risk, recap, etc.)."
+          },
+          "title": {
+            "type": "string"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4
+          },
+          "timeline": {
+            "type": "object",
+            "properties": {
+              "years": {
+                "type": "array",
+                "items": {}
+              }
+            }
+          },
+          "card": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "bullets": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "beats": {
+      "type": "array",
+      "minItems": 3,
+      "description": "Ordered visual+VO units. Each beat is ONE short spoken phrase shown over ONE image; the narrator moving to the next beat is exactly when the image swaps.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "scene",
+          "vo",
+          "image_brief"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "scene": {
+            "type": "string",
+            "description": "The id of the scene this beat belongs to."
+          },
+          "vo": {
+            "type": "string",
+            "minLength": 4,
+            "description": "The exact short narration phrase for this beat (~1 sentence, 2-7s)."
+          },
+          "image_brief": {
+            "type": "string",
+            "minLength": 10,
+            "description": "What the beat's image shows — match it tightly to what the vo MENTIONS (a specific studio/style/example named in the vo)."
+          },
+          "layout": {
+            "type": "string",
+            "enum": [
+              "full",
+              "split_v",
+              "split_diag"
+            ],
+            "description": "full = one image; split_v = two images in asymmetric vertical panels; split_diag = two images split by a diagonal slash."
+          },
+          "image_brief_b": {
+            "type": "string",
+            "description": "Second image brief, required when layout is split_v or split_diag."
+          }
+        }
+      }
+    },
+    "split_beat_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Ids of beats with layout split_v/split_diag (need a second image)."
+    }
+  }
+}

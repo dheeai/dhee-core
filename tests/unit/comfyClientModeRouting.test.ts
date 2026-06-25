@@ -2,16 +2,16 @@
  * End-to-end mode-routing assertions for ComfyUIClient.
  *
  * Existing coverage:
- *   - kshana-desktop's `kshanaCoreManager.test.ts` proves the
+ *   - dhee-desktop's `dheeCoreManager.test.ts` proves the
  *     env→COMFYUI_BASE_URL mapping for local / direct-cloud /
- *     Kshana-Cloud-auth modes.
+ *     dhee-Cloud-auth modes.
  *   - `comfyClientEmbeddedConfig.test.ts` proves env is read at
  *     construction time and the right header style is picked.
  *
  * The piece that wasn't covered: when `queueWorkflow` and
  * `uploadImage` actually run, do they hit the URL the env said?
  * That's what blew up in the wild — config looked right, but the
- * Kshana Cloud override silently rerouted requests to a host the
+ * dhee Cloud override silently rerouted requests to a host the
  * user never configured. These tests pin the contract by mocking
  * fetch and asserting on the URL it was called with.
  */
@@ -38,7 +38,7 @@ beforeEach(() => {
     saved[k] = process.env[k];
     delete process.env[k];
   }
-  tempDir = mkdtempSync(join(tmpdir(), 'kshana-mode-routing-'));
+  tempDir = mkdtempSync(join(tmpdir(), 'dhee-mode-routing-'));
 });
 
 afterEach(() => {
@@ -127,9 +127,9 @@ describe('ComfyUIClient mode routing — actual fetch URL', () => {
     expect(headers['Authorization']).toBeUndefined();
   });
 
-  it('Kshana Cloud proxy mode: queueWorkflow hits the proxy /comfy/api/prompt with Bearer auth', async () => {
+  it('dhee Cloud proxy mode: queueWorkflow hits the proxy /comfy/api/prompt with Bearer auth', async () => {
     process.env['COMFY_MODE'] = 'cloud';
-    process.env['COMFYUI_BASE_URL'] = 'https://kshana-website.example/comfy/api';
+    process.env['COMFYUI_BASE_URL'] = 'https://dhee-website.example/comfy/api';
     process.env['COMFY_CLOUD_API_KEY'] = 'desktop-jwt';
     const mockFetch = makeFetchMock();
     globalThis.fetch = mockFetch;
@@ -140,14 +140,14 @@ describe('ComfyUIClient mode routing — actual fetch URL', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [calledUrl, calledInit] = mockFetch.mock.calls[0];
-    expect(calledUrl).toBe('https://kshana-website.example/comfy/api/prompt');
+    expect(calledUrl).toBe('https://dhee-website.example/comfy/api/prompt');
     const headers = calledInit.headers as Record<string, string>;
-    // Non-cloud-host cloud mode uses Bearer auth (Kshana proxy expects JWT).
+    // Non-cloud-host cloud mode uses Bearer auth (dhee proxy expects JWT).
     expect(headers['Authorization']).toBe('Bearer desktop-jwt');
     expect(headers['X-API-Key']).toBeUndefined();
   });
 
-  it('local mode: NEVER hits cloud.comfy.org (regression guard for the Kshana-Cloud-override bug)', async () => {
+  it('local mode: NEVER hits cloud.comfy.org (regression guard for the dhee-Cloud-override bug)', async () => {
     process.env['COMFY_MODE'] = 'local';
     process.env['COMFYUI_BASE_URL'] = 'http://127.0.0.1:8188';
     const mockFetch = makeFetchMock();
@@ -159,7 +159,7 @@ describe('ComfyUIClient mode routing — actual fetch URL', () => {
 
     const calledUrl = mockFetch.mock.calls[0][0] as string;
     expect(calledUrl).not.toContain('cloud.comfy.org');
-    expect(calledUrl).not.toContain('kshana-website');
+    expect(calledUrl).not.toContain('dhee-website');
     expect(calledUrl.startsWith('http://127.0.0.1:8188')).toBe(true);
   });
 

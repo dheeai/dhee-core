@@ -164,9 +164,9 @@ describe("buildSupervisorTask", () => {
     expect(msg).toContain("shot_image_prompt:scene_1_shot_2");
     expect(msg).toContain("shot_image_last_frame:scene_1_shot_2");
     expect(msg).toContain("prompts_tab_save");
-    // The directive: pi-agent must call kshana_status FIRST on the
+    // The directive: pi-agent must call dhee_status FIRST on the
     // next resume turn — the seeds + dependents are pending now.
-    expect(msg.toLowerCase()).toMatch(/kshana_status/);
+    expect(msg.toLowerCase()).toMatch(/dhee_status/);
     // And: do NOT auto-dispatch run_to from this event. The user
     // decides when to resume.
     expect(msg.toLowerCase()).toMatch(/do not auto-dispatch|do not.*run_to|user decides/i);

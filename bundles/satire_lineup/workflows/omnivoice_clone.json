@@ -1,0 +1,12 @@
+{
+  "13": { "class_type": "LoadAudio", "inputs": { "audio": "voice_ref.wav" } },
+  "14": { "class_type": "OmniVoiceWhisperLoader", "inputs": { "model": "whisper-large-v3-turbo (auto-download)", "device": "auto", "dtype": "fp16" } },
+  "28": { "class_type": "OmniVoiceVoiceCloneTTS", "inputs": {
+      "model": "OmniVoice (auto download)", "text": "placeholder — replaced by runner", "ref_text": "",
+      "steps": 32, "guidance_scale": 2, "t_shift": 0.1, "speed": 0.92, "duration": 0,
+      "device": "auto", "dtype": "auto", "attention": "auto", "seed": 42,
+      "position_temperature": 5, "class_temperature": 0, "layer_penalty_factor": 5,
+      "denoise": true, "preprocess_prompt": true, "postprocess_output": true,
+      "keep_model_loaded": true, "instruct": "", "ref_audio": ["13", 0], "whisper_model": ["14", 0] } },
+  "1": { "class_type": "SaveAudio", "inputs": { "audio": ["28", 0], "filename_prefix": "audio/omnivoice_clone" } }
+}

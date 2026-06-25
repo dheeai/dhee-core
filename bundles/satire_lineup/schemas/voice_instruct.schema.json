@@ -1,0 +1,1 @@
+{ "$schema":"http://json-schema.org/draft-07/schema#","title":"voice_instruct","type":"object","required":["voice_instruct"],"properties":{"voice_instruct":{"type":"string","minLength":3}} }

@@ -38,11 +38,11 @@ pnpm-debug.log*
 # Subprojects
 prompt-optimizer/
 
-# Project data — kshana/dhee project folders live at repo root during
+# Project data — dhee/dhee project folders live at repo root during
 # local development (created by the CLI / desktop in CWD). Never source.
 .dhee/
 *.dhee/
-*.kshana/
+*.dhee/
 Chhaya.V3/
 
 # Local outputs (generated images/videos)

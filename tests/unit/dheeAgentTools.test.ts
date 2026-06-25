@@ -41,7 +41,7 @@ const PROJECTS_ENV = 'dhee_PROJECTS_DIR';
 let projectsRoot: string;
 
 beforeEach(() => {
-  projectsRoot = mkdtempSync(join(tmpdir(), 'kshana-agent-tools-'));
+  projectsRoot = mkdtempSync(join(tmpdir(), 'dhee-agent-tools-'));
   process.env[PROJECTS_ENV] = projectsRoot;
 });
 

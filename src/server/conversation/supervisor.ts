@@ -154,7 +154,7 @@ interface AssetEventInfo extends BaseSupervisorEventInfo {
 interface UserInvalidateEventInfo extends BaseSupervisorEventInfo {
   event: "user_invalidate";
   /** Node ids the user invalidated (seed set). Cascade ids are NOT
-   *  included — pi-agent can derive them with kshana_status if it
+   *  included — pi-agent can derive them with dhee_status if it
    *  cares; the seeds are the user's intent. */
   seeds: string[];
   /** Where the invalidation originated. Free-form string so the
@@ -199,7 +199,7 @@ export function buildSupervisorTask(info: SupervisorEventInfo): string {
       `seeds:`,
       seedList,
       ``,
-      `The user invalidated the above nodes via the desktop UI (NOT via chat). Your prior view of "everything is completed" is now stale — the seeds + their dependents are pending again. When the user next asks you to "resume" / "run" / "what's left", call kshana_status FIRST to refresh, then act on the fresh state. A one-line ack here is fine ("Noted — N nodes pending, ready when you say go."). Do NOT auto-dispatch kshana_run_to from this event — the user decides when to resume.`,
+      `The user invalidated the above nodes via the desktop UI (NOT via chat). Your prior view of "everything is completed" is now stale — the seeds + their dependents are pending again. When the user next asks you to "resume" / "run" / "what's left", call dhee_status FIRST to refresh, then act on the fresh state. A one-line ack here is fine ("Noted — N nodes pending, ready when you say go."). Do NOT auto-dispatch dhee_run_to from this event — the user decides when to resume.`,
     ].join("\n");
   }
   // asset

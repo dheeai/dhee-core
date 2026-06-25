@@ -1,4 +1,4 @@
-// kshana-core public entry point (bundle architecture only).
+// dhee-core public entry point (bundle architecture only).
 export * from './dag/walker.js';
 export * from './dag/schema.js';
 export * from './dag/bundleSource.js';
@@ -14,7 +14,7 @@ export {
 } from './dag/runners/registry.js';
 
 // Phase 6.4: embed-host helpers (formerly re-exported via the
-// now-defunct `./manager` barrel). Kshana-desktop imports these
+// now-defunct `./manager` barrel). dhee-desktop imports these
 // directly from `dhee-core` so it no longer needs the dead
 // ConversationManager-flavored entry point.
 export {

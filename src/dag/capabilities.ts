@@ -14,7 +14,7 @@
  * results.
  *
  * Reserved capability names are kebab-with-dots, lowercased, grouped
- * by domain. The kshana-core "platform" capabilities are listed in
+ * by domain. The dhee-core "platform" capabilities are listed in
  * src/dag/schema.ts NodeDef.displayCapability JSDoc.
  */
 import type { DagBundle, NodeDef } from './schema.js';

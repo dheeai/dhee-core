@@ -4,7 +4,7 @@
  * legacy `getRunner` / `listRunners` API for back-compat with code
  * that hasn't migrated to using the registry directly.
  *
- * Custom runners (from ~/.kshana/runners/) are NOT loaded here — they
+ * Custom runners (from ~/.dhee/runners/) are NOT loaded here — they
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';

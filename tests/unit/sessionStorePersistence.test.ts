@@ -24,7 +24,7 @@ const ENV_KEY = 'DHEE_PI_SESSIONS_DIR';
 let tempRoot: string;
 
 beforeEach(() => {
-  tempRoot = mkdtempSync(join(tmpdir(), 'kshana-session-store-'));
+  tempRoot = mkdtempSync(join(tmpdir(), 'dhee-session-store-'));
   process.env[ENV_KEY] = tempRoot;
 });
 

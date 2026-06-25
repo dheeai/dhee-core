@@ -48,7 +48,7 @@ The differences between stages live entirely in the prompt template and the inpu
 interface LlmGenerateConfig {
   /**
    * Path to the prompt template file. Relative paths resolve against
-   * the kshana-core repo root (where `prompts/templates/` lives).
+   * the dhee-core repo root (where `prompts/templates/` lives).
    * Uses the existing `src/core/prompts/loader.ts` for template loading
    * and variable interpolation, so syntax matches what's already in
    * production prompts.
@@ -240,7 +240,7 @@ function describe(): RunnerDescription {
 
    **Lean toward (b)** — simplest, no extra runner, fits the bundle's declarative shape.
 
-2. **Where do prompt templates live?** Today: `prompts/templates/` in the kshana-core repo. For shared bundles, templates need to ship with the bundle. Either (a) inline in the bundle JSON, (b) sibling files in `bundles/<bundle-id>/templates/`, or (c) reference repo paths and require the consumer to have them.
+2. **Where do prompt templates live?** Today: `prompts/templates/` in the dhee-core repo. For shared bundles, templates need to ship with the bundle. Either (a) inline in the bundle JSON, (b) sibling files in `bundles/<bundle-id>/templates/`, or (c) reference repo paths and require the consumer to have them.
 
    **Lean toward (b)** — bundles are self-contained, templates ship alongside. Consistent with the "complete graphs only" principle.
 

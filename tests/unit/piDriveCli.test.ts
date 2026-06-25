@@ -22,7 +22,7 @@ const ENV_KEY = 'DHEE_PI_SESSIONS_DIR';
 let tempRoot: string;
 
 beforeEach(() => {
-  tempRoot = mkdtempSync(join(tmpdir(), 'kshana-drive-cli-'));
+  tempRoot = mkdtempSync(join(tmpdir(), 'dhee-drive-cli-'));
   process.env[ENV_KEY] = tempRoot;
 });
 

@@ -1,0 +1,9 @@
+{
+  "30": { "class_type": "OmniVoiceVoiceDesignTTS", "inputs": {
+      "model": "OmniVoice (auto download)", "text": "placeholder", "voice_instruct": "placeholder",
+      "steps": 32, "guidance_scale": 2, "t_shift": 0.1, "speed": 1.0, "duration": 0,
+      "device": "auto", "dtype": "auto", "attention": "auto", "seed": 42,
+      "position_temperature": 5, "class_temperature": 0, "layer_penalty_factor": 5,
+      "denoise": true, "postprocess_output": true, "keep_model_loaded": true } },
+  "16": { "class_type": "SaveAudio", "inputs": { "audio": ["30", 0], "filename_prefix": "omnivoice_design" } }
+}

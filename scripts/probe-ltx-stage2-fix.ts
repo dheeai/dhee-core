@@ -43,7 +43,7 @@ const scene = parseInt(sceneArg, 10);
 const shot = parseInt(shotArg, 10);
 const projectRoot = resolve(
   process.cwd(),
-  projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`,
+  projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`,
 );
 if (!existsSync(projectRoot)) {
   console.error(`Project not found: ${projectRoot}`);

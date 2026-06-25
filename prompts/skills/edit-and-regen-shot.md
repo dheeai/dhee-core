@@ -113,7 +113,7 @@ shot or frame** — not for project-wide stylistic changes (those need
   LLM on the next dispatch, which writes a fresh file and silently
   overwrites your text. If you wrote
   `prompts/motion/scene_N_shot_M.json` and then call
-  `kshana_invalidate node=shot_motion_directive:scene_N_shot_M`, your
+  `dhee_invalidate node=shot_motion_directive:scene_N_shot_M`, your
   motion directive will be gone by the time the video renders. Use the
   consumer-mapping table in step 5 — for a hand-written motion
   directive, invalidate `shot_video:…`; the video re-renders from your

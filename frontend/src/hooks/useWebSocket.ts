@@ -17,7 +17,7 @@ export interface UseWebSocketOptions {
   maxRetries?: number
 }
 
-const RESUME_SESSION_KEY = 'kshana.sessionId'
+const RESUME_SESSION_KEY = 'dhee.sessionId'
 
 function readStoredSessionId(): string | null {
   try {

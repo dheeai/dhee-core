@@ -146,7 +146,7 @@ runner**; only the named tools above are registered and targetable by a
 bundle node.
 
 Anyone can write a new runner (an API wrapper, a new local workflow,
-a custom postprocess step) and drop it into `~/.kshana/runners/`.
+a custom postprocess step) and drop it into `~/.dhee/runners/`.
 The engine picks it up at startup.
 
 ---
@@ -288,7 +288,7 @@ No flow named "narrative-with-audio." No flag. Just an edge.
 ### c) Use a totally different video backend (Seedance, Veo, Kling, Runway)
 
 Write a runner once (~150 lines of TypeScript: take config, call the
-API, save the file). Drop it in `~/.kshana/runners/`. Now every
+API, save the file). Drop it in `~/.dhee/runners/`. Now every
 bundle author can use it. The bundle that uses it differs from the
 LTX one in **one node's `runner` block**.
 
@@ -457,7 +457,7 @@ Today, from the CLI:
 
 ```
 pnpm tsx scripts/run-project-via-bundle.ts \
-  --project ./my_story.kshana \
+  --project ./my_story.dhee \
   --bundle built-in:narrative_shot_by_shot
 ```
 

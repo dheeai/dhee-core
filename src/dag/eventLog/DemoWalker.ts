@@ -104,7 +104,7 @@ export interface RunDemoWalkOpts {
   branchId?: string;
   /** Only run these nodes and their descendants; everything else skipped. */
   runOnly?: string[];
-  /** Override the default CAS root (~/.kshana/cache). Useful for tests. */
+  /** Override the default CAS root (~/.dhee/cache). Useful for tests. */
   cacheRoot?: string;
   log?: (msg: string) => void;
 }

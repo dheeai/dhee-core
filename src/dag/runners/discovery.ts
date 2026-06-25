@@ -10,7 +10,7 @@
  * Robustness contract (each rule has a corresponding regression test):
  *
  *   - Missing search dir → silently skip (the user may not have created
- *     ~/.kshana/runners/ yet)
+ *     ~/.dhee/runners/ yet)
  *   - Subdirectory without runner.json → skip (not a runner package,
  *     e.g. a README dir or version-control folder)
  *   - Malformed runner.json → warn, skip this package, continue with

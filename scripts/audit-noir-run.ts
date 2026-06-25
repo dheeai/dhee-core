@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Audit a kshana project's artifacts against the goal:
+ * Audit a dhee project's artifacts against the goal:
  *   1. Bharata framework — every scene has rasa/sthayi/narrativeMode
  *   2. SCALIST — image prompts are coherent paragraphs, no Sanskrit leakage,
  *      no banned motion verbs, single Creative Director's Brief style
@@ -29,7 +29,7 @@ if (!projectArg) {
 }
 const projectRoot = resolve(
   process.cwd(),
-  projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`,
+  projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`,
 );
 if (!existsSync(projectRoot)) {
   console.error(`Project not found: ${projectRoot}`);

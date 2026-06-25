@@ -4,7 +4,7 @@
  * workflow at `workflows/cloud/ltx23_fl2v_cloud_int8.json` with a single
  * LTX-V-official-style prompt synthesized by DeepSeek via OpenRouter.
  *
- * No A/B render here — the user already has a kshana-style render of this
+ * No A/B render here — the user already has a dhee-style render of this
  * shot on disk and wants to compare a fresh LTX-V-enhancer render against
  * it directly.
  *
@@ -28,7 +28,7 @@ const WORKFLOW_PATH =
   join(REPO_ROOT, 'workflows/cloud/ltx23_fl2v_cloud_int8.json');
 const LTX_SYSTEM_PROMPT_PATH = join(REPO_ROOT, 'prompts/probes/ltxv_official_i2v.md');
 
-const PROJECT = process.env['PROBE_PROJECT'] || 'Ruby.kshana';
+const PROJECT = process.env['PROBE_PROJECT'] || 'Ruby.dhee';
 const SCENE = parseInt(process.env['PROBE_SCENE'] || '1', 10);
 const SHOT = parseInt(process.env['PROBE_SHOT'] || '2', 10);
 // Default newest first/last frames for Ruby s1shot2 — override via
@@ -68,11 +68,11 @@ async function buildLtxPrompt(): Promise<string> {
   const systemPrompt = readFileSync(LTX_SYSTEM_PROMPT_PATH, 'utf-8');
 
   // Apples-to-apples mode: when USER_MESSAGE_FILE is set, replay the
-  // EXACT user message kshana's production motion-directive LLM
+  // EXACT user message dhee's production motion-directive LLM
   // received. This bypasses our hand-built brief and lets DeepSeek
   // see the full <scene_state>, <shot_audio>, <bharata_cues>, World
   // Style Bible, etc., so the only variable in the A/B is the system
-  // prompt (kshana motion guide vs LTX-V official i2v).
+  // prompt (dhee motion guide vs LTX-V official i2v).
   const userMessageFile = process.env['USER_MESSAGE_FILE'];
   if (userMessageFile) {
     const userMessage = readFileSync(userMessageFile, 'utf-8');
@@ -249,7 +249,7 @@ async function main() {
   writeFileSync(sidecarPath, JSON.stringify(sidecar, null, 2));
 
   console.log(`\nLTX-V enhancer output → ${savedPath}`);
-  console.log(`Existing kshana render → ${EXISTING_RENDER}`);
+  console.log(`Existing dhee render → ${EXISTING_RENDER}`);
   console.log(`Sidecar → ${sidecarPath}`);
 }
 

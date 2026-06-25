@@ -38,7 +38,7 @@ describe('assertPathInProject', () => {
   });
 
   it('4. outside projectDir → throws', () => {
-    expect(() => assertPathInProject('/Users/ganaraj/dhee-studios/X', '/Users/ganaraj/Projects/kshana-core/src/dag/walker.ts')).toThrow(/outside|scope|project/i);
+    expect(() => assertPathInProject('/Users/ganaraj/dhee-studios/X', '/Users/ganaraj/Projects/dhee-core/src/dag/walker.ts')).toThrow(/outside|scope|project/i);
   });
 
   it('5. ../ escape → throws', () => {

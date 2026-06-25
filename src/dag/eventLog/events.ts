@@ -1,5 +1,5 @@
 /**
- * Event types for the kshana event log.
+ * Event types for the dhee event log.
  *
  * Per docs/event-sourced-graph-design.md, every behavior emits events;
  * projections fold them; readers query projections.

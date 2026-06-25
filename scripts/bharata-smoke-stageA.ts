@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 import { LLMClient } from '../src/core/llm/index.js';
 
-const PROJECT = process.argv[2] || 'chhaya_60s_anime.kshana';
+const PROJECT = process.argv[2] || 'chhaya_60s_anime.dhee';
 const SCENE_NUM = parseInt(process.argv[3] || '1', 10);
 const OUT_DIR = `test-output/bharata-smoke/${basename(PROJECT)}`;
 if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });

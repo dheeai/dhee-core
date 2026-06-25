@@ -1,0 +1,348 @@
+{
+  "id": "cartoon_explainer",
+  "version": "0.1.0",
+  "license": "MIT",
+  "displayName": "Cartoon Explainer",
+  "summary": "Narrated cartoon explainer videos: Ideogram 4 cartoon scenes, Qwen3-TTS narration, LTX 2.3 motion + crossfades.",
+  "techLine": "Ideogram 4 (cartoon) · Qwen3-TTS (cloned voice) · LTX Director (audio-driven) + xfade",
+  "engineCompat": ">=0.1.0",
+  "description": "Turns a brief into a narrated CARTOON EXPLAINER video. An LLM distills the brief into segments; each segment becomes a vivid Ideogram 4 cartoon SCENE (via comfy.tti) — characters + visual metaphor that dramatize the idea, with the key number rendered as in-scene text — and a Qwen3-TTS narration track (via comfy.tts) in ONE consistent voice (designed + saved once, then cloned per segment). Each cartoon scene is animated with the LTX 2.3 Director (comfy.ltx_director, audio-driven, sized to its narration) — generative motion suits illustrative cartoon art (unlike crisp infographic text) — and the clips are concatenated with crossfade transitions. Audio is generated FIRST so each clip is sized to the narration.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "comfy.tti": ">=0.1.0",
+      "comfy.tts": ">=0.1.0",
+      "comfy.ltx_director": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0"
+    },
+    "runnerPackages": {
+      "comfy.tts": "@dhee_ai/runner-tts"
+    }
+  },
+  "inputs": [
+    {
+      "id": "brief_input",
+      "kind": "file",
+      "path": "inputs/brief.md",
+      "required": true
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "cartoon_explainer"
+    },
+    {
+      "id": "aspect",
+      "kind": "project",
+      "field": "aspect",
+      "default": "16:9"
+    }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "outline",
+      "displayName": "Outline",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/outline.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/outline.md",
+          "tier": "heavy",
+          "outputFormat": "markdown",
+          "temperature": 0.6
+        }
+      },
+      "displayCapability": "outline.prose"
+    },
+    {
+      "id": "infographic_plan",
+      "displayName": "Infographic Plan",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "outline",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/infographic_plan.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/infographic_plan.md",
+          "outputSchema": "schemas/infographic_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json",
+          "temperature": 0.5,
+          "maxTokens": 8000
+        }
+      },
+      "displayCapability": "plan.json"
+    },
+    {
+      "id": "segment_image_prompt",
+      "displayName": "Segment Image Prompt",
+      "kind": "collection",
+      "itemSource": "infographic_plan",
+      "itemKey": "segments",
+      "inputs": [
+        {
+          "from": "infographic_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "outline",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/segment_image/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/segment_scene_prompt.md",
+          "outputSchema": "schemas/segment_image_prompt.schema.json",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "segment.image_prompt"
+    },
+    {
+      "id": "segment_image",
+      "displayName": "Segment Image",
+      "kind": "collection",
+      "itemSource": "segment_image_prompt",
+      "inputs": [
+        {
+          "from": "segment_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/segments/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.tti",
+        "config": {
+          "workflowPath": "workflows/ideogram4.json",
+          "manifestPath": "workflows/ideogram4.manifest.json",
+          "endpoint": "self.local",
+          "width": 1920,
+          "height": 1080
+        }
+      },
+      "displayCapability": "segment.image"
+    },
+    {
+      "id": "segment_narration",
+      "displayName": "Segment Narration",
+      "kind": "collection",
+      "itemSource": "infographic_plan",
+      "itemKey": "segments",
+      "inputs": [
+        {
+          "from": "infographic_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "outline",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/narration/{{item_id}}.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/segment_narration.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.4
+        }
+      },
+      "displayCapability": "segment.narration"
+    },
+    {
+      "id": "narrator_voice",
+      "displayName": "Narrator Voice",
+      "kind": "stage",
+      "inputs": [],
+      "outputs": {
+        "format": "audio",
+        "pattern": "assets/audio/narrator_voice.wav"
+      },
+      "runner": {
+        "tool": "comfy.tts",
+        "config": {
+          "workflowPath": "workflows/qwen3_voice_save.json",
+          "endpoint": "self.local",
+          "textNodeId": "1",
+          "textField": "text",
+          "text": "Every great idea begins as a simple question, and the answer can change everything we thought we knew.",
+          "fields": {
+            "1": {
+              "instruct": "A warm, clear, professional narrator voice: neutral accent, measured and confident pacing, friendly and engaging — the polished tone of a documentary voice-over.",
+              "seed": 42
+            }
+          }
+        }
+      },
+      "displayCapability": "narrator.voice"
+    },
+    {
+      "id": "segment_audio",
+      "displayName": "Segment Narration Audio",
+      "kind": "collection",
+      "itemSource": "segment_narration",
+      "inputs": [
+        {
+          "from": "segment_narration",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "narrator_voice",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "audio",
+        "pattern": "assets/audio/segments/{{item_id}}.wav"
+      },
+      "runner": {
+        "tool": "comfy.tts",
+        "config": {
+          "workflowPath": "workflows/qwen3_narration_cloned.json",
+          "endpoint": "self.local",
+          "textInput": "segment_narration",
+          "textNodeId": "4",
+          "textField": "script",
+          "textPrefix": "Narrator: "
+        }
+      },
+      "displayCapability": "segment.audio"
+    },
+    {
+      "id": "segment_motion",
+      "displayName": "Segment Motion",
+      "kind": "collection",
+      "itemSource": "infographic_plan",
+      "itemKey": "segments",
+      "inputs": [
+        {
+          "from": "infographic_plan",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "outline",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/motion/{{item_id}}.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/segment_motion.md",
+          "tier": "medium",
+          "outputFormat": "markdown",
+          "temperature": 0.7
+        }
+      },
+      "displayCapability": "segment.motion"
+    },
+    {
+      "id": "segment_video",
+      "displayName": "Segment Clip",
+      "kind": "collection",
+      "itemSource": "segment_image",
+      "inputs": [
+        {
+          "from": "segment_image",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "segment_audio",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "segment_motion",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "infographic_plan",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/segments/{{item_id}}.mp4"
+      },
+      "runner": {
+        "tool": "comfy.ltx_director",
+        "config": {
+          "workflowPath": "workflows/ltx_director_local.json",
+          "endpoint": "self.local",
+          "fps": 24,
+          "width": 1280,
+          "height": 720,
+          "imageInput": "segment_image",
+          "audioInput": "segment_audio",
+          "promptInput": "segment_motion",
+          "guideStrength": 0.55,
+          "globalPrompt": "Vibrant, energetic 2D cartoon animation, bouncy and expressive; bright fun explainer style; clean on-model art; no morphing, melting, or warping."
+        }
+      },
+      "displayCapability": "segment.video"
+    },
+    {
+      "id": "final_video",
+      "displayName": "Final Video",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "segment_video",
+          "usage": "input",
+          "scope": "all"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/final/final_video.mp4"
+      },
+      "runner": {
+        "tool": "ffmpeg.concat",
+        "config": {
+          "transition": "fade",
+          "transitionDuration": 0.5
+        }
+      },
+      "displayCapability": "final.video"
+    }
+  ]
+}

@@ -4,7 +4,7 @@
  *
  * Built-in runners (the ones that ship in src/dag/runners/) register at
  * import time via the global registry exported here. Custom runners
- * discovered at startup from `~/.kshana/runners/` (see discovery.ts)
+ * discovered at startup from `~/.dhee/runners/` (see discovery.ts)
  * register through the same API.
  *
  * The registry is also responsible for validating a bundle's declared
@@ -81,7 +81,7 @@ export class RunnerRegistry {
       if (!entry) {
         errors.push(
           `Runner '${tool}' is not registered. ` +
-            `Install it (e.g. clone the runner package into ~/.kshana/runners/<name>/) ` +
+            `Install it (e.g. clone the runner package into ~/.dhee/runners/<name>/) ` +
             `or check the bundle's dependencies declaration.`,
         );
         continue;

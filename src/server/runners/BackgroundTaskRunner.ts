@@ -234,7 +234,7 @@ export class BackgroundTaskRunner {
    * finally block alongside `this.active = null`. Surfaced via
    * `getActive()` and IPC status so the desktop's Stop/Resume button
    * can show "Stopping…" even when the cancel originated from a
-   * non-UI path (e.g. pi-agent's `kshana_task_cancel` tool, an
+   * non-UI path (e.g. pi-agent's `dhee_task_cancel` tool, an
    * automation calling the cancel IPC directly, or programmatic
    * replace()). Without this, only `handleCancel()` on the desktop
    * could flip the local pendingCancel — agent-initiated cancels

@@ -35,12 +35,12 @@ adapt it — see the **Catalog** below for what exists.
 
 > **Where bundles live (two roots, both on the loader's search chain).**
 > `listBundles()` / `bundleSource.ts` resolve in order:
-> `DHEE_APP_BUNDLES_DIR` → **`~/.kshana/bundles/`** → **`dhee-core/src/dag/bundles/`**.
-> - **New bundles you author go in `~/.kshana/bundles/<id>/`** (each its own git
+> `DHEE_APP_BUNDLES_DIR` → **`~/.dhee/bundles/`** → **`dhee-core/src/dag/bundles/`**.
+> - **New bundles you author go in `~/.dhee/bundles/<id>/`** (each its own git
 >   repo). This is the working rule — do NOT add new bundles to dhee-core.
 > - `dhee-core/src/dag/bundles/` still holds the older in-repo *template*
 >   bundles (loadable, good copy-from bases). Copy FROM either root; PLACE the
->   new one under `~/.kshana/bundles/`.
+>   new one under `~/.dhee/bundles/`.
 
 > **Golden rule:** the walker and runners stay generic; per-bundle and
 > per-workflow knowledge lives in *data* (bundle.json + the workflow
@@ -65,9 +65,9 @@ Don't start from a blank file. Match the shape you want:
 
 ```bash
 # copy a template (from either root) into the user bundle dir:
-cp -r src/dag/bundles/narrative_prompt_relay ~/.kshana/bundles/<your_bundle_id>
+cp -r src/dag/bundles/narrative_prompt_relay ~/.dhee/bundles/<your_bundle_id>
 # …or clone a richer live one, e.g. a talking-head/UGC base:
-cp -r ~/.kshana/bundles/ugc_ad_software ~/.kshana/bundles/<your_bundle_id>
+cp -r ~/.dhee/bundles/ugc_ad_software ~/.dhee/bundles/<your_bundle_id>
 ```
 
 A bundle directory holds:
@@ -90,11 +90,11 @@ has no prompts/workflows of its own.
 
 > Snapshot (refresh anytime):
 > ```bash
-> for d in ~/.kshana/bundles/*/ ~/Projects/dhee-core/src/dag/bundles/*/; do \
+> for d in ~/.dhee/bundles/*/ ~/Projects/dhee-core/src/dag/bundles/*/; do \
 >   python3 -c "import json,sys;b=json.load(open('$d/bundle.json'));print(f\"{b['id']:28} {b.get('summary','')[:90]}\")" 2>/dev/null; done
 > ```
 
-**`~/.kshana/bundles/` — the live / user bundles (richest copy-from bases):**
+**`~/.dhee/bundles/` — the live / user bundles (richest copy-from bases):**
 
 | id | what it is | distinctive runners |
 |----|------------|---------------------|

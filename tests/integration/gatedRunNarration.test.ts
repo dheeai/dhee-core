@@ -81,7 +81,7 @@ describe('gated-run terminal event — real BackgroundTaskRunner singleton', () 
     process.env['HOME'] = tmpHome;
 
     // A user-scheme bundle: upstream(stage) → fanout(collection) → final(goal).
-    const bundleDir = join(tmpHome, '.kshana/bundles', 'test_gate_e2e');
+    const bundleDir = join(tmpHome, '.dhee/bundles', 'test_gate_e2e');
     mkdirSync(bundleDir, { recursive: true });
     writeFileSync(
       join(bundleDir, 'bundle.json'),

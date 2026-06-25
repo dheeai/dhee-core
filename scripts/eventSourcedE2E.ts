@@ -16,7 +16,7 @@
  *
  *   TEST 2 — CACHING.     Project B is a fresh project with the SAME
  *            story.md. After A primed the CAS, B's walk should hit
- *            all 3 nodes in ~/.kshana/cache and spend $0 of new LLM
+ *            all 3 nodes in ~/.dhee/cache and spend $0 of new LLM
  *            calls (every node returns cached:true).
  *
  *   TEST 3 — TIME TRAVEL. Inspect project A's walkState at past
@@ -127,7 +127,7 @@ function readJson(filePath: string): Record<string, unknown> | null {
 
 async function main(): Promise<void> {
   // Use an isolated CAS root so we don't pollute the user's
-  // ~/.kshana/cache and so test 2's hit-rate is deterministic.
+  // ~/.dhee/cache and so test 2's hit-rate is deterministic.
   const casRoot = mkdtempSync(join(tmpdir(), 'e2e-cas-'));
   process.env['DHEE_CACHE_ROOT'] = casRoot;
   // Make sure the runner CAS path is enabled.

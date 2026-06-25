@@ -10,7 +10,7 @@
  * `inputsHash.ts`. Two runners called with the same resolved inputs
  * produce the same hash and hit the same entry.
  *
- * Default cacheRoot is `~/.kshana/cache` (shared across projects).
+ * Default cacheRoot is `~/.dhee/cache` (shared across projects).
  * Tests pass an isolated tmpdir.
  *
  * On hit: `linkInto(key, destPath)` writes the artifact at the
@@ -56,7 +56,7 @@ export interface GenerationCache {
 }
 
 export function defaultCacheRoot(): string {
-  return join(homedir(), '.kshana', 'cache');
+  return join(homedir(), '.dhee', 'cache');
 }
 
 export function openGenerationCache(opts?: { cacheRoot?: string }): GenerationCache {

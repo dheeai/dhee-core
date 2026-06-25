@@ -1,0 +1,51 @@
+{
+  "1": {
+    "class_type": "HiggsV3LoadModel",
+    "inputs": {
+      "model": "Higgs Audio v3 TTS 4B - bosonai (auto-download)",
+      "dtype": "auto",
+      "device": "auto",
+      "attention": "auto",
+      "download_if_missing": true
+    }
+  },
+  "13": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "voice_ref.wav"
+    }
+  },
+  "2": {
+    "class_type": "HiggsV3VoiceClone",
+    "inputs": {
+      "higgs_model": [
+        "1",
+        0
+      ],
+      "text": "placeholder",
+      "reference_audio": [
+        "13",
+        0
+      ],
+      "reference_text": "अरे वाह, यह तो कमाल हो गया! सच में? मुझे तो यकीन ही नहीं हो रहा... कितना शानदार है यह सब!",
+      "max_new_tokens": 4096,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 50,
+      "seed": 42,
+      "longform_chunking": true,
+      "words_per_chunk": 45,
+      "pause_between_chunks": 0.15
+    }
+  },
+  "16": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "filename_prefix": "higgs_clone"
+    }
+  }
+}

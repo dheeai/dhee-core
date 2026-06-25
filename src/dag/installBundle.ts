@@ -9,7 +9,7 @@
  * flow it runs at first-run — install and first-run converge there.
  *
  * Install target = the first writable user root: DHEE_USER_BUNDLES_DIR,
- * else ~/.kshana/bundles (both are on the listBundles() search chain,
+ * else ~/.dhee/bundles (both are on the listBundles() search chain,
  * so an installed bundle is discoverable out of the box).
  */
 
@@ -44,7 +44,7 @@ export type InstallResult =
 
 export function userBundlesDir(): string {
   const env = process.env['DHEE_USER_BUNDLES_DIR']?.trim();
-  return env && env.length > 0 ? env : resolve(homedir(), '.kshana/bundles');
+  return env && env.length > 0 ? env : resolve(homedir(), '.dhee/bundles');
 }
 
 interface MinimalNode {

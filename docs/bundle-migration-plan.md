@@ -27,7 +27,7 @@ The chosen replacement is the **ComfyUI mental model**:
 
 - **Engine** (the walker) walks a DAG. Doesn't know "narrative" from "documentary."
 - **Runners** are the work-doers (LLM call, Comfy image, Comfy video, ffmpeg).
-  Built-in runners ship with kshana-core. **Custom runners are user-installable**,
+  Built-in runners ship with dhee-core. **Custom runners are user-installable**,
   same as ComfyUI custom nodes.
 - **Bundles** are user-authored production pipelines — JSON DAGs + prompts +
   workflows, packaged as directories. The bundles we ship (narrative_classic,
@@ -39,7 +39,7 @@ After migration:
 - One production path. No dispatcher. No stage-vocabulary translation.
 - New project type (documentary, music video, explainer, …) = JSON file.
 - New capability (Suno, Runway gen-3, Eleven Labs TTS, …) = installable runner package.
-- Engineering bottleneck removed from "what kshana can produce."
+- Engineering bottleneck removed from "what dhee can produce."
 
 ## 2. Architecture overview
 
@@ -86,7 +86,7 @@ Resolved by the walker via a single helper, with three schemes:
 | Scheme | Location | Example |
 |---|---|---|
 | `built-in:<id>` | `<REPO_ROOT>/src/dag/bundles/<id>/` | `built-in:narrative_relay` |
-| `user:<id>` | `~/.kshana/bundles/<id>/` | `user:my_studio_doc` |
+| `user:<id>` | `~/.dhee/bundles/<id>/` | `user:my_studio_doc` |
 | `registry:<scope>/<name>@<version>` | future bundle registry | `registry:studio42/explainer@1.2.0` |
 
 `renderMethod` as a top-level project field is **deleted**. `bundleSource` is the new single source of truth for "what this project produces."
@@ -106,8 +106,8 @@ export class RunnerRegistry {
 Discovery at startup:
 
 1. Compile-time: all built-in runners auto-register on import.
-2. Runtime: walker scans `~/.kshana/runners/` for `runner.json` manifests, dynamic-imports each, calls `register()`.
-3. Runtime override: `KSHANA_RUNNER_PATH` env var allows additional dirs (testing, monorepo, CI).
+2. Runtime: walker scans `~/.dhee/runners/` for `runner.json` manifests, dynamic-imports each, calls `register()`.
+3. Runtime override: `dhee_RUNNER_PATH` env var allows additional dirs (testing, monorepo, CI).
 
 ### 2.4 Bundle manifest with dependencies
 
@@ -138,12 +138,12 @@ Walker validates **before** running:
 
 Fails loudly with install hints on miss.
 
-### 2.5 Runner SDK (`@kshana/runner-sdk`)
+### 2.5 Runner SDK (`@dhee/runner-sdk`)
 
 Exported as a stable public sub-package. Third parties build against this.
 
 ```ts
-// @kshana/runner-sdk
+// @dhee/runner-sdk
 export interface Runner {
   readonly tool: string;
   readonly version: string;
@@ -212,7 +212,7 @@ TDD rule). Tests for those failure modes are written first.
 3. Bundle source URI is malformed (`builtin:x` not `built-in:x`) → clear error.
 4. `built-in:foo` references a missing bundle directory → clear error.
 5. `user:foo` references a missing bundle directory → clear error.
-6. `~/.kshana/runners/foo/runner.json` is malformed JSON → log warning, skip, continue startup (one bad runner doesn't kill the engine).
+6. `~/.dhee/runners/foo/runner.json` is malformed JSON → log warning, skip, continue startup (one bad runner doesn't kill the engine).
 7. Two runners declare the same `tool` id → log warning, last-loaded wins (deterministic behavior to be picked, but never silent).
 8. Required credential env var declared by a runner is missing → bundle validation fails before walking.
 9. Concurrent `register()` calls → registry is thread-safe (single-process, but consistent).
@@ -222,7 +222,7 @@ TDD rule). Tests for those failure modes are written first.
 **Implementation:**
 - `src/dag/runners/registry.ts` — class with `register/get/list/validate`.
 - `src/dag/bundleSource.ts` — URI parser + dir resolver.
-- `src/dag/runners/discovery.ts` — startup scanner for `~/.kshana/runners/`.
+- `src/dag/runners/discovery.ts` — startup scanner for `~/.dhee/runners/`.
 - Refactor existing `src/dag/runners/index.ts` to register through the new registry.
 - Update walker entrypoint to call validator before walking.
 
@@ -437,7 +437,7 @@ The migration is complete when **all** of these are true:
 1. A new narrative project created via the desktop wizard runs end-to-end on the new architecture and produces an OOTW-equivalent (or better) final video.
 2. The current "Out of this world" project, re-run via the new architecture, produces an indistinguishable final video from the existing reference.
 3. `dhee_run_to`, `dhee_invalidate`, `dhee_status`, `dhee_show_*` all work as documented in their tool descriptions, using bundle node IDs.
-4. A custom runner can be installed at `~/.kshana/runners/<name>/` and used by a bundle without modifying kshana-core.
+4. A custom runner can be installed at `~/.dhee/runners/<name>/` and used by a bundle without modifying dhee-core.
 5. No code references `ExecutorAgent`, `DependencyGraphExecutor`, `runExecutor`, `runProjectInProcess`, `VALID_STAGES`, or `classifyRunTarget` anywhere in the live tree.
 6. `pnpm tsc --noEmit` clean; `pnpm vitest run` green.
 7. The three doc files (`docs/bundles.md`, `docs/runners.md`, `docs/migration-from-v0.md`) are shipped and reviewed.
@@ -448,8 +448,8 @@ These are tempting and adjacent, but deferred to keep the migration shippable:
 
 - **Visual bundle editor.** ComfyUI has one; we don't, and authoring JSON in a text editor is acceptable for v1.
 - **Bundle registry / marketplace.** `registry:` URIs are reserved in the schema but not implemented.
-- **Runner package manager.** Users install custom runners by cloning into `~/.kshana/runners/`; we don't ship a `kshana runner install <pkg>` CLI yet.
-- **Runner sandboxing / permissions.** Custom runners run with the same trust as kshana-core. No process isolation.
+- **Runner package manager.** Users install custom runners by cloning into `~/.dhee/runners/`; we don't ship a `dhee runner install <pkg>` CLI yet.
+- **Runner sandboxing / permissions.** Custom runners run with the same trust as dhee-core. No process isolation.
 - **Bundle hot-reload.** Walker reads the bundle on each invocation; no live-edit pickup mid-walk.
 - **Schema migration for old projects.** Hard cutover; no automated conversion of legacy `executorState` → `walkState`.
 - **Audio runner family** (`audio.analyze`, `audio.transcribe`, `tts.generate`). Music-video-bundle dependencies. Built as separate work after this migration lands.
@@ -462,7 +462,7 @@ These are tempting and adjacent, but deferred to keep the migration shippable:
 | Walker walkState shape vs existing executorState shape divergence breaks invalidation cascade | Phase 4 explicitly mirrors the cascade semantics; Phase 5 tests exercise it |
 | A built-in runner's config schema can't express something the executor handler did implicitly | Phase 1/2 failure-mode tests are the bottleneck; uncover during build, not during migration |
 | `process.cwd()` or similar latent path bugs in untouched code surface after the cutover | Phase 7 E2E test from a clean desktop catch-all; the bundle/workflow path bug from this week is already covered by `tests/dag/bundle-paths.test.ts` |
-| Custom runner discovery introduces a startup performance regression | Bench-test scan of `~/.kshana/runners/` with N=100 stubs; if measurable, switch to lazy load with manifest pre-scan |
+| Custom runner discovery introduces a startup performance regression | Bench-test scan of `~/.dhee/runners/` with N=100 stubs; if measurable, switch to lazy load with manifest pre-scan |
 | Bundle versioning (engineCompat) too strict; legitimate runs blocked | Engine compares only major version for v1; minor/patch are accepted always |
 
 ## 8. Open questions
@@ -473,7 +473,7 @@ These are tempting and adjacent, but deferred to keep the migration shippable:
 
 3. **Where does `world_style` resolution live?** Today it's an LLM-derived stylistic guide consumed by many downstream nodes. In the bundle it's just another `llm.generate` node with `scope: project`. No special handling needed.
 
-4. **Are bundles versioned independently from kshana-core?** Yes. A bundle is a directory with a `version` field. The engine has its own version. `engineCompat` declares what the bundle was authored against.
+4. **Are bundles versioned independently from dhee-core?** Yes. A bundle is a directory with a `version` field. The engine has its own version. `engineCompat` declares what the bundle was authored against.
 
 5. **Do we ship a bundle linter / validator CLI?** Nice-to-have. Out of scope for the migration; add later.
 
@@ -483,7 +483,7 @@ These are tempting and adjacent, but deferred to keep the migration shippable:
 
 Phase 0, single commit, scope:
 
-- `@kshana/runner-sdk` types extracted into a separate export (no implementation changes yet).
+- `@dhee/runner-sdk` types extracted into a separate export (no implementation changes yet).
 - `RunnerRegistry` class created; existing runners migrated to register through it (no behavior change).
 - `bundleSource` URI parser added.
 - All Phase 0 failure-mode tests added — written BEFORE the implementation, expected to be red until the implementation lands.

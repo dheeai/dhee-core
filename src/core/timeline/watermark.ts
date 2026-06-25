@@ -18,7 +18,7 @@ const CURRENT_DIR =
     ? __dirname
     : dirname(fileURLToPath(import.meta.url));
 
-function findKshanaCoreRootFromSource(): string | null {
+function finddheeCoreRootFromSource(): string | null {
   let dir = CURRENT_DIR;
   for (let i = 0; i < 8; i += 1) {
     const pkg = join(dir, 'package.json');
@@ -52,7 +52,7 @@ export function resolveWatermarkPath(cwd: string = process.cwd()): string | null
     const abs = join(cwd, rel);
     if (existsSync(abs)) return toUnpackedPath(abs);
   }
-  const repoRoot = findKshanaCoreRootFromSource();
+  const repoRoot = finddheeCoreRootFromSource();
   if (repoRoot) {
     for (const rel of WATERMARK_PNG_CANDIDATES) {
       const abs = resolve(repoRoot, rel);

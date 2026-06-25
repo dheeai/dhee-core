@@ -182,7 +182,7 @@ describe('capabilities query API', () => {
   });
 
   describe('unknown capabilities (whacky bundles)', () => {
-    it('honors any string as a capability — kshana-core does not gatekeep names', () => {
+    it('honors any string as a capability — dhee-core does not gatekeep names', () => {
       // A user-authored bundle invents a capability like 'storyboard.panel'.
       // The query still works; only desktop views that recognize the name
       // will render. Unknown names just don't show in any view.

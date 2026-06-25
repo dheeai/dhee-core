@@ -8,7 +8,7 @@
  *
  * Symlink-escape is intentionally NOT handled here (would require
  * `fs.realpath`). For v1 the textual scope check is enough to stop
- * the agent from wandering into `/Users/ganaraj/Projects/kshana-core`
+ * the agent from wandering into `/Users/ganaraj/Projects/dhee-core`
  * to read engine source.
  */
 import { isAbsolute, relative, resolve } from 'node:path';

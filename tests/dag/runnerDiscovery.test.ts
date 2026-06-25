@@ -3,7 +3,7 @@
  *
  * Test failures map to plan §3 Phase 0 failure modes 6, 7.
  *
- * Discovery scans `~/.kshana/runners/` (or KSHANA_RUNNER_PATH-listed
+ * Discovery scans `~/.dhee/runners/` (or dhee_RUNNER_PATH-listed
  * dirs). Each subdirectory containing a `runner.json` manifest +
  * `index.js` is loaded and its exported runner is registered.
  *
@@ -51,7 +51,7 @@ describe('discoverRunners', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'kshana-runners-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'dhee-runners-'));
   });
 
   afterEach(() => {
@@ -71,7 +71,7 @@ describe('discoverRunners', () => {
   });
 
   it('skips directories without runner.json', async () => {
-    // A stray directory in ~/.kshana/runners/ that isn't a runner package
+    // A stray directory in ~/.dhee/runners/ that isn't a runner package
     // (no manifest) must not cause discovery to fail.
     mkdirSync(join(tmpDir, 'just-a-dir'), { recursive: true });
     writeFileSync(join(tmpDir, 'just-a-dir', 'README.md'), 'not a runner');
