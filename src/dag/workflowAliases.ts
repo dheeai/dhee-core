@@ -85,7 +85,7 @@ export function endpointSlug(endpoint: string): string {
  * `/comfy/api` proxy) have distinct model libraries that must not share
  * a namespace.
  */
-function isCloudEndpoint(endpoint: string): boolean {
+export function isCloudEndpoint(endpoint: string): boolean {
   return /cloud\.comfy\.org/i.test(endpoint) || /\/comfy\/api(?:\/|$)/i.test(endpoint);
 }
 

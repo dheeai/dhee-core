@@ -636,7 +636,8 @@
         "tool": "comfy.ltx_director",
         "config": {
           "workflowPath": "workflows/ltx_director_local.json",
-          "endpoint": "self.local",
+          "workflowPathCloud": "workflows/cloud/ltx23_director_cloud.json",
+          "endpoint": "public.cloud",
           "fps": 24,
           "width": 1280,
           "height": 720
