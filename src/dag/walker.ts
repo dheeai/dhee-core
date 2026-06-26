@@ -536,10 +536,19 @@ function materializeCollection(
           }
         }
       }
+      // An empty list is only an ERROR for an unkeyed collection (one that walks
+      // a whole upstream array like `scenes`/`beats` — zero there means the plan
+      // failed). For a collection keyed on an OPTIONAL id-list (split_beat_ids,
+      // depth_beat_ids, ltx_beat_ids), an empty/absent list legitimately means
+      // "this capability is off for this video" → materialize zero instances and
+      // let downstream skip gracefully, rather than failing the whole run.
       if (items.length === 0) {
-        throw new Error(
-          `materializeCollection: upstream '${node.itemSource}' output ${upstreamPath} has no items to materialize`,
-        );
+        if (!node.itemKey) {
+          throw new Error(
+            `materializeCollection: upstream '${node.itemSource}' output ${upstreamPath} has no items to materialize`,
+          );
+        }
+        return [];
       }
       // ── chunkBy on upstream-driven materializer ──
       // When the node declares chunkBy AND items are scenes (itemKey='scenes')
