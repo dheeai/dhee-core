@@ -484,10 +484,16 @@ function materializeCollection(
   // here for clarity.
   if (node.itemSource) {
     const upstream = upstreamInstances.get(node.itemSource);
-    if (!upstream || upstream.length === 0) {
+    if (upstream === undefined) {
       throw new Error(
         `materializeCollection: itemSource '${node.itemSource}' has no instances (upstream not materialized yet)`,
       );
+    }
+    // Upstream RAN but produced zero instances (a legitimately-empty optional
+    // collection, e.g. beat_image_b_prompt when split_beat_ids is []). This node
+    // fans through it, so it is empty too — skip rather than fail the run.
+    if (upstream.length === 0) {
+      return [];
     }
     // If the upstream is itself a collection (has any instance with
     // an itemId), mirror its instances one-to-one rather than trying
