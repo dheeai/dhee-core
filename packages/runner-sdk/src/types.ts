@@ -273,7 +273,7 @@ export interface DagBundle {
    * "CC-BY-4.0", or "LicenseRef-Proprietary" for closed bundles).
    *
    * Bundles are runtime data + runner manifests loaded by the engine
-   * through the Apache-2.0 `@dheeai/runner-sdk` boundary; they are NOT
+   * through the Apache-2.0 `@dhee_ai/runner-sdk` boundary; they are NOT
    * derivative works of the AGPL-3.0 engine and carry their own license
    * (see BUNDLE_LICENSING.md). Bundle authors may choose any license,
    * including proprietary. First-party bundles are MIT.
@@ -599,7 +599,7 @@ export interface Runner {
  * surfaced in requirements/checks (e.g. checkBundleRunners); runtime
  * sandbox enforcement (network/fs) is future work. The boundary that IS
  * enforced today is structural: a published runner depends only on
- * `@dheeai/runner-sdk`, never on kshana-core internals (runner-sdk firewall test).
+ * `@dhee_ai/runner-sdk`, never on kshana-core internals (runner-sdk firewall test).
  */
 export interface RunnerPermissions {
   /** Hostnames the runner may reach (e.g. ['openrouter.ai']). */

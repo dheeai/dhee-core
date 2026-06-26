@@ -1439,8 +1439,8 @@ export class ComfyUIClient {
         if (msgType === 'executed' && msgData) {
           const output = msgData['output'] as Record<string, unknown> | undefined;
           if (output) {
-            // Check for videos/images/gifs in the executed node output
-            for (const key of ['videos', 'images', 'gifs']) {
+            // Check for videos/images/gifs/audio in the executed node output
+            for (const key of ['videos', 'images', 'gifs', 'audio']) {
               const items = output[key] as
                 | Array<{ filename: string; subfolder?: string; type?: string }>
                 | undefined;
@@ -1698,7 +1698,7 @@ export class ComfyUIClient {
   }
 
   private async resolveOutputImages(promptId: string): Promise<ImageInfo[]> {
-    const attempts = this.isCloud ? 10 : 1;
+    const attempts = this.isCloud ? 30 : 1;
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const images = await this.getOutputImages(promptId);

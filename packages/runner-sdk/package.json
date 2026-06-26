@@ -1,6 +1,6 @@
 {
-  "name": "@dheeai/runner-sdk",
-  "version": "0.1.3",
+  "name": "@dhee_ai/runner-sdk",
+  "version": "0.1.6",
   "description": "Authoring SDK for Dhee runners & bundles — the firewall a runner depends on.",
   "type": "module",
   "license": "Apache-2.0",

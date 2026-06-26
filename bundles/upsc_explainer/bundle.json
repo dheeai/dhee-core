@@ -169,9 +169,9 @@
       "runner": {
         "tool": "comfy.tti",
         "config": {
-          "workflowPath": "workflows/krea2_tti.json",
-          "manifestPath": "workflows/krea2_tti.manifest.json",
-          "endpoint": "self.local",
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
+          "endpoint": "self.public",
           "width": 1280,
           "height": 720
         }
@@ -226,9 +226,9 @@
       "runner": {
         "tool": "comfy.tti",
         "config": {
-          "workflowPath": "workflows/krea2_tti.json",
-          "manifestPath": "workflows/krea2_tti.manifest.json",
-          "endpoint": "self.local",
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
+          "endpoint": "self.public",
           "width": 1280,
           "height": 720
         }
@@ -305,17 +305,21 @@
       "runner": {
         "tool": "comfy.tts",
         "config": {
-          "workflowPath": "workflows/omnivoice_design.json",
-          "endpoint": "self.local",
-          "textNodeId": "30",
-          "textField": "voice_instruct",
+          "workflowPath": "workflows/qwen3_voice_save.json",
+          "endpoint": "self.public",
+          "textNodeId": "1",
+          "textField": "text",
           "textInput": "narrator_voice_spec",
           "fields": {
-            "30": {
+            "1": {
               "text": "Across the centuries, a single moment can change the course of history, and understanding it is the first step to mastering it.",
-              "speed": 1.0,
+              "instruct": "A warm, clear, professional narrator voice: neutral accent, measured and confident pacing, friendly and engaging, the polished tone of a documentary voice-over.",
               "seed": 42,
-              "guidance_scale": 3
+              "model_choice": "1.7B",
+              "language": "English",
+              "max_new_tokens": 2048,
+              "temperature": 1,
+              "top_p": 0.8
             }
           }
         }
@@ -344,21 +348,26 @@
       "runner": {
         "tool": "comfy.tts",
         "config": {
-          "workflowPath": "workflows/higgs_clone.json",
-          "endpoint": "self.local",
+          "workflowPath": "workflows/qwen3_narration_cloned.json",
+          "endpoint": "self.public",
           "textInput": "beat_vo",
-          "textNodeId": "2",
-          "textField": "text",
+          "textNodeId": "4",
+          "textField": "script",
+          "textPrefix": "Narrator: ",
           "voiceSample": "assets/audio/narrator_voice.wav",
-          "voiceNodeId": "13",
+          "voiceNodeId": "1",
           "voiceField": "audio",
           "fields": {
-            "2": {
-              "reference_text": "Across the centuries, a single moment can change the course of history, and understanding it is the first step to mastering it.",
+            "4": {
+              "model_choice": "1.7B",
+              "language": "English",
               "seed": 42,
-              "longform_chunking": true,
-              "max_new_tokens": 2048,
-              "temperature": 1.0
+              "max_new_tokens_per_line": 2048,
+              "temperature": 1,
+              "top_p": 0.8,
+              "top_k": 20,
+              "merge_outputs": true,
+              "batch_size": 2
             }
           }
         }
@@ -425,7 +434,7 @@
         "tool": "comfy.ltx_director",
         "config": {
           "workflowPath": "workflows/ltx_director_local.json",
-          "endpoint": "self.local",
+          "endpoint": "self.public",
           "imageInput": "beat_image",
           "audioInput": "beat_audio",
           "lipSync": false,

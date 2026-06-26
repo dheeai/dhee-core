@@ -64,6 +64,8 @@ beforeEach(() => {
   pkg('dhee-runner-nokeyword', { dhee: { runners: './x.mjs' } }, { 'x.mjs': RUNNER_MODULE('no.key') });
   // Keyword present but entry file missing → error, must not poison others.
   pkg('dhee-runner-broken', { keywords: ['dhee-runner'], dhee: { runners: './missing.mjs' } });
+  // SDK-style library: keyword but no dhee.runners → skipped silently.
+  pkg('@dhee_ai/runner-sdk', { keywords: ['dhee-runner'] });
   // Unrelated package → ignored entirely.
   pkg('react', {});
 
@@ -104,6 +106,7 @@ describe('discoverNpmRunners', () => {
     const res = await discoverNpmRunners(reg);
     expect(res.registered).toContain('foo.bar');
     expect(res.errors.some((e) => e.includes('dhee-runner-broken'))).toBe(true);
+    expect(res.errors.some((e) => e.includes('runner-sdk'))).toBe(false);
   });
 
   it('is idempotent — skips a tool already registered (no duplicate-register throw)', async () => {

@@ -165,7 +165,8 @@ export async function discoverNpmRunners(
     if (!p.isRunner) continue;
     const entry = p.pkg.dhee?.runners;
     if (!entry) {
-      res.errors.push(`${p.name}: has keyword 'dhee-runner' but no package.json 'dhee.runners' entry point.`);
+      // Shared libraries (e.g. @dhee_ai/runner-sdk) carry the dhee-runner
+      // keyword for discoverability but expose no runners entry point.
       continue;
     }
     const entryPath = resolve(p.dir, entry);

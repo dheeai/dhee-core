@@ -1,10 +1,24 @@
 {
   "1": {
     "inputs": {
-      "filename": "Narrator.wav"
+      "audio": "narrator_voice.wav"
     },
-    "class_type": "FB_Qwen3TTSLoadSpeaker",
-    "_meta": { "title": "Load: Narrator" }
+    "class_type": "LoadAudio",
+    "_meta": { "title": "Load: Narrator reference" }
+  },
+  "2": {
+    "inputs": {
+      "ref_audio": ["1", 0],
+      "ref_text": "Across the centuries, a single moment can change the course of history, and understanding it is the first step to mastering it.",
+      "model_choice": "1.7B",
+      "device": "auto",
+      "precision": "bf16",
+      "attention": "sdpa",
+      "x_vector_only": false,
+      "unload_model_after_generate": false
+    },
+    "class_type": "FB_Qwen3TTSVoiceClonePrompt",
+    "_meta": { "title": "Clone prompt: Narrator" }
   },
   "3": {
     "inputs": {
@@ -16,7 +30,7 @@
       "role_name_6": "Role6",
       "role_name_7": "Role7",
       "role_name_8": "Role8",
-      "prompt_1": ["1", 0]
+      "prompt_1": ["2", 0]
     },
     "class_type": "FB_Qwen3TTSRoleBank",
     "_meta": { "title": "Role bank" }

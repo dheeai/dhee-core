@@ -1,4 +1,4 @@
-# @dheeai/runner-sdk
+# @dhee_ai/runner-sdk
 
 The public authoring SDK for [Dhee](https://github.com/dheeai) **runners** and **bundles**.
 
@@ -7,7 +7,7 @@ The public authoring SDK for [Dhee](https://github.com/dheeai) **runners** and *
 ## Install
 
 ```sh
-npm install @dheeai/runner-sdk
+npm install @dhee_ai/runner-sdk
 ```
 
 ## What it gives you
@@ -21,8 +21,8 @@ npm install @dheeai/runner-sdk
 ## Minimal runner
 
 ```ts
-import { defineRunner, resolveEndpointUrl, retryTransient } from '@dheeai/runner-sdk';
-import type { RunnerContext, RunnerDescription, RunnerManifest } from '@dheeai/runner-sdk';
+import { defineRunner, resolveEndpointUrl, retryTransient } from '@dhee_ai/runner-sdk';
+import type { RunnerContext, RunnerDescription, RunnerManifest } from '@dhee_ai/runner-sdk';
 
 export const manifest = {
   tool: 'my.thing',
@@ -64,7 +64,7 @@ Your package opts in via **name + keyword + entry point**:
   "name": "dhee-runner-my-thing",
   "keywords": ["dhee-runner"],
   "dhee": { "runners": "./dist/index.js" },
-  "dependencies": { "@dheeai/runner-sdk": "^0.1.0" }
+  "dependencies": { "@dhee_ai/runner-sdk": "^0.1.0" }
 }
 ```
 

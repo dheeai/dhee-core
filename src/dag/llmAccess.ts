@@ -4,7 +4,7 @@ import type {
   LLMAccessTier,
   LLMGenerateTextOptions,
   LLMGenerateTextResult,
-} from '@dheeai/runner-sdk';
+} from '@dhee_ai/runner-sdk';
 import { getLLMConfig } from '../core/llm/config.js';
 import type { LLMPurpose } from '../core/llm/purposes.js';
 import { isLLMPurpose } from '../core/llm/purposes.js';

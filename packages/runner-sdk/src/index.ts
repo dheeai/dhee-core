@@ -1,5 +1,5 @@
 /**
- * @dheeai/runner-sdk — the public surface a Dhee runner (and bundle author)
+ * @dhee_ai/runner-sdk — the public surface a Dhee runner (and bundle author)
  * builds against. A published runner depends on ONLY this package, never
  * on kshana-core internals (enforced by the runner-sdk firewall test).
  *

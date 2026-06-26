@@ -19,30 +19,6 @@
     "class_type": "FB_Qwen3TTSVoiceDesign",
     "_meta": { "title": "Design: Narrator" }
   },
-  "2": {
-    "inputs": {
-      "ref_text": "Every great idea begins as a simple question, and the answer can change everything we thought we knew.",
-      "model_choice": "1.7B",
-      "device": "auto",
-      "precision": "bf16",
-      "attention": "sdpa",
-      "x_vector_only": false,
-      "unload_model_after_generate": false,
-      "ref_audio": ["1", 0]
-    },
-    "class_type": "FB_Qwen3TTSVoiceClonePrompt",
-    "_meta": { "title": "Clone prompt: Narrator" }
-  },
-  "3": {
-    "inputs": {
-      "filename": "Narrator",
-      "ref_text": "Every great idea begins as a simple question, and the answer can change everything we thought we knew.",
-      "voice_clone_prompt": ["2", 0],
-      "audio": ["1", 0]
-    },
-    "class_type": "FB_Qwen3TTSSaveVoice",
-    "_meta": { "title": "Save voice: Narrator" }
-  },
   "5": {
     "inputs": {
       "filename_prefix": "audio/narrator_voice",

@@ -17,7 +17,7 @@ import semver from 'semver';
 import type { DagBundle, Runner, RunnerManifest } from '../schema.js';
 
 // `RunnerManifest` (with `permissions`) is now canonically defined in
-// @dheeai/runner-sdk and re-exported via ../schema.js. Re-export here too so
+// @dhee_ai/runner-sdk and re-exported via ../schema.js. Re-export here too so
 // the long-standing `import { RunnerManifest } from './registry.js'` surface
 // keeps working.
 export type { Runner, RunnerManifest } from '../schema.js';
@@ -79,10 +79,12 @@ export class RunnerRegistry {
     for (const [tool, range] of Object.entries(deps)) {
       const entry = this.entries.get(tool);
       if (!entry) {
+        const declaredPkg = bundle.dependencies?.runnerPackages?.[tool];
+        const pkgHint = declaredPkg
+          ? ` Install npm package '${declaredPkg}' into ~/dhee-studios/runners/node_modules`
+          : ` Install into ~/dhee-studios/runners/node_modules (e.g. dhee-runner-${tool.split('.')[0]})`;
         errors.push(
-          `Runner '${tool}' is not registered. ` +
-            `Install it (e.g. clone the runner package into ~/.dhee/runners/<name>/) ` +
-            `or check the bundle's dependencies declaration.`,
+          `Runner '${tool}' is not registered.${pkgHint} or check the bundle's dependencies declaration.`,
         );
         continue;
       }

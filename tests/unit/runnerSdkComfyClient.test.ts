@@ -47,7 +47,7 @@ function makeFetchMock() {
   });
 }
 
-describe('@dheeai/runner-sdk ComfyClient auth', () => {
+describe('@dhee_ai/runner-sdk ComfyClient auth', () => {
   it('local mode: no auth on upload', async () => {
     process.env['COMFY_MODE'] = 'local';
     const mockFetch = makeFetchMock();
