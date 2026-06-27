@@ -11,7 +11,6 @@ import type { Runner } from '../schema.js';
 import { comfyKleinRunner } from './comfyKlein.js';
 import { comfyTtiRunner } from './comfyTti.js';
 import { comfyFl2vRunner } from './comfyFl2v.js';
-import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
@@ -104,22 +103,10 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: comfyFl2vRunner,
   },
-  {
-    manifest: {
-      tool: 'comfy.ltx_director',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      // No env credentials — the runner resolves its Comfy endpoint by
-      // semantic name (e.g. self.local) through ENDPOINT_<name> vars,
-      // which are user-config and validated at runner.run() time with a
-      // clear pointer to which env var to set.
-      credentials: [],
-      displayName: 'Comfy LTX Director',
-      description:
-        'Drives the LTX Director / Director Chain ComfyUI workflow to render per-scene relay clips from first-frame anchors + motion directives.',
-    },
-    runner: comfyLtxDirectorRunner,
-  },
+  // comfy.ltx_director moved OUT of core into its own external runner package
+  // (dhee-runner-ltx-director) — discovered at startup like the other
+  // dhee-runner-* packages. Bundles declaring `comfy.ltx_director` resolve it
+  // from there. See the open-runner-ecosystem convention.
   {
     manifest: {
       tool: 'comfy.qwen_edit_chain',
