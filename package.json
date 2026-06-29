@@ -139,7 +139,7 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
-    "@dhee_ai/runner-sdk": "file:./packages/runner-sdk",
+    "@dhee_ai/runner-sdk": "file:../dhee-packages/dhee-runner-sdk",
     "@eslint/js": "^9.28.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.29",

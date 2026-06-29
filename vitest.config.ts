@@ -8,10 +8,11 @@ process.env['DHEE_DISABLE_CAS'] = '1';
 
 export default defineConfig({
   // Resolve the workspace SDK to its SOURCE for in-repo tests, so tests
-  // run without a prior `pnpm -C packages/runner-sdk build`.
+  // run without a prior `npm run build` in dhee-packages/dhee-runner-sdk.
   resolve: {
     alias: {
-      '@dhee/runner-sdk': resolve(__dirname, 'packages/runner-sdk/src/index.ts'),
+      '@dhee_ai/runner-sdk': resolve(__dirname, '../dhee-packages/dhee-runner-sdk/src/index.ts'),
+      '@dhee/runner-sdk': resolve(__dirname, '../dhee-packages/dhee-runner-sdk/src/index.ts'),
     },
   },
   test: {

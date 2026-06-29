@@ -53,7 +53,7 @@ describe('@dhee_ai/runner-sdk ComfyClient auth', () => {
     const mockFetch = makeFetchMock();
     globalThis.fetch = mockFetch;
 
-    const { ComfyClient } = await import('../../packages/runner-sdk/src/comfyClient.js');
+    const { ComfyClient } = await import('@dhee_ai/runner-sdk');
     const client = new ComfyClient('http://127.0.0.1:8188');
     const dir = mkdtempSync(join(tmpdir(), 'sdk-comfy-'));
     const img = join(dir, 'a.png');
@@ -72,7 +72,7 @@ describe('@dhee_ai/runner-sdk ComfyClient auth', () => {
     const mockFetch = makeFetchMock();
     globalThis.fetch = mockFetch;
 
-    const { ComfyClient } = await import('../../packages/runner-sdk/src/comfyClient.js');
+    const { ComfyClient } = await import('@dhee_ai/runner-sdk');
     const client = new ComfyClient('https://dhee.studio/comfy/api');
     await client.queuePrompt({ n: { class_type: 'X', inputs: {} } });
 
@@ -89,7 +89,7 @@ describe('@dhee_ai/runner-sdk ComfyClient auth', () => {
     const mockFetch = makeFetchMock();
     globalThis.fetch = mockFetch;
 
-    const { ComfyClient } = await import('../../packages/runner-sdk/src/comfyClient.js');
+    const { ComfyClient } = await import('@dhee_ai/runner-sdk');
     const client = new ComfyClient('https://cloud.comfy.org/api');
     await client.queuePrompt({ n: { class_type: 'X', inputs: {} } });
 
@@ -100,7 +100,7 @@ describe('@dhee_ai/runner-sdk ComfyClient auth', () => {
 
   it('cloud mode without key throws at construction', async () => {
     process.env['COMFY_MODE'] = 'cloud';
-    const { ComfyClient } = await import('../../packages/runner-sdk/src/comfyClient.js');
+    const { ComfyClient } = await import('@dhee_ai/runner-sdk');
     expect(() => new ComfyClient('https://dhee.studio/comfy/api')).toThrow(/COMFY_CLOUD_API_KEY/);
   });
 });

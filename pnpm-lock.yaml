@@ -111,8 +111,8 @@ importers:
         version: 3.25.76
     devDependencies:
       '@dhee_ai/runner-sdk':
-        specifier: file:./packages/runner-sdk
-        version: file:packages/runner-sdk
+        specifier: file:../dhee-packages/dhee-runner-sdk
+        version: file:../dhee-packages/dhee-runner-sdk
       '@eslint/js':
         specifier: ^9.28.0
         version: 9.39.1
@@ -558,8 +558,8 @@ packages:
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
 
-  '@dhee_ai/runner-sdk@file:packages/runner-sdk':
-    resolution: {directory: packages/runner-sdk, type: directory}
+  '@dhee_ai/runner-sdk@file:../dhee-packages/dhee-runner-sdk':
+    resolution: {directory: ../dhee-packages/dhee-runner-sdk, type: directory}
     engines: {node: '>=20.0.0'}
 
   '@emnapi/core@1.10.0':
@@ -4795,7 +4795,7 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
-  '@dhee_ai/runner-sdk@file:packages/runner-sdk': {}
+  '@dhee_ai/runner-sdk@file:../dhee-packages/dhee-runner-sdk': {}
 
   '@emnapi/core@1.10.0':
     dependencies:
