@@ -38,9 +38,9 @@ adapt it — see the **Catalog** below for what exists.
 > `DHEE_APP_BUNDLES_DIR` → **`~/.dhee/bundles/`** → **`dhee-core/src/dag/bundles/`**.
 > - **New bundles you author go in `~/.dhee/bundles/<id>/`** (each its own git
 >   repo). This is the working rule — do NOT add new bundles to dhee-core.
-> - `dhee-core/src/dag/bundles/` still holds the older in-repo *template*
->   bundles (loadable, good copy-from bases). Copy FROM either root; PLACE the
->   new one under `~/.dhee/bundles/`.
+> - **Product bundles** (cartoon explainer, UGC ads, etc.) live in
+>   `dheeai/dhee-bundle-*` git repos and ship as `@dhee_ai/bundle-*` npm
+>   packages — not in dhee-core. Install via the desktop New Project npm search.
 
 > **Golden rule:** the walker and runners stay generic; per-bundle and
 > per-workflow knowledge lives in *data* (bundle.json + the workflow

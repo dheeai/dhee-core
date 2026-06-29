@@ -1,1 +1,0 @@
-GRL Foods Choco Chips Cookies — baked fresh in Mangaluru. Crunchy, melt-in-the-mouth cookies loaded with real chocolate chips, made in small batches with no preservatives. A pure-temptation everyday treat that pairs perfectly with chai or coffee. Available at GRL Foods, Lower Carstreet, Mangaluru. Order: +91 77957 48977 · grlfoods.sales@gmail.com
