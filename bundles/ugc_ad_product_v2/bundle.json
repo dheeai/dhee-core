@@ -44,7 +44,7 @@
       "id": "product_matte", "displayName": "Product Matte (SAM 3)", "kind": "stage",
       "inputs": [],
       "outputs": { "format": "image", "pattern": "assets/images/product_matte.png" },
-      "runner": { "tool": "comfy.matte", "config": { "endpoint": "self.local", "imageInput": "product_image", "conceptInput": "product_concept", "threshold": 0.5 } },
+      "runner": { "tool": "comfy.matte", "config": { "endpoint": "self.local", "imageInput": "product_image", "conceptInput": "product_concept", "threshold": 0.5, "workflowPath": "workflows/matte_local.json" } },
       "displayCapability": "product.matte"
     },
 

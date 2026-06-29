@@ -1,0 +1,74 @@
+{
+  "13": {
+    "inputs": {
+      "audio": ""
+    },
+    "class_type": "LoadAudio",
+    "_meta": { "title": "Load: Reference voice" }
+  },
+  "115": {
+    "inputs": {
+      "ref_audio": ["13", 0],
+      "ref_text": "",
+      "model_choice": "1.7B",
+      "device": "auto",
+      "precision": "bf16",
+      "attention": "sdpa",
+      "x_vector_only": true,
+      "unload_model_after_generate": false
+    },
+    "class_type": "FB_Qwen3TTSVoiceClonePrompt",
+    "_meta": { "title": "Clone prompt (cloud)" }
+  },
+  "3": {
+    "inputs": {
+      "role_name_1": "Role1",
+      "role_name_2": "Role2",
+      "role_name_3": "Role3",
+      "role_name_4": "Role4",
+      "role_name_5": "Role5",
+      "role_name_6": "Role6",
+      "role_name_7": "Role7",
+      "role_name_8": "Role8",
+      "prompt_1": ["115", 0]
+    },
+    "class_type": "FB_Qwen3TTSRoleBank",
+    "_meta": { "title": "Role bank (cloud)" }
+  },
+  "2": {
+    "inputs": {
+      "script": "",
+      "model_choice": "1.7B",
+      "device": "auto",
+      "precision": "bf16",
+      "language": "English",
+      "pause_linebreak": 0.5,
+      "period_pause": 0.4,
+      "comma_pause": 0.2,
+      "question_pause": 0.6,
+      "hyphen_pause": 0.3,
+      "merge_outputs": true,
+      "batch_size": 2,
+      "seed": 42,
+      "max_new_tokens_per_line": 4096,
+      "top_p": 0.8,
+      "top_k": 20,
+      "temperature": 1,
+      "repetition_penalty": 1.05,
+      "attention": "sdpa",
+      "unload_model_after_generate": false,
+      "role_bank": ["3", 0]
+    },
+    "class_type": "FB_Qwen3TTSDialogueInference",
+    "_meta": { "title": "Narrate (cloned voice, cloud)" }
+  },
+  "16": {
+    "inputs": {
+      "filename_prefix": "audio/qwen3_clone",
+      "audioUI": "",
+      "audio": ["2", 0]
+    },
+    "class_type": "SaveAudio",
+    "_meta": { "title": "Save narration (cloud)" }
+  }
+}

@@ -236,7 +236,10 @@
           "textInput": "segment_narration",
           "textNodeId": "4",
           "textField": "script",
-          "textPrefix": "Narrator: "
+          "textPrefix": "Narrator: ",
+          "voiceSample": "assets/audio/narrator_voice.wav",
+          "voiceNodeId": "1",
+          "voiceField": "audio"
         }
       },
       "displayCapability": "segment.audio"
