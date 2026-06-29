@@ -182,7 +182,7 @@ describe('buildPiSessionConfig', () => {
   });
 
   it('honors a custom cwd', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'kshana-build-session-'));
+    const tmp = mkdtempSync(join(tmpdir(), 'dhee-build-session-'));
     try {
       const cfg = await buildPiSessionConfig({
         sessionManager: SessionManager.inMemory(tmp),

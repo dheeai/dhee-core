@@ -25,14 +25,14 @@ describe('userBundlesDir', () => {
     expect(userBundlesDir()).toBe('/tmp/custom/bundles');
   });
 
-  it('falls back to ~/.kshana/bundles when the env var is unset', () => {
+  it('falls back to ~/.dhee/bundles when the env var is unset', () => {
     delete process.env['DHEE_USER_BUNDLES_DIR'];
-    expect(userBundlesDir()).toBe(resolve(homedir(), '.kshana/bundles'));
+    expect(userBundlesDir()).toBe(resolve(homedir(), '.dhee/bundles'));
   });
 
   it('falls back when the env var is empty / whitespace-only', () => {
     process.env['DHEE_USER_BUNDLES_DIR'] = '   ';
-    expect(userBundlesDir()).toBe(resolve(homedir(), '.kshana/bundles'));
+    expect(userBundlesDir()).toBe(resolve(homedir(), '.dhee/bundles'));
   });
 
   it('trims the configured value', () => {

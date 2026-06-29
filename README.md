@@ -68,7 +68,7 @@ src/
 
 A bundle is a self-contained directory under `src/dag/bundles/` (or a single `.json`). Its `bundle.json` declares an id, version, display metadata, the runners it needs (`dependencies.runners`, as semver ranges, validated before the walker starts), its user inputs, and its nodes (each with an `outputs.pattern` for where its artifact lands in the project). Prompts, schemas, and ComfyUI workflows live alongside it.
 
-Bundles resolve from a search chain — `DHEE_USER_BUNDLES_DIR` → `DHEE_APP_BUNDLES_DIR` → `~/.kshana/bundles` → the repo's `src/dag/bundles` — first-seen-wins, so a user fork shadows a shipped default.
+Bundles resolve from a search chain — `DHEE_USER_BUNDLES_DIR` → `DHEE_APP_BUNDLES_DIR` → `~/.dhee/bundles` → the repo's `src/dag/bundles` — first-seen-wins, so a user fork shadows a shipped default.
 
 Two first-party bundles ship today:
 
@@ -95,7 +95,7 @@ A runner is what actually executes a node. Each is a dot-namespaced tool registe
 
 Each `comfy.*` tool is a runner NAMED for the workflow family it drives (it may know that workflow's shape, like `comfy.ltx_director`); they share one workflow-agnostic core, `comfyExecutor`, for endpoint resolution, upload, queue/download, model aliases, and caching. That core is internal plumbing — only the dot-namespaced tools above are registered as runners and targetable by a bundle node.
 
-Built-in runners register at import time. Custom runners are discovered at startup from `~/.kshana/runners/` and ship a `runner.json` manifest (tool id, version, engine-compat range, required credentials). A bundle that depends on a runner whose credentials are unset fails validation *before* any work runs, naming the missing variable.
+Built-in runners register at import time. Custom runners are discovered at startup from `~/.dhee/runners/` and ship a `runner.json` manifest (tool id, version, engine-compat range, required credentials). A bundle that depends on a runner whose credentials are unset fails validation *before* any work runs, naming the missing variable.
 
 LLM and VLM runners select a provider independently: OpenRouter, Gemini, OpenAI, LM Studio, or any OpenAI-compatible endpoint.
 
@@ -165,7 +165,7 @@ A project is a directory on disk:
 └── videos/                Per-shot clips and the final cut
 ```
 
-`project.json` and every other view are projections of `events.jsonl`; delete them and they rebuild from the log. Generated artifacts are also de-duplicated through a shared content-addressable cache at `~/.kshana/cache`, keyed on `(tool, version, inputs, config, seed)` — so re-running a node with unchanged inputs is instant.
+`project.json` and every other view are projections of `events.jsonl`; delete them and they rebuild from the log. Generated artifacts are also de-duplicated through a shared content-addressable cache at `~/.dhee/cache`, keyed on `(tool, version, inputs, config, seed)` — so re-running a node with unchanged inputs is instant.
 
 ## How the agent drives it
 

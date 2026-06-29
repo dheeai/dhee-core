@@ -17,7 +17,7 @@ if (!projectArg) {
   console.error('Usage: pnpm tsx scripts/normalize-frozen-instant.ts <project>');
   process.exit(1);
 }
-const projectRoot = resolve(process.cwd(), projectArg.endsWith('.kshana') ? projectArg : `${projectArg}.kshana`);
+const projectRoot = resolve(process.cwd(), projectArg.endsWith('.dhee') ? projectArg : `${projectArg}.dhee`);
 if (!existsSync(projectRoot)) { console.error(`Project not found: ${projectRoot}`); process.exit(1); }
 
 const FROZEN_INSTANT_REPLACEMENTS: Array<[RegExp, string]> = [

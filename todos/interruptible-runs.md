@@ -1,6 +1,6 @@
 # Interruptible runs — agent decides whether to abort
 
-Branch: `feat/interruptible-runs` (both kshana-core + kshana-desktop)
+Branch: `feat/interruptible-runs` (both dhee-core + dhee-desktop)
 
 ## Problem
 

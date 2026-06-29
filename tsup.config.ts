@@ -13,9 +13,9 @@ export default defineConfig({
   },
   format: ['esm'],
   // Bundle the workspace SDK INLINE into dist so the shipped dhee-core is
-  // self-contained — the desktop loads dist/ and won't have a separate
-  // @dhee/runner-sdk install. (It's a workspace dep, otherwise external.)
-  noExternal: ['@dhee/runner-sdk'],
+  // self-contained — the desktop loads dist/ and won't need a separate
+  // @dhee_ai/runner-sdk install. (It's a workspace dep, otherwise external.)
+  noExternal: ['@dhee_ai/runner-sdk'],
   dts: false,
   clean: true,
   splitting: false,
@@ -36,22 +36,31 @@ export default defineConfig({
   // desktop's electron-builder extraResources config from this
   // dist/bundles directory).
   async onSuccess() {
-    const { cpSync, existsSync, rmSync } = await import('node:fs');
+    const { cpSync, existsSync, rmSync, mkdirSync } = await import('node:fs');
     const dstSkill = 'dist/skill';
     if (existsSync(dstSkill)) rmSync(dstSkill, { recursive: true, force: true });
     cpSync('src/agent/pi/skill', dstSkill, { recursive: true });
 
-    // Curated default bundles. Add new defaults here when ready to
-    // ship them. The full src/dag/bundles tree stays in source for
-    // dev; only these get packaged so the .app stays small.
-    const FIRST_PARTY_BUNDLES = [
-      'narrative_prompt_relay',
-      'narrative_shot_by_shot',
+    // Curated default bundles shipped inside the packaged desktop app.
+    // Narrative bundles live under src/dag/bundles; product bundles under
+    // bundles/ at the dhee-core package root (same tree dev uses via
+    // DHEE_USER_BUNDLES_DIR → <dhee-core>/bundles).
+    const DAG_BUNDLES = ['narrative_prompt_relay', 'narrative_shot_by_shot'];
+    const PACKAGE_BUNDLES = [
+      'cartoon_explainer',
+      'satire_lineup',
+      'ugc_ad_product_v2',
+      'upsc_explainer',
+      'openrouter_youtube_documentary',
     ];
     const dstBundles = 'dist/bundles';
     if (existsSync(dstBundles)) rmSync(dstBundles, { recursive: true, force: true });
-    for (const id of FIRST_PARTY_BUNDLES) {
+    mkdirSync(dstBundles, { recursive: true });
+    for (const id of DAG_BUNDLES) {
       cpSync(`src/dag/bundles/${id}`, `${dstBundles}/${id}`, { recursive: true });
+    }
+    for (const id of PACKAGE_BUNDLES) {
+      cpSync(`bundles/${id}`, `${dstBundles}/${id}`, { recursive: true });
     }
   },
 });

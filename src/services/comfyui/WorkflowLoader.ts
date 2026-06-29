@@ -316,7 +316,7 @@ export function parameterizeZImageWorkflow(
   }
 
   // [ZIMAGE_PROMPT_TRACE] Dump final positive + negative texts post-
-  // parameterization so we can diff what kshana actually submits against
+  // parameterization so we can diff what dhee actually submits against
   // what disk says. Surfaces caching / wrong-prompt-substitution bugs in
   // the character_image path (officer-as-Doraemon, 2026-05-19).
   try {

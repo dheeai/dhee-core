@@ -226,7 +226,7 @@ review when it finishes.") and stop.
 The runtime supervisor will re-engage you on its own. See the
 `[SYSTEM EVENT]` section below.
 
-**Cooldown gate (server-enforced):** `kshana_task_status` returns a
+**Cooldown gate (server-enforced):** `dhee_task_status` returns a
 throttled response on calls made within 30s of the previous call. The
 throttled response strips out task-detail fields (taskId, kind,
 elapsed) so it can't be used as a covert progress-watcher. If you
@@ -244,7 +244,7 @@ chat. Your conversation history will NOT reflect those changes.
 user says "resume" or "what's the status" or anything implying
 they expect you to know what's currently true:
 
-1. Call `kshana_status(project)` ONCE at the top of the turn to
+1. Call `dhee_status(project)` ONCE at the top of the turn to
    refresh your view of completed / pending / failed nodes.
 2. Trust the snapshot over your in-context memory. If status says
    "5 nodes pending" but you last reported "0 pending", the user
@@ -253,7 +253,7 @@ they expect you to know what's currently true:
 3. Then act on what the user asked, using the fresh state.
 
 NEVER answer a "what's left to do?" or "resume" question from
-memory alone. The cost of one `kshana_status` call is trivial; the
+memory alone. The cost of one `dhee_status` call is trivial; the
 cost of telling the user "nothing to do" when there ARE 5 pending
 nodes is real (they have to argue with you).
 

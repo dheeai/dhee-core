@@ -6,7 +6,7 @@
  * sort are all exercised without touching the shipped bundle tree.
  *
  * To keep the temp dir the SOLE source, the lower-precedence roots
- * (DHEE_APP_BUNDLES_DIR, ~/.kshana/bundles, repo src/dag/bundles) still
+ * (DHEE_APP_BUNDLES_DIR, ~/.dhee/bundles, repo src/dag/bundles) still
  * exist — but every assertion is on the ids WE wrote, and we use unique
  * ids that can't collide with shipped bundles.
  */

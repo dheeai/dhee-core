@@ -2,10 +2,10 @@
 /**
  * Diagnose the "officer renders as Doraemon byte-identical across runs"
  * bug by submitting Z-Image three times directly through the local
- * Comfy that the desktop is talking to. Bypasses kshana's executor /
+ * Comfy that the desktop is talking to. Bypasses dhee's executor /
  * artifact / asset-scanner layers — only the WorkflowLoader + ComfyUI
  * client are exercised, so any caching observed must live in the local
- * ComfyUI server (or the zrok tunnel in front of it), not in kshana's
+ * ComfyUI server (or the zrok tunnel in front of it), not in dhee's
  * pipeline.
  *
  * Three submissions, two independent variables:
@@ -17,7 +17,7 @@
  *   - A == B  →  seed isn't reaching the sampler (or being ignored)
  *   - A == C  →  prompt isn't reaching the model (caching by workflow-id / filename_prefix)
  *   - A == B == C  →  Comfy is returning a cached PNG regardless of submission
- *   - All distinct  →  the bug is upstream in kshana, NOT in Comfy
+ *   - All distinct  →  the bug is upstream in dhee, NOT in Comfy
  */
 
 import 'dotenv/config';
@@ -133,7 +133,7 @@ async function main() {
     } else if (!ab && ac) {
       console.log('A == C (diff prompt → same image) → prompt not reaching model. Workflow hash collision somewhere.');
     } else {
-      console.log('All three distinct → Comfy is fine. Bug is upstream in kshana pipeline.');
+      console.log('All three distinct → Comfy is fine. Bug is upstream in dhee pipeline.');
     }
   }
 }

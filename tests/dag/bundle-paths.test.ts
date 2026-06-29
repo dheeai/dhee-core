@@ -1,6 +1,6 @@
 /**
- * Regression: bundle + workflow paths must resolve against kshana-core's
- * package root (REPO_ROOT), NOT process.cwd(). When kshana-core is
+ * Regression: bundle + workflow paths must resolve against dhee-core's
+ * package root (REPO_ROOT), NOT process.cwd(). When dhee-core is
  * loaded as a library inside a host process (Electron desktop, packaged
  * CLI), cwd is the host's working directory — using cwd silently
  * ENOENT'd the bundle/workflow JSON files and the dispatcher returned
@@ -28,8 +28,8 @@ describe('DAG bundle path resolution', () => {
 
   beforeEach(() => {
     originalCwd = process.cwd();
-    tmpDir = mkdtempSync(join(tmpdir(), 'kshana-bundle-paths-'));
-    // Simulate a host process whose cwd is unrelated to the kshana-core
+    tmpDir = mkdtempSync(join(tmpdir(), 'dhee-bundle-paths-'));
+    // Simulate a host process whose cwd is unrelated to the dhee-core
     // package root — the exact failure mode the desktop hit when the
     // dispatcher resolved `src/dag/bundles/...` against cwd.
     process.chdir(tmpDir);

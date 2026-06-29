@@ -1,0 +1,545 @@
+{
+  "id": "upsc_explainer",
+  "version": "0.1.0",
+  "license": "MIT",
+  "displayName": "Dhee Demo Vision — 1-Minute UPSC Explainer",
+  "summary": "Turn a TOPIC — or a COMPLETE RESEARCHED PROJECT — into a cinematic documentary explainer with zero manual prompting. If given a full research document it distills the WHOLE project faithfully; if given a topic it researches and expands it. Either way: an arc of scenes, broken into narration-synced BEATS (each spoken phrase shown over its own matching image, so visuals swap exactly as the narrator names each thing), Krea2 cinematic stills, a dynamically-cast male/female narrator (OmniVoice design + Higgs voice-clone), mixed Ken-Burns + LTX motion, timed keyword/timeline/revision-card graphics + an opening title card, and optional karaoke captions.",
+  "techLine": "TOPIC-ONLY · KREA2 STILLS · OMNIVOICE→HIGGS NARRATOR · KEN BURNS · TIMED GRAPHICS · KARAOKE CAPTIONS",
+  "engineCompat": ">=0.1.0",
+  "description": "Input → cinematic explainer video. The input is EITHER a short topic (researched + expanded) OR a complete researched project/report (distilled faithfully and covered comprehensively, scaled to the chosen duration). An LLM produces an outline, then a scene plan broken into fine-grained BEATS — each beat is one short narration phrase shown over one tightly-matched image, so the on-screen visual swaps exactly when the narrator names each thing (studio, figure, example, term). Each beat: a Krea2 cinematic still, a per-beat VO in ONE dynamically-cast narrator voice (OmniVoice design → Higgs voice-clone, male or female to fit the topic), a Ken-Burns move sized to the VO (audio-first), with a few dynamic beats animated by LTX. The video.graphics runner assembles the beats in order and overlays a title card, keyword lower-thirds, an animated timeline and a revision card (programmatic, no image-model text); optional cv.captions adds karaoke captions.",
+  "dependencies": {
+    "runners": {
+      "llm.generate": ">=0.1.0",
+      "comfy.tti": ">=0.1.0",
+      "comfy.tts": ">=0.1.0",
+      "ffmpeg.kenburns": ">=0.1.0",
+      "ffmpeg.concat": ">=0.1.0",
+      "video.graphics": ">=0.1.0",
+      "cv.captions": ">=0.1.0",
+      "comfy.ltx_director": ">=0.1.0"
+    },
+    "runnerPackages": {
+      "comfy.tts": "@dhee_ai/runner-tts",
+      "video.graphics": "@dhee_ai/runner-video-graphics",
+      "cv.captions": "@dhee_ai/runner-captions"
+    }
+  },
+  "inputs": [
+    {
+      "id": "topic_input",
+      "kind": "file",
+      "path": "inputs/topic.md",
+      "required": false,
+      "label": "Topic or researched project",
+      "placeholder": "EITHER a single topic (e.g. 'French Revolution (1789)') OR a complete researched document/report — the bundle distills a full project into the video. Set a longer Duration to cover more of the research.",
+      "multiline": true
+    },
+    {
+      "id": "duration",
+      "kind": "project",
+      "field": "duration",
+      "default": 60,
+      "label": "Duration (seconds)",
+      "control": "text"
+    },
+    {
+      "id": "style",
+      "kind": "project",
+      "field": "style",
+      "default": "Historical Documentary — cinematic, archival, dramatic lighting",
+      "label": "Style",
+      "control": "text"
+    },
+    {
+      "id": "audience",
+      "kind": "project",
+      "field": "audience",
+      "default": "UPSC aspirants",
+      "label": "Audience",
+      "control": "text"
+    },
+    {
+      "id": "aspect",
+      "kind": "project",
+      "field": "aspect",
+      "default": "16:9",
+      "label": "Aspect",
+      "control": "text"
+    }
+  ],
+  "goal": "final_video",
+  "nodes": [
+    {
+      "id": "outline",
+      "displayName": "Outline",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "topic_input",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/outline.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/outline.md",
+          "tier": "heavy",
+          "outputFormat": "markdown",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "outline.prose"
+    },
+    {
+      "id": "scene_plan",
+      "displayName": "Scene Plan",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "outline",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "plans/scene_plan.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/scene_plan.md",
+          "outputSchema": "schemas/scene_plan.schema.json",
+          "tier": "heavy",
+          "outputFormat": "json",
+          "temperature": 0.5,
+          "maxTokens": 24000
+        }
+      },
+      "displayCapability": "scene.plan"
+    },
+    {
+      "id": "beat_image_prompt",
+      "displayName": "Beat Image Prompts",
+      "kind": "collection",
+      "itemSource": "scene_plan",
+      "itemKey": "beats",
+      "inputs": [
+        {
+          "from": "scene_plan",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/beat_images/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/beat_image_prompt.md",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "segment.image_prompt",
+      "headlineField": "imagePrompt"
+    },
+    {
+      "id": "beat_image",
+      "displayName": "Beat Images",
+      "kind": "collection",
+      "itemSource": "beat_image_prompt",
+      "inputs": [
+        {
+          "from": "beat_image_prompt",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/beats/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.tti",
+        "config": {
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
+          "endpoint": "self.public",
+          "width": 1280,
+          "height": 720
+        }
+      },
+      "displayCapability": "segment.image"
+    },
+    {
+      "id": "beat_image_b_prompt",
+      "displayName": "Split Image-B Prompts",
+      "kind": "collection",
+      "itemSource": "scene_plan",
+      "itemKey": "split_beat_ids",
+      "inputs": [
+        {
+          "from": "scene_plan",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "json",
+        "pattern": "prompts/beat_images_b/{{item_id}}.json"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/beat_image_b.md",
+          "tier": "medium",
+          "outputFormat": "json",
+          "temperature": 0.5
+        }
+      },
+      "displayCapability": "segment.image_prompt",
+      "headlineField": "imagePrompt"
+    },
+    {
+      "id": "beat_image_b",
+      "displayName": "Split Images B",
+      "kind": "collection",
+      "itemSource": "beat_image_b_prompt",
+      "inputs": [
+        {
+          "from": "beat_image_b_prompt",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "image",
+        "pattern": "assets/images/beats_b/{{item_id}}.png"
+      },
+      "runner": {
+        "tool": "comfy.tti",
+        "config": {
+          "workflowPath": "workflows/zimage_tti.json",
+          "manifestPath": "workflows/zimage_tti.manifest.json",
+          "endpoint": "self.public",
+          "width": 1280,
+          "height": 720
+        }
+      },
+      "displayCapability": "segment.image"
+    },
+    {
+      "id": "beat_vo",
+      "displayName": "Beat Narration",
+      "kind": "collection",
+      "itemSource": "scene_plan",
+      "itemKey": "beats",
+      "inputs": [
+        {
+          "from": "scene_plan",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/beat_vo/{{item_id}}.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/beat_vo.md",
+          "tier": "light",
+          "outputFormat": "markdown",
+          "temperature": 0.2
+        }
+      },
+      "displayCapability": "segment.narration"
+    },
+    {
+      "id": "narrator_voice_spec",
+      "displayName": "Narrator Casting",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "scene_plan",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "md",
+        "pattern": "plans/narrator_voice.md"
+      },
+      "runner": {
+        "tool": "llm.generate",
+        "config": {
+          "promptTemplate": "prompts/narrator_voice.md",
+          "tier": "light",
+          "outputFormat": "markdown",
+          "temperature": 0.7
+        }
+      },
+      "displayCapability": "narrator.casting"
+    },
+    {
+      "id": "narrator_voice",
+      "displayName": "Narrator Voice",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "narrator_voice_spec",
+          "usage": "input"
+        }
+      ],
+      "outputs": {
+        "format": "audio",
+        "pattern": "assets/audio/narrator_voice.wav"
+      },
+      "runner": {
+        "tool": "comfy.tts",
+        "config": {
+          "workflowPath": "workflows/qwen3_voice_save.json",
+          "endpoint": "self.public",
+          "textNodeId": "1",
+          "textField": "text",
+          "textInput": "narrator_voice_spec",
+          "fields": {
+            "1": {
+              "text": "Across the centuries, a single moment can change the course of history, and understanding it is the first step to mastering it.",
+              "instruct": "A warm, clear, professional narrator voice: neutral accent, measured and confident pacing, friendly and engaging, the polished tone of a documentary voice-over.",
+              "seed": 42,
+              "model_choice": "1.7B",
+              "language": "English",
+              "max_new_tokens": 2048,
+              "temperature": 1,
+              "top_p": 0.8
+            }
+          }
+        }
+      },
+      "displayCapability": "narrator.voice"
+    },
+    {
+      "id": "beat_audio",
+      "displayName": "Beat Audio",
+      "kind": "collection",
+      "itemSource": "beat_vo",
+      "inputs": [
+        {
+          "from": "beat_vo",
+          "usage": "input"
+        },
+        {
+          "from": "narrator_voice",
+          "usage": "context"
+        }
+      ],
+      "outputs": {
+        "format": "audio",
+        "pattern": "assets/audio/beats/{{item_id}}.wav"
+      },
+      "runner": {
+        "tool": "comfy.tts",
+        "config": {
+          "workflowPath": "workflows/qwen3_narration_cloned.json",
+          "endpoint": "self.public",
+          "textInput": "beat_vo",
+          "textNodeId": "4",
+          "textField": "script",
+          "textPrefix": "Narrator: ",
+          "voiceSample": "assets/audio/narrator_voice.wav",
+          "voiceNodeId": "1",
+          "voiceField": "audio",
+          "fields": {
+            "4": {
+              "model_choice": "1.7B",
+              "language": "English",
+              "seed": 42,
+              "max_new_tokens_per_line": 2048,
+              "temperature": 1,
+              "top_p": 0.8,
+              "top_k": 20,
+              "merge_outputs": true,
+              "batch_size": 2
+            }
+          }
+        }
+      },
+      "displayCapability": "segment.audio"
+    },
+    {
+      "id": "beat_clip",
+      "displayName": "Beat Clips",
+      "kind": "collection",
+      "itemSource": "beat_image",
+      "inputs": [
+        {
+          "from": "beat_image",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "beat_audio",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/beats/{{item_id}}.mp4"
+      },
+      "runner": {
+        "tool": "ffmpeg.kenburns",
+        "config": {
+          "imageInput": "beat_image",
+          "audioInput": "beat_audio",
+          "fps": 30,
+          "width": 1280,
+          "height": 720,
+          "zoom": 1.12
+        }
+      },
+      "displayCapability": "segment.video"
+    },
+    {
+      "id": "motion_clip",
+      "displayName": "Motion Beats (LTX)",
+      "kind": "collection",
+      "itemSource": "scene_plan",
+      "itemKey": "ltx_beat_ids",
+      "inputs": [
+        {
+          "from": "beat_image",
+          "usage": "input",
+          "scope": "matching"
+        },
+        {
+          "from": "beat_audio",
+          "usage": "input",
+          "scope": "matching"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/motion/{{item_id}}.mp4"
+      },
+      "runner": {
+        "tool": "comfy.ltx_director",
+        "config": {
+          "workflowPath": "workflows/ltx_director_local.json",
+          "endpoint": "self.public",
+          "imageInput": "beat_image",
+          "audioInput": "beat_audio",
+          "lipSync": false,
+          "loras": [],
+          "width": 1280,
+          "height": 720,
+          "fps": 30,
+          "guideStrength": 0.3,
+          "globalPrompt": "A bold, clearly visible cinematic camera move with strong continuous motion — a decisive push-in or sweeping pan with pronounced parallax and drifting atmosphere. Keeps its art style. No talking, no text, no new characters."
+        }
+      },
+      "displayCapability": "segment.motion"
+    },
+    {
+      "id": "graphics_video",
+      "displayName": "Graphics Overlay",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "scene_plan",
+          "usage": "input"
+        },
+        {
+          "from": "motion_clip",
+          "usage": "input",
+          "scope": "all"
+        },
+        {
+          "from": "beat_clip",
+          "usage": "input",
+          "scope": "all"
+        },
+        {
+          "from": "beat_image_b",
+          "usage": "input",
+          "scope": "all"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/graphics/graphics_video.mp4"
+      },
+      "runner": {
+        "tool": "video.graphics",
+        "config": {
+          "planInput": "scene_plan",
+          "clipInputs": [
+            "motion_clip",
+            "beat_clip"
+          ],
+          "width": 1280,
+          "height": 720,
+          "fps": 30,
+          "accent": "#ffcc33",
+          "titleSeconds": 3.5,
+          "bImagesInput": "beat_image_b"
+        }
+      },
+      "displayCapability": "graphics.video"
+    },
+    {
+      "id": "final_video",
+      "displayName": "Final (captioned)",
+      "kind": "stage",
+      "inputs": [
+        {
+          "from": "graphics_video",
+          "usage": "input"
+        }
+      ],
+      "outputs": {
+        "format": "video",
+        "pattern": "assets/videos/final/final_video.mp4"
+      },
+      "runner": {
+        "tool": "cv.captions",
+        "config": {
+          "scriptPath": "scripts/caption_render.py",
+          "videoInput": "graphics_video",
+          "asrEngine": "whisper",
+          "model": "small",
+          "language": "en",
+          "translate_to": "",
+          "font": "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+          "accent": "FFCC33",
+          "maxWords": 10,
+          "posFrac": 0.8
+        }
+      },
+      "displayCapability": "final.video"
+    }
+  ],
+  "display": {
+    "thumbnail": {
+      "from": [
+        "segment.image"
+      ],
+      "pick": "first_completed"
+    },
+    "stats": [
+      {
+        "label": "scenes",
+        "source": "scene.plan",
+        "path": "scenes.length"
+      }
+    ]
+  }
+}

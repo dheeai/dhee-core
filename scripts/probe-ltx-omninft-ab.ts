@@ -14,7 +14,7 @@
  * Optional env:
  *   PROMPT_OVERRIDE="..."        skip DeepSeek, use this prompt verbatim
  *   OMNINFT_STRENGTH=0.8         override lora strength (default 0.8)
- *   PROBE_PROJECT_DIR=...        absolute path to .kshana-style project dir
+ *   PROBE_PROJECT_DIR=...        absolute path to .dhee-style project dir
  *                                 (default ~/Projects/Ruby)
  *   PROBE_SCENE=1 PROBE_SHOT=4   override scene/shot indices
  */

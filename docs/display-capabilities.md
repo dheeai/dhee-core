@@ -2,7 +2,7 @@
 
 The desktop UI must work with any bundle (built-in, third-party, user-authored) without per-bundle code. The contract that makes that possible is **display capabilities**: each bundle node optionally declares a `displayCapability` string in `bundle.json`. The desktop queries the bundle + walkState by capability to discover what artifacts exist and where to find them — it never inspects node ids or filesystem paths directly.
 
-This document is the **registry of reserved capability names** that the kshana-core platform recognises and the desktop ships views for. Bundles MAY use any capability string they want; unknown capabilities are silently ignored by the desktop (graceful degradation — the artifacts are still on disk).
+This document is the **registry of reserved capability names** that the dhee-core platform recognises and the desktop ships views for. Bundles MAY use any capability string they want; unknown capabilities are silently ignored by the desktop (graceful degradation — the artifacts are still on disk).
 
 ## How a bundle node declares its capability
 
@@ -19,7 +19,7 @@ This document is the **registry of reserved capability names** that the kshana-c
 ## How the desktop queries
 
 ```ts
-import { findByCapability, listCompletedItemIds } from 'kshana-core/dag';
+import { findByCapability, listCompletedItemIds } from 'dhee-core/dag';
 
 // Reading project.json from disk; bundle definition from the bundle source resolver
 const completedShots = listCompletedItemIds(bundle, project.walkState, 'shot.prompt');

@@ -4,7 +4,7 @@
  * renders bundle cards from this).
  *
  * Scans the bundle search root chain (DHEE_USER_BUNDLES_DIR →
- * DHEE_APP_BUNDLES_DIR → ~/.kshana/bundles → repo src/dag/bundles) and
+ * DHEE_APP_BUNDLES_DIR → ~/.dhee/bundles → repo src/dag/bundles) and
  * returns one entry per bundle id (first-seen-wins so user forks
  * shadow shipped defaults).
  *

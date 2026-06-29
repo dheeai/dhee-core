@@ -5,8 +5,8 @@
  *
  * A bundleSource URI is the project.json's pointer to which bundle the
  * project uses. Three schemes:
- *   - built-in:<id>   → ships with kshana-core (src/dag/bundles/<id>/)
- *   - user:<id>       → user-authored, lives in ~/.kshana/bundles/<id>/
+ *   - built-in:<id>   → ships with dhee-core (src/dag/bundles/<id>/)
+ *   - user:<id>       → user-authored, lives in ~/.dhee/bundles/<id>/
  *   - registry:<scope>/<name>@<version>  → future registry; parser only
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -80,8 +80,8 @@ describe('resolveBundleDir', () => {
   let originalHome: string | undefined;
 
   beforeEach(() => {
-    // Isolate ~/.kshana/ for user: scheme tests
-    tmpHome = mkdtempSync(join(tmpdir(), 'kshana-home-'));
+    // Isolate ~/.dhee/ for user: scheme tests
+    tmpHome = mkdtempSync(join(tmpdir(), 'dhee-home-'));
     originalHome = process.env['HOME'];
     process.env['HOME'] = tmpHome;
   });
@@ -107,8 +107,8 @@ describe('resolveBundleDir', () => {
       .toThrow(/not found|missing/i);
   });
 
-  it('resolves user:<id> to ~/.kshana/bundles/<id>/ when present', () => {
-    const userBundles = join(tmpHome, '.kshana', 'bundles', 'my_doc');
+  it('resolves user:<id> to ~/.dhee/bundles/<id>/ when present', () => {
+    const userBundles = join(tmpHome, '.dhee', 'bundles', 'my_doc');
     mkdirSync(userBundles, { recursive: true });
     writeFileSync(join(userBundles, 'bundle.json'), JSON.stringify({ id: 'my_doc', goal: 'final', nodes: [] }));
 
@@ -141,7 +141,7 @@ describe('resolveBundleDir — multi-root search (externalized bundles)', () => 
   // Search order (high → low precedence):
   //   1. DHEE_USER_BUNDLES_DIR — user forks, community installs (writable)
   //   2. DHEE_APP_BUNDLES_DIR  — shipped defaults inside .app (read-only)
-  //   3. ~/.kshana/bundles     — legacy `user:` location (back-compat)
+  //   3. ~/.dhee/bundles     — legacy `user:` location (back-compat)
   //   4. <REPO_ROOT>/src/dag/bundles — dev/source fallback
   //
   // Both `built-in:` and `user:` schemes resolve through the SAME chain.
@@ -214,10 +214,10 @@ describe('resolveBundleDir — multi-root search (externalized bundles)', () => 
     expect(dir).toBe(join(tmpUser, 'my_custom'));
   });
 
-  it('back-compat: user:<id> still resolves to ~/.kshana/bundles when no env vars are set', () => {
+  it('back-compat: user:<id> still resolves to ~/.dhee/bundles when no env vars are set', () => {
     delete process.env['DHEE_USER_BUNDLES_DIR'];
     delete process.env['DHEE_APP_BUNDLES_DIR'];
-    const legacyDir = join(tmpHome, '.kshana', 'bundles', 'legacy');
+    const legacyDir = join(tmpHome, '.dhee', 'bundles', 'legacy');
     mkdirSync(legacyDir, { recursive: true });
     writeFileSync(join(legacyDir, 'bundle.json'), '{}');
     const dir = resolveBundleDir({ scheme: 'user', id: 'legacy' });

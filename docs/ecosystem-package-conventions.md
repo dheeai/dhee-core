@@ -123,7 +123,7 @@ matches the regex above **and** carry the matching keyword, then:
 
 Resolution precedence, highest wins:
 
-1. Explicit project/local override (`~/.kshana/runners/`, project bundles)
+1. Explicit project/local override (`~/.dhee/runners/`, project bundles)
 2. Installed npm package (the declared/closest version)
 3. Built-in (shipped in dhee-core)
 
@@ -194,6 +194,6 @@ supplying keys.
   hints (see above).
 
 Alongside the pre-existing loaders: built-in runners
-(`src/dag/runners/index.ts`), custom runners from `~/.kshana/runners/`
+(`src/dag/runners/index.ts`), custom runners from `~/.dhee/runners/`
 (`runner.json`, `discovery.ts`), and project/installed bundles
 (`installBundle.ts`).

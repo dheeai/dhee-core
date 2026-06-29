@@ -1,0 +1,90 @@
+{
+  "1": {
+    "inputs": {
+      "filename": "Dwarf.wav"
+    },
+    "class_type": "FB_Qwen3TTSLoadSpeaker",
+    "_meta": {
+      "title": "Load: Dwarf"
+    }
+  },
+  "2": {
+    "inputs": {
+      "filename": "Orc.wav"
+    },
+    "class_type": "FB_Qwen3TTSLoadSpeaker",
+    "_meta": {
+      "title": "Load: Orc"
+    }
+  },
+  "3": {
+    "inputs": {
+      "role_name_1": "Dwarf",
+      "role_name_2": "Orc",
+      "role_name_3": "Role3",
+      "role_name_4": "Role4",
+      "role_name_5": "Role5",
+      "role_name_6": "Role6",
+      "role_name_7": "Role7",
+      "role_name_8": "Role8",
+      "prompt_1": [
+        "1",
+        0
+      ],
+      "prompt_2": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "FB_Qwen3TTSRoleBank",
+    "_meta": {
+      "title": "Role bank"
+    }
+  },
+  "4": {
+    "inputs": {
+      "script": "Orc: Tell me, dwarf, does a cage make the bird any less a bird?\nDwarf: It makes the captor less a man. You chain my hands, yet your conscience wears the heavier iron.\nOrc: The strong take. That is the only law this world has ever obeyed.\nDwarf: Then mercy is the only law worth keeping. Ask yourself at the mountains which of us is truly the prisoner.",
+      "model_choice": "1.7B",
+      "device": "auto",
+      "precision": "bf16",
+      "language": "English",
+      "pause_linebreak": 0.5,
+      "period_pause": 0.4,
+      "comma_pause": 0.2,
+      "question_pause": 0.6,
+      "hyphen_pause": 0.3,
+      "merge_outputs": true,
+      "batch_size": 2,
+      "seed": 7,
+      "max_new_tokens_per_line": 2048,
+      "top_p": 0.8,
+      "top_k": 20,
+      "temperature": 1,
+      "repetition_penalty": 1.05,
+      "attention": "sdpa",
+      "unload_model_after_generate": false,
+      "role_bank": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "FB_Qwen3TTSDialogueInference",
+    "_meta": {
+      "title": "Dialogue"
+    }
+  },
+  "5": {
+    "inputs": {
+      "filename_prefix": "audio/dwarf_orc_dialogue",
+      "audioUI": "",
+      "audio": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "SaveAudio",
+    "_meta": {
+      "title": "Save audio"
+    }
+  }
+}

@@ -2094,3 +2094,5 @@ export {
   suggestParameterMappings,
 } from './importWorkflow.js';
 export type { ApiWorkflowValidation, ParameterMapping } from './importWorkflow.js';
+export { discoverNpmRunners, checkBundleRunners } from './ecosystem.js';
+export { getGlobalRegistry } from './runners/registry.js';

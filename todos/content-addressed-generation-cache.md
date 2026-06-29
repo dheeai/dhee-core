@@ -72,7 +72,7 @@ interface CacheEntry {
 ```
 
 - Store lives outside any single project dir (so it's shared across projects),
-  e.g. `~/.kshana/cache/<hash[0:2]>/<hash>.<ext>`.
+  e.g. `~/.dhee/cache/<hash[0:2]>/<hash>.<ext>`.
 - On hit: link (hardlink) or copy the artifact to the node's `outputPath` and
   return `{ ok: true, outputPath, metadata: { cached: true, ... } }` — the
   `metadata.cached` hook already exists in `walkState.ts`.

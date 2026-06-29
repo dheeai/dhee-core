@@ -42,7 +42,7 @@ registered in **`src/dag/runners/index.ts`**.
 > Refresh the registered list anytime:
 > ```bash
 > grep -oE "tool: '[a-z.]+_?[a-z]*'" ~/Projects/dhee-core/src/dag/runners/index.ts | sort -u
-> ls ~/.kshana/runners/          # external dhee-runner-* packages installed locally
+> ls ~/.dhee/runners/          # external dhee-runner-* packages installed locally
 > ```
 
 **Built-in / core** — code in `dhee-core/src/dag/runners/`, registered in
@@ -66,9 +66,9 @@ behavior independent of workflow.)
 
 **External packages** — `dhee-runner-*`, discovered ESLint-plugin-style.
 For the RUN path they must be symlinked into `dhee-core/node_modules/`
-(see project CLAUDE.md "Runner discovery"); source lives in `~/.kshana/runners/`.
+(see project CLAUDE.md "Runner discovery"); source lives in `~/.dhee/runners/`.
 
-| tool | package | installed in `~/.kshana/runners/`? | does |
+| tool | package | installed in `~/.dhee/runners/`? | does |
 |------|---------|-----------------------------------|------|
 | `comfy.tts` | `dhee-runner-tts` | ✅ | Qwen3 voice-clone TTS (any language; `language` is a workflow-node field set via `fields`, not a runner param; no text-length cap / no chunking) |
 | `comfy.matte` | `dhee-runner-matte` | ✅ | SAM-3 concept-prompted matte (extract product/subject) — CPU |
@@ -247,7 +247,7 @@ The registry rejects duplicate tool ids and, at walk start,
 the tool must be registered, its version must satisfy the declared range,
 and all `credentials` env vars must be set — else the bundle fails BEFORE
 any work runs. (Runners shipped OUTSIDE the core are discovered at startup
-from `~/.kshana/runners/` via a `runner.json` manifest.)
+from `~/.dhee/runners/` via a `runner.json` manifest.)
 
 ---
 

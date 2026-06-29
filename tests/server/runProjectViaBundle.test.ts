@@ -56,12 +56,12 @@ afterEach(() => {
   __resetGlobalRegistryForTesting();
 });
 
-// ── Helper: spin up a user-scheme bundle in ~/.kshana/bundles/<id>/ ────
+// ── Helper: spin up a user-scheme bundle in ~/.dhee/bundles/<id>/ ────
 
 function makeUserBundle(id: string, bundleJson: Record<string, unknown>): string {
   const home = process.env['HOME'];
   if (!home) throw new Error('HOME not set');
-  const dir = join(home, '.kshana/bundles', id);
+  const dir = join(home, '.dhee/bundles', id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'bundle.json'), JSON.stringify(bundleJson));
   return dir;

@@ -4,12 +4,13 @@
  * legacy `getRunner` / `listRunners` API for back-compat with code
  * that hasn't migrated to using the registry directly.
  *
- * Custom runners (from ~/.kshana/runners/) are NOT loaded here — they
+ * Custom runners (from ~/.dhee/runners/) are NOT loaded here — they
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';
 import { comfyKleinRunner } from './comfyKlein.js';
 import { comfyTtiRunner } from './comfyTti.js';
+import { comfyTtiCloudRunner } from './comfyTtiCloud.js';
 import { comfyFl2vRunner } from './comfyFl2v.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
@@ -90,6 +91,23 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Generates an image from a text prompt via a ComfyUI text-to-image workflow (no reference images). Used for character / setting reference renders.',
     },
     runner: comfyTtiRunner,
+  },
+  {
+    // Cloud-pinned comfy.tti: forces Comfy Cloud (cloud.comfy.org) routing,
+    // defaults the public.cloud endpoint from COMFYUI_BASE_URL so it works
+    // without ENDPOINT_public_cloud wired, and validates COMFY_CLOUD_API_KEY.
+    // Same zimage workflow as comfy.tti — use when a node must always render
+    // on cloud regardless of the operator's endpoint env.
+    manifest: {
+      tool: 'comfy.tti.cloud',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Comfy text-to-image (Cloud)',
+      description:
+        'Cloud-pinned comfy.tti: forces Comfy Cloud (cloud.comfy.org) routing, defaults the public.cloud endpoint, and validates COMFY_CLOUD_API_KEY. Same zimage workflow as comfy.tti.',
+    },
+    runner: comfyTtiCloudRunner,
   },
   {
     manifest: {

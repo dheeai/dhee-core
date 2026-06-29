@@ -11,7 +11,7 @@ import { ComfyUIClient } from '../src/services/comfyui/ComfyUIClient.js';
 const PROJ = '/Users/ganaraj/dhee-studios/Ruby V3';
 const SCENE = 1;
 const FPS = 24;
-const WORKFLOW = '/Users/ganaraj/Projects/kshana-core/src/dag/bundles/narrative_prompt_relay/workflows/ltx_director_local.json';
+const WORKFLOW = '/Users/ganaraj/Projects/dhee-core/src/dag/bundles/narrative_prompt_relay/workflows/ltx_director_local.json';
 
 function alignToLTX(rawFrames: number[]): number[] {
   const rounded = rawFrames.map((f) => Math.max(8, Math.round(f / 8) * 8));

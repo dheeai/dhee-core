@@ -39,7 +39,7 @@ function makeProject(
   nodes: Record<string, { status: string; outputPath?: string; itemId?: string; error?: string }>,
   bundleSource = 'built-in:narrative_qwen_chain_relay',
 ): string {
-  const dir = mkdtempSync(join(tmpdir(), 'kshana-project-regen-'));
+  const dir = mkdtempSync(join(tmpdir(), 'dhee-project-regen-'));
   writeFileSync(
     join(dir, 'project.json'),
     JSON.stringify({
@@ -169,7 +169,7 @@ describe('regenerateNode', () => {
   });
 
   it('errors clearly when project.json is missing', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kshana-project-regen-missing-'));
+    const dir = mkdtempSync(join(tmpdir(), 'dhee-project-regen-missing-'));
     const ghost = join(dir, 'does-not-exist');
     const runSpy = vi.fn();
 
@@ -325,7 +325,7 @@ describe('invalidateNodes', () => {
   });
 
   it('errors clearly when project.json is missing', async () => {
-    const ghost = join(tmpdir(), 'kshana-no-such-project-' + Date.now());
+    const ghost = join(tmpdir(), 'dhee-no-such-project-' + Date.now());
     const result = await invalidateNodes({ projectDir: ghost, nodeIds: ['x'] });
     expect(result.invalidated).toEqual([]);
     expect(result.notFound).toEqual([]);

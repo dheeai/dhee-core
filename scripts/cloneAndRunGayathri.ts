@@ -92,12 +92,12 @@ async function main(): Promise<void> {
   // 2. Make sure CAS is enabled (production runs use it).
   delete process.env['DHEE_DISABLE_CAS'];
 
-  // 3. Use the shared global CAS (~/.kshana/cache) so re-runs after
+  // 3. Use the shared global CAS (~/.dhee/cache) so re-runs after
   //    failures hit cached LLM artifacts and don't re-pay. Each
   //    individual project still has its own .dhee/events.jsonl
   //    inside its dir.
   delete process.env['DHEE_CACHE_ROOT'];
-  console.log(`  CAS root:        ~/.kshana/cache (shared global)`);
+  console.log(`  CAS root:        ~/.dhee/cache (shared global)`);
   console.log();
 
   // 4. Run.

@@ -81,8 +81,8 @@ async function main() {
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://kshana.local',
-      'X-Title': 'kshana-core side-b experiment',
+      'HTTP-Referer': 'https://dhee.local',
+      'X-Title': 'dhee-core side-b experiment',
     },
     body: JSON.stringify(body),
   });

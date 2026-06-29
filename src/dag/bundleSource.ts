@@ -18,8 +18,8 @@
  *      (the desktop sets this to `<studiosDir>/bundles/`).
  *   2. DHEE_APP_BUNDLES_DIR  — first-party defaults shipped inside
  *      the packaged app (electron-builder extraResources lifts
- *      kshana-core/dist/bundles → <app>/Resources/bundles).
- *   3. ~/.kshana/bundles     — legacy `user:` location, kept for
+ *      dhee-core/dist/bundles → <app>/Resources/bundles).
+ *   3. ~/.dhee/bundles     — legacy `user:` location, kept for
  *      back-compat with projects created before externalization.
  *   4. <REPO_ROOT>/src/dag/bundles — dev/source fallback (the path
  *      that worked pre-externalization). Lets vitest + headless
@@ -123,7 +123,7 @@ export function parseBundleSource(uri: string): BundleSource {
  *
  * Env vars take precedence over defaults so the desktop can point
  * them at packaged paths (`<app>/Resources/bundles`) and user paths
- * (`<studiosDir>/bundles`) without recompiling kshana-core.
+ * (`<studiosDir>/bundles`) without recompiling dhee-core.
  */
 export function getBundleSearchRoots(): string[] {
   const roots: string[] = [];
@@ -133,7 +133,7 @@ export function getBundleSearchRoots(): string[] {
   if (appDir) roots.push(appDir);
   // Legacy `user:` location — back-compat for projects that predate
   // the env-driven layout.
-  roots.push(resolve(homedir(), '.kshana/bundles'));
+  roots.push(resolve(homedir(), '.dhee/bundles'));
   // Dev / source fallback — the in-repo source tree. Keeps vitest +
   // headless scripts working without setting env vars.
   roots.push(resolve(REPO_ROOT, 'src/dag/bundles'));

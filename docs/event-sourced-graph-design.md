@@ -134,7 +134,7 @@ interface EventLog {
   one process is serialized by the single walker; cross-process is guarded by a
   lockfile (the engine is single-process per project today).
 - **Artifacts are NOT in the log.** The log stores only the **content hash**
-  (`storeHash`); bytes live in the content-addressed store (① ` ~/.kshana/cache/`
+  (`storeHash`); bytes live in the content-addressed store (① ` ~/.dhee/cache/`
   or `<projectDir>/.dhee/cas/`). This keeps the log small and makes free replay
   possible.
 

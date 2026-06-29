@@ -4,7 +4,7 @@
  * Wraps `read`, `ls`, `grep`, `find` under `dhee_` names that REFUSE
  * any path outside the project directory. Replaces pi-coding-agent's
  * built-in versions, which accept any absolute path (and so let the
- * agent wander into engine source like `kshana-core/src/...` to debug
+ * agent wander into engine source like `dhee-core/src/...` to debug
  * itself instead of helping the user with their video).
  *
  * Each tool takes `projectDir` explicitly (matching the other dhee_*

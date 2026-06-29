@@ -1,0 +1,134 @@
+{
+  "unet": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "boogu_image_edit_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "clip": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_fp8_scaled.safetensors",
+      "type": "boogu"
+    }
+  },
+  "vae": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "enc": {
+    "class_type": "TextEncodeBooguEdit",
+    "inputs": {
+      "clip": [
+        "clip",
+        0
+      ],
+      "prompt": "Turn this image into a vibrant watercolor painting.",
+      "vae": [
+        "vae",
+        0
+      ],
+      "images.image_1": [
+        "img1",
+        0
+      ],
+      "images.image_2": [
+        "img2",
+        0
+      ],
+      "images.image_3": [
+        "img3",
+        0
+      ],
+      "images.image_4": [
+        "img4",
+        0
+      ]
+    }
+  },
+  "lat": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "ks": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "unet",
+        0
+      ],
+      "positive": [
+        "enc",
+        0
+      ],
+      "negative": [
+        "enc",
+        1
+      ],
+      "latent_image": [
+        "lat",
+        0
+      ],
+      "seed": 42,
+      "steps": 20,
+      "cfg": 4.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "dec": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "ks",
+        0
+      ],
+      "vae": [
+        "vae",
+        0
+      ]
+    }
+  },
+  "save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "dec",
+        0
+      ],
+      "filename_prefix": "boogu/edit"
+    }
+  },
+  "img1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "boogu_edit_input.png"
+    }
+  },
+  "img2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "boogu_edit_input.png"
+    }
+  },
+  "img3": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "boogu_edit_input.png"
+    }
+  },
+  "img4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "boogu_edit_input.png"
+    }
+  }
+}

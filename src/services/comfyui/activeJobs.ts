@@ -115,7 +115,7 @@ export async function cancelAllActiveJobs(): Promise<number> {
   // wants cancels to be instant in cloud mode where the /interrupt
   // round-trip can take a few seconds. Awaiting it here made
   // `cancel()` callers (BackgroundTaskRunner, ChatPanelEmbedded
-  // Stop, agent's kshana_task_cancel) wait for cloud HTTP to settle
+  // Stop, agent's dhee_task_cancel) wait for cloud HTTP to settle
   // before reporting cancellation — and during that window the UI
   // is in limbo. Now: signal flips instantly, GPU cleanup happens
   // in the background.

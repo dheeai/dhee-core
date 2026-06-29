@@ -23,7 +23,7 @@ const ctx = {} as never;
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'kshana-show-tools-'));
+  tmp = mkdtempSync(join(tmpdir(), 'dhee-show-tools-'));
 });
 afterEach(() => {
   if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });

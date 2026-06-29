@@ -124,7 +124,7 @@ Three small additions to `src/core/planner/ExecutorAgent.ts`:
 
 Each catalog entry lives in `src/core/pipeline/catalog/<name>.ts` with the runner code colocated. Prompts for any LLM-using runners live in `src/core/prompts/catalog/<name>.md` per CLAUDE.md ("create the prompt in a different file and import the prompt").
 
-### 6. UI surface (kshana-desktop)
+### 6. UI surface (dhee-desktop)
 
 New "Pipeline" tab on the project detail view. Renders the graph as a vertical DAG (react-flow or a simple custom flex layout — defer to whatever's already in use in the desktop repo). Two interactions:
 

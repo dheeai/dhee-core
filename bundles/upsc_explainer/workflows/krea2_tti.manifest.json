@@ -1,0 +1,24 @@
+{
+  "id": "krea2_tti",
+  "displayName": "Krea2 Turbo text-to-image",
+  "pipeline": "image_generation",
+  "outputType": "image",
+  "inputRequirements": [
+    { "id": "prompt", "type": "text", "source": "llm", "required": true },
+    { "id": "seed", "type": "number", "source": "system", "required": false },
+    { "id": "filenamePrefix", "type": "text", "source": "system", "required": false },
+    { "id": "width", "type": "number", "source": "system", "required": false },
+    { "id": "height", "type": "number", "source": "system", "required": false }
+  ],
+  "parameterMappings": [
+    { "input": "prompt",         "nodeId": "6",  "field": "text" },
+    { "input": "seed",           "nodeId": "2",  "field": "seed" },
+    { "input": "filenamePrefix", "nodeId": "9",  "field": "filename_prefix" },
+    { "input": "width",          "nodeId": "10", "field": "width" },
+    { "input": "height",         "nodeId": "10", "field": "height" }
+  ],
+  "format": "api",
+  "builtIn": false,
+  "active": true,
+  "mode": "local"
+}

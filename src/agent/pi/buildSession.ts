@@ -51,7 +51,7 @@ const SKILL_DIR = resolve(__dirname, 'skill');
  * Pi's read-only built-in tools used to be in this allowlist:
  *   ['read', 'ls', 'grep', 'find']
  * Removed because pi's defaults accept ANY absolute path, which let the
- * agent wander into /Users/ganaraj/Projects/kshana-core/src/... to
+ * agent wander into /Users/ganaraj/Projects/dhee-core/src/... to
  * debug engine internals instead of helping the user with their video.
  * The dhee_read / dhee_ls / dhee_grep / dhee_find tools (path-scoped
  * to the user's projectDir) replace them in DHEE_TOOL_NAMES.

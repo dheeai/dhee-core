@@ -35,7 +35,7 @@ SDK-ready:
   require an engine major-version bump." `tool`, `version`, `engineCompat`,
   `credentials[]`, `displayName?`, `description?`, `entry?`.
 - **Disk discovery** (`src/dag/runners/discovery.ts`) — scans
-  `~/.kshana/runners/<name>/` for `runner.json` (manifest) + an entry module
+  `~/.dhee/runners/<name>/` for `runner.json` (manifest) + an entry module
   exporting `export const runner = {...}`. ComfyUI-style "load what's there,
   name failures, keep going."
 - **Bundle → runner dependency declaration** (`BundleDependencies.runners`,
@@ -104,7 +104,7 @@ Three tiers, by what each thing is:
 
 ## Package, Build & License
 
-- **Name:** `@dhee/verb-sdk` (see Open Questions on the `kshana`↔`dhee` naming
+- **Name:** `@dhee/verb-sdk` (see Open Questions on the `dhee`↔`dhee` naming
   split).
 - **License:** Apache-2.0. The engine stays AGPL-3.0-or-later. License boundary
   is per-package (standard for mixed-license monorepos).
@@ -149,7 +149,7 @@ Three tiers, by what each thing is:
 
 1. A throwaway runner package living **outside the repo**, whose only `dhee`
    dependency is `@dhee/verb-sdk`, **compiles and runs** end-to-end through
-   `discoverRunners` from `~/.kshana/runners/`. (This is the firewall proof —
+   `discoverRunners` from `~/.dhee/runners/`. (This is the firewall proof —
    if it needs anything from `../src`, the split failed.)
 2. All 7 existing bundles still validate and run unchanged
    (`narrative_prompt_relay`, `narrative_shot_by_shot`, `narrative_text_only`,
@@ -208,9 +208,9 @@ verification against the 7 existing bundles, not lines of code):
 
 ## Open Questions (for founder)
 
-1. **Naming.** Public brand is `@dhee/*`, but the runtime uses `~/.kshana/`
-   and `dhee-core`'s local checkout is `kshana-core`. Reconcile to `@dhee/`
-   (recommended) — and decide separately whether `~/.kshana/runners/` gets
+1. **Naming.** Public brand is `@dhee/*`, but the runtime uses `~/.dhee/`
+   and `dhee-core`'s local checkout is `dhee-core`. Reconcile to `@dhee/`
+   (recommended) — and decide separately whether `~/.dhee/runners/` gets
    renamed/aliased (out of scope here, but it's a visible inconsistency).
 2. **Monorepo package vs separate repo.** Recommended: monorepo workspace
    package (co-located contract, no cross-repo drift, per-package license).

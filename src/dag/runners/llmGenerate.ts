@@ -579,7 +579,7 @@ export function createLlmGenerateRunner(opts?: {
     };
     // CAS kill-switch for tests + opt-out scenarios. Production calls
     // through this path; vitest sets DHEE_DISABLE_CAS=1 to keep unit
-    // tests isolated from the shared ~/.kshana/cache.
+    // tests isolated from the shared ~/.dhee/cache.
     const casDisabled = process.env['DHEE_DISABLE_CAS'] === '1';
     if (!casDisabled && !cfg.forceRerun && !hasPendingCritique) {
       const cache = openGenerationCache(

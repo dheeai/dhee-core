@@ -42,7 +42,7 @@ describe('ComfyUIClient queueWorkflow fetch enrichment', () => {
 
     const client = new ComfyUIClient({
       baseUrl: 'https://cloud.example.test/api',
-      outputDir: '/tmp/kshana-test-out',
+      outputDir: '/tmp/dhee-test-out',
       timeout: 5,
       apiKey: 'test-key',
       isCloud: true,
@@ -72,7 +72,7 @@ describe('ComfyUIClient queueWorkflow fetch enrichment', () => {
 
     const client = new ComfyUIClient({
       baseUrl: 'https://cloud.example.test/api',
-      outputDir: '/tmp/kshana-test-out',
+      outputDir: '/tmp/dhee-test-out',
       timeout: 5,
       apiKey: 'test-key',
       isCloud: true,
@@ -104,7 +104,7 @@ describe('ComfyUIClient queueWorkflow fetch enrichment', () => {
 
     const client = new ComfyUIClient({
       baseUrl: 'https://cloud.example.test/api',
-      outputDir: '/tmp/kshana-test-out',
+      outputDir: '/tmp/dhee-test-out',
       timeout: 5,
       apiKey: 'test-key',
       isCloud: true,
