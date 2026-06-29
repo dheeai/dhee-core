@@ -1,7 +1,4 @@
 import { defineConfig } from 'tsup';
-import { resolve } from 'node:path';
-
-const RUNNER_SDK = resolve('../dhee-packages/dhee-runner-sdk/src/index.ts');
 
 export default defineConfig({
   entry: {
@@ -15,16 +12,6 @@ export default defineConfig({
     'dag/index': 'src/dag/walker.ts',
   },
   format: ['esm'],
-  // Bundle the workspace SDK INLINE into dist so the shipped dhee-core is
-  // self-contained — the desktop loads dist/ and won't need a separate
-  // @dhee_ai/runner-sdk install. (It's a workspace dep, otherwise external.)
-  noExternal: ['@dhee_ai/runner-sdk'],
-  esbuildOptions(options) {
-    options.alias = {
-      ...options.alias,
-      '@dhee_ai/runner-sdk': RUNNER_SDK,
-    };
-  },
   dts: false,
   clean: true,
   splitting: false,

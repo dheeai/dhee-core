@@ -20,10 +20,7 @@
     "verbatimModuleSyntax": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "paths": {
-      "@dhee_ai/runner-sdk": ["../dhee-packages/dhee-runner-sdk/src/index.ts"]
-    }
+    "noPropertyAccessFromIndexSignature": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests"]

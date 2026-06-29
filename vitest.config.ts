@@ -1,5 +1,4 @@
 import { defineConfig } from 'vitest/config';
-import { resolve } from 'node:path';
 
 // Disable the cross-project content-addressed cache for tests so stale
 // entries from a previous test run can't leak into a fresh suite.
@@ -7,14 +6,6 @@ import { resolve } from 'node:path';
 process.env['DHEE_DISABLE_CAS'] = '1';
 
 export default defineConfig({
-  // Resolve the workspace SDK to its SOURCE for in-repo tests, so tests
-  // run without a prior `npm run build` in dhee-packages/dhee-runner-sdk.
-  resolve: {
-    alias: {
-      '@dhee_ai/runner-sdk': resolve(__dirname, '../dhee-packages/dhee-runner-sdk/src/index.ts'),
-      '@dhee/runner-sdk': resolve(__dirname, '../dhee-packages/dhee-runner-sdk/src/index.ts'),
-    },
-  },
   test: {
     globals: true,
     environment: 'node',
