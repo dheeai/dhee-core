@@ -66,9 +66,16 @@ function pickWorkflowPath(opts: ResolveWorkflowPathOpts): string {
   if (workflowPathCloud && resolvesExisting(workflowPathCloud, bundleDir)) {
     return workflowPathCloud;
   }
+  // Convention 1: explicit _local.json → _cloud.json
   const derived = workflowPath.replace(/_local(?=\.json$)/, '_cloud');
   if (derived !== workflowPath && resolvesExisting(derived, bundleDir)) {
     return derived;
+  }
+  // Convention 2: any X.json → X_cloud.json (for workflows without the
+  // _local suffix, e.g. ideogram4.json → ideogram4_cloud.json)
+  const derived2 = workflowPath.replace(/\.json$/, '_cloud.json');
+  if (derived2 !== workflowPath && resolvesExisting(derived2, bundleDir)) {
+    return derived2;
   }
   return workflowPath;
 }

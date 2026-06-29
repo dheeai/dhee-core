@@ -28,6 +28,7 @@ import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
 import { resolveEndpointUrl } from './endpointResolver.js';
+import { resolveWorkflowPath } from '../workflowPathResolver.js';
 import { unloadLocalLlmForComfy } from './gpuCoordinator.js';
 import { getProjectCacheScope } from '../projectIdentity.js';
 
@@ -285,7 +286,37 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
   }
 
   const outAbs = resolve(ctx.projectDir, opts.outputPath);
-  const workflowAbs = resolve(ctx.bundleDir, opts.workflowPath);
+
+  // ── Resolve endpoint early (needed for cloud-aware workflow selection) ──
+  let baseUrl: string | undefined;
+  if (opts.endpoint) {
+    const resolved = resolveEndpointUrl(opts.endpoint);
+    if (!resolved) {
+      return {
+        ok: false,
+        error: tag(
+          `endpoint '${opts.endpoint}' is referenced by the bundle but ` +
+            `ENDPOINT_${opts.endpoint.replace(/\./g, '_')} is not set in the environment. ` +
+            `Configure it in Settings → ComfyUI Endpoints (or your .env in dev mode).`,
+        ),
+      };
+    }
+    baseUrl = resolved;
+    ctx.log(tag(`routing to endpoint '${opts.endpoint}' → ${resolved}`));
+  }
+
+  // Cloud-aware workflow path: when the endpoint resolves to Comfy Cloud,
+  // prefer a _cloud.json variant (convention or explicit workflowPathCloud).
+  // Falls back to the canonical path when no cloud variant exists — so local
+  // runs and bundles without cloud variants are completely unaffected.
+  const workflowAbs = resolveWorkflowPath({
+    workflowPath: opts.workflowPath,
+    bundleDir: ctx.bundleDir,
+    endpointUrl: baseUrl,
+  });
+  if (workflowAbs !== resolve(ctx.bundleDir, opts.workflowPath)) {
+    ctx.log(tag(`cloud endpoint → using ${workflowAbs}`));
+  }
   const scalars = opts.scalars ?? {};
 
   // ── Content-addressed cache key ──
@@ -393,24 +424,6 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
         ),
       };
     }
-  }
-
-  // ── Resolve endpoint ──
-  let baseUrl: string | undefined;
-  if (opts.endpoint) {
-    const resolved = resolveEndpointUrl(opts.endpoint);
-    if (!resolved) {
-      return {
-        ok: false,
-        error: tag(
-          `endpoint '${opts.endpoint}' is referenced by the bundle but ` +
-            `ENDPOINT_${opts.endpoint.replace(/\./g, '_')} is not set in the environment. ` +
-            `Configure it in Settings → ComfyUI Endpoints (or your .env in dev mode).`,
-        ),
-      };
-    }
-    baseUrl = resolved;
-    ctx.log(tag(`routing to endpoint '${opts.endpoint}' → ${resolved}`));
   }
 
   // ── Per-endpoint workflow aliases (model rename / class swap) ──

@@ -6,6 +6,7 @@
     "@dhee_ai/runner-boogu": "^0.1.0",
     "@dhee_ai/runner-captions": "^0.1.1",
     "@dhee_ai/runner-matte": "^0.1.0",
+    "@dhee_ai/runner-sdk": "^0.1.5",
     "@dhee_ai/runner-tts": "^0.1.1",
     "@dhee_ai/runner-video-graphics": "^0.1.0",
     "dhee-runner-openrouter-image": "^0.1.0",

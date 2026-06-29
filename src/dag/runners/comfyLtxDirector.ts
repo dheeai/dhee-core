@@ -757,25 +757,6 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     { inputs: Record<string, unknown>; class_type: string }
   > = JSON.parse(JSON.stringify(baseWorkflow));
 
-  // Apply per-endpoint workflow aliases (model-file rename +
-  // class_type swap for GGUF / quant variants). Same mechanism as
-  // comfy.qwen_edit_chain — bundle's canonical workflow stays
-  // untouched on disk; the user's local Comfy may have differently-
-  // named LoRAs / UNETs (e.g. VBVR vs transition base LoRA), and the
-  // agent's dhee_apply_workflow_aliases tool persists the chosen map.
-  {
-    const { applyEndpointAliases, defaultAliasesDir } = await import('../workflowAliases.js');
-    const aliasRes = await applyEndpointAliases({
-      workflow: workflow as never,
-      workflowKey: workflowPath.split('/').slice(-2).join('/'),
-      aliasesDir: defaultAliasesDir(),
-      endpointUrl: endpointBaseUrl,
-      log: (m) => ctx.log(`comfy.ltx_director: ${m}`),
-    });
-    if (aliasRes.error) return { ok: false, error: `comfy.ltx_director: ${aliasRes.error}` };
-    workflow = aliasRes.workflow as never;
-  }
-
   const director = workflow['46'];
   if (!director || director.class_type !== 'LTXDirector') {
     return { ok: false, error: 'comfy.ltx_director: workflow missing LTXDirector at node 46' };
@@ -803,6 +784,27 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     ctx.log(
       `comfy.ltx_director: loras → ${cfg.loras.map((l) => `${l.name}@${l.strength ?? 0.8}`).join(', ')}`,
     );
+  }
+
+  // Apply per-endpoint workflow aliases (model-file rename +
+  // class_type swap for GGUF / quant variants). Runs AFTER the lora
+  // chain rebuild so name_aliases can remap the injected LoRA names
+  // (e.g. a talking-head LoRA absent from cloud Comfy → a LoRA that
+  // the cloud endpoint has). Same mechanism as comfy.qwen_edit_chain
+  // — bundle's canonical workflow stays untouched on disk; the user's
+  // local Comfy may have differently-named LoRAs / UNETs, and the
+  // agent's dhee_apply_workflow_aliases tool persists the chosen map.
+  {
+    const { applyEndpointAliases, defaultAliasesDir } = await import('../workflowAliases.js');
+    const aliasRes = await applyEndpointAliases({
+      workflow: workflow as never,
+      workflowKey: workflowPath.split('/').slice(-2).join('/'),
+      aliasesDir: defaultAliasesDir(),
+      endpointUrl: endpointBaseUrl,
+      log: (m) => ctx.log(`comfy.ltx_director: ${m}`),
+    });
+    if (aliasRes.error) return { ok: false, error: `comfy.ltx_director: ${aliasRes.error}` };
+    workflow = aliasRes.workflow as never;
   }
 
   // ── Custom audio: mux the LTXDirector combined_audio output (slot 6) into
