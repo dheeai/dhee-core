@@ -688,14 +688,51 @@ export class ComfyUIClient {
 
           const status = await this.getCloudJobStatus(promptId);
           debugLog(`[waitForCompletion] Cloud status for ${promptId}: ${status ?? 'unknown'}`);
-          if (status === 'completed' || status === 'done' || status === 'success') {
-            if (progressCallback) {
-              await this.callProgressCallback(progressCallback, 100, 'Complete!');
-            }
-            return { status: 'completed', prompt_id: promptId };
-          }
           if (status === 'failed' || status === 'cancelled' || status === 'error') {
-            return { status: 'error', prompt_id: promptId };
+            // Fetch the job's exception so the runner surfaces the REAL cause
+            // (missing model, foreign lora_name, malformed input, …) instead
+            // of a generic "did not complete". Without this, a cloud graph
+            // failure was indistinguishable from a network blip.
+            const errorMessage = await this.getCloudJobError(promptId);
+            debugLog(
+              `[waitForCompletion] Cloud job ${promptId} terminal-error (${status}). ${errorMessage ?? 'no exception detail'}`
+            );
+            return { status: 'error', prompt_id: promptId, errorMessage };
+          }
+          if (status === 'completed' || status === 'done' || status === 'success') {
+            // Comfy Cloud reports a coarse "completed" even when the graph
+            // ERRORED at execution (e.g. a model not on cloud) — in that case
+            // /history_v2 never populates with outputs. `cloudHasOutputs` was
+            // already false at the top of this branch, so a "completed" status
+            // here is suspicious: tolerate a brief history-population race,
+            // then fetch the job's exception and return it as an error so the
+            // runner sees the actual failure instead of "no outputs".
+            let gotOutputs = false;
+            for (let i = 0; i < 3 && !abortSignal?.aborted; i++) {
+              if (await this.cloudHasOutputs(promptId)) {
+                gotOutputs = true;
+                break;
+              }
+              await this.sleep(2000);
+            }
+            if (gotOutputs) {
+              debugLog(`[waitForCompletion] Cloud completed with outputs for ${promptId}`);
+              if (progressCallback) {
+                await this.callProgressCallback(progressCallback, 100, 'Complete!');
+              }
+              return { status: 'completed', prompt_id: promptId };
+            }
+            const errorMessage = await this.getCloudJobError(promptId);
+            debugLog(
+              `[waitForCompletion] Cloud reported completed but no outputs for ${promptId}. ${errorMessage ?? 'no exception detail'}`
+            );
+            return {
+              status: 'error',
+              prompt_id: promptId,
+              errorMessage:
+                errorMessage ??
+                'Cloud job reported completed but produced no outputs (workflow may have failed silently).',
+            };
           }
 
           // Fallback: check history_v2 status flags (covers VHS_VideoCombine and other
@@ -1678,6 +1715,59 @@ export class ComfyUIClient {
     }
     const body = (await response.json()) as { status?: string };
     return body.status ?? null;
+  }
+
+  /**
+   * Fetch a cloud job's execution exception (the real reason a graph failed:
+   * missing model, foreign lora_name, malformed input, OOM, …) from the full
+   * `/job/{id}` body. Comfy Cloud's `/job/{id}/status` only carries a coarse
+   * status string; the exception lives on the full job record. Returns a
+   * single human-readable line ("Type — message — node=N") or undefined when
+   * the job record is unavailable / carries no exception.
+   *
+   * This is what unmasks the recurring "Comfy returned no outputs (workflow
+   * may have failed silently)" failure: without it, a cloud execution_error
+   * was indistinguishable from a silent workflow, so the root cause (almost
+   * always a wrong model filename for cloud) was never surfaced.
+   */
+  private async getCloudJobError(promptId: string): Promise<string | undefined> {
+    try {
+      const response = await this.request(`/job/${promptId}`);
+      if (!response.ok) return undefined;
+      const body = (await response.json()) as Record<string, unknown>;
+      const ex =
+        body['exception'] && typeof body['exception'] === 'object'
+          ? (body['exception'] as Record<string, unknown>)
+          : {};
+      const pick = (key: string): string | undefined => {
+        const fromEx = ex[key];
+        if (typeof fromEx === 'string' && fromEx.trim()) return fromEx.trim();
+        const fromBody = body[key];
+        if (typeof fromBody === 'string' && fromBody.trim()) return fromBody.trim();
+        return undefined;
+      };
+      // Some error bodies nest under `error` instead of `exception`.
+      const errNested =
+        body['error'] && typeof body['error'] === 'object'
+          ? (body['error'] as Record<string, unknown>)
+          : null;
+      const type =
+        pick('exception_type') ??
+        (typeof errNested?.['type'] === 'string' ? String(errNested['type']) : undefined);
+      const msg =
+        pick('exception_message') ??
+        (typeof errNested?.['message'] === 'string' ? String(errNested['message']) : undefined);
+      const node =
+        pick('node_id') ??
+        (typeof errNested?.['node'] === 'string' ? String(errNested['node']) : undefined);
+      const parts: string[] = [];
+      if (type) parts.push(type);
+      if (msg) parts.push(msg);
+      if (node) parts.push(`node=${node}`);
+      return parts.length > 0 ? parts.join(' — ') : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async cloudHasOutputs(promptId: string): Promise<boolean> {

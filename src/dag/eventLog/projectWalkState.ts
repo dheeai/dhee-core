@@ -113,8 +113,9 @@ export function projectWalkState(
         const p = e.payload as NodeStartedPayload;
         const k = keyFor(p.nodeId, p.itemId);
         const prior = state.nodes[k] ?? {};
+        const { error: _staleError, ...priorWithoutError } = prior;
         state.nodes[k] = {
-          ...prior,
+          ...priorWithoutError,
           status: 'in_progress' as NodeRunStatus,
           startedAt: e.ts,
           ...(p.itemId !== undefined ? { itemId: p.itemId } : {}),
@@ -126,6 +127,7 @@ export function projectWalkState(
         const p = e.payload as NodeCompletedPayload;
         const k = keyFor(p.nodeId, p.itemId);
         const prior = state.nodes[k] ?? ({} as ProjectedNodeStateEntry);
+        const { error: _staleError, ...priorWithoutError } = prior;
         const newVersion: NodeVersionEntry = {
           versionId: p.versionId,
           outputPath: p.outputPath,
@@ -136,7 +138,7 @@ export function projectWalkState(
         const versions = [...(versionsHistory.get(k) ?? []), newVersion];
         versionsHistory.set(k, versions);
         state.nodes[k] = {
-          ...prior,
+          ...priorWithoutError,
           status: 'completed' as NodeRunStatus,
           outputPath: p.outputPath,
           completedAt: e.ts,

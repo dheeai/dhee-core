@@ -51,6 +51,14 @@ export interface ComfyImageClient {
     signal?: AbortSignal,
   ): Promise<{
     outputs: Array<{ filename: string; subfolder?: string; nodeId?: string }>;
+    /**
+     * Real cloud execution_error (exception_type/message/node) when the job
+     * failed. Present only when the run failed; absent on success. Surfaced
+     * through the executor so the user sees WHY it failed instead of a
+     * generic "no outputs" — which historically masked the root cause
+     * (almost always a wrong model filename for cloud).
+     */
+    errorMessage?: string;
   }>;
   downloadOutput(
     filename: string,
@@ -161,21 +169,32 @@ export function defaultComfyClientFactory(opts: { baseUrl?: string; outputDir: s
       return { name: r.name };
     },
     async queueAndWait(workflow, signal) {
-      const { outputs, promptId } = await client.queueAndWaitWS(
+      const { outputs, promptId, result } = await client.queueAndWaitWS(
         workflow,
         undefined,
         { ...(workflowId ? { workflowId } : {}), ...(signal ? { signal } : {}) },
       );
       let resolved = outputs;
       if (resolved.length === 0 && promptId) {
-        try {
-          resolved = await client.getOutputImages(promptId);
-        } catch {
-          // keep empty; executor surfaces "no outputs"
+        // Cloud history_v2 can lag job-completion by a couple of seconds
+        // (the population race). Retry briefly before giving up so a
+        // genuinely-successful job isn't misreported as "no outputs".
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            resolved = await client.getOutputImages(promptId);
+          } catch {
+            resolved = [];
+          }
+          if (resolved.length > 0) break;
+          await new Promise((r) => setTimeout(r, 1000));
         }
       }
+      // Propagate the cloud execution_error (if any) so the executor can
+      // surface the real cause instead of a generic "no outputs".
+      const errorMessage = result?.status === 'error' ? result.errorMessage : undefined;
       return {
         outputs: resolved.map((o) => ({ filename: o.filename, subfolder: o.subfolder })),
+        ...(errorMessage ? { errorMessage } : {}),
       };
     },
     async downloadOutput(filename, subfolder, destPath) {
@@ -513,7 +532,10 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
   // Single-GPU swap: unload the local LLM/VLM off the shared GPU before this
   // render (no-op unless DHEE_SINGLE_GPU=1). Best-effort; never blocks the render.
   await unloadLocalLlmForComfy(undefined, ctx.log);
-  let queueResult: { outputs: Array<{ filename: string; subfolder?: string }> };
+  let queueResult: {
+    outputs: Array<{ filename: string; subfolder?: string }>;
+    errorMessage?: string;
+  };
   try {
     queueResult = await retryTransient(() => client.queueAndWait(workflow, ctx.signal), {
       signal: ctx.signal,
@@ -524,7 +546,10 @@ export async function executeComfyWorkflow(opts: ExecuteComfyOptions): Promise<R
     return { ok: false, error: tag((err as Error).message) };
   }
   if (!queueResult.outputs || queueResult.outputs.length === 0) {
-    return { ok: false, error: tag('Comfy returned no outputs (workflow may have failed silently).') };
+    const detail = queueResult.errorMessage
+      ? `Comfy job failed: ${queueResult.errorMessage}`
+      : 'Comfy returned no outputs (workflow may have failed silently).';
+    return { ok: false, error: tag(detail) };
   }
 
   // ── Download first media output ──
