@@ -189,4 +189,154 @@ describe('executeComfyWorkflow — required inputs (manifest-driven)', () => {
     expect((wf['2'] as { inputs: { image: string } }).inputs.image).toBe('up_base.png');
     expect(existsSync(join(projectDir, 'out.png'))).toBe(true);
   });
+
+  it('forwards explicit workflow metadata from node config', async () => {
+    const img = join(projectDir, 'base.png');
+    writeFileSync(img, Buffer.from('img'));
+    const ctx = makeCtx();
+    (ctx.node.runner.config as Record<string, unknown>)['workflowId'] = 'workflow-ref-1';
+    const queued: Array<Record<string, unknown>> = [];
+    let seenWorkflowId: string | undefined;
+
+    const result = await executeComfyWorkflow({
+      ctx,
+      tool: 'comfy.test',
+      workflowPath: 'workflows/wf.json',
+      manifestPath: 'workflows/wf.manifest.json',
+      endpoint: 'test.endpoint',
+      outputPath: 'workflow-ref.png',
+      prompt: 'a cloud image',
+      imageInputs: { base_image: img },
+      clientFactory: (opts) => {
+        seenWorkflowId = opts.workflowId;
+        return makeStubClient(queued);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(seenWorkflowId).toBe('workflow-ref-1');
+  });
+});
+
+// ── executeComfyWorkflow: cloud execution_error surfacing ─────────────
+// Regression guard for the recurring "Comfy returned no outputs (workflow
+// may have failed silently)" failure, which MASKED the real cloud error
+// (almost always a wrong model filename for cloud). The client now carries
+// the cloud job's exception through `queueAndWait`; the executor must
+// surface it instead of the generic string.
+
+describe('executeComfyWorkflow — surfaces real cloud execution_error', () => {
+  let bundleDir: string;
+  let projectDir: string;
+  let savedMode: string | undefined;
+  let savedCas: string | undefined;
+
+  beforeEach(() => {
+    bundleDir = mkdtempSync(join(tmpdir(), 'exec-err-bundle-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'exec-err-proj-'));
+    mkdirSync(join(bundleDir, 'workflows'), { recursive: true });
+    writeFileSync(
+      join(bundleDir, 'workflows/wf.json'),
+      JSON.stringify({
+        '1': { class_type: 'CLIPTextEncode', inputs: { text: '' } },
+        '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'out' } },
+      }),
+    );
+    writeFileSync(
+      join(bundleDir, 'workflows/wf.manifest.json'),
+      JSON.stringify({
+        inputRequirements: [{ id: 'prompt', type: 'text', source: 'llm', required: true }],
+        parameterMappings: [{ input: 'prompt', nodeId: '1', field: 'text' }],
+      }),
+    );
+    savedMode = process.env['COMFY_MODE'];
+    savedCas = process.env['DHEE_DISABLE_CAS'];
+    process.env['COMFY_MODE'] = 'cloud';
+    process.env['DHEE_DISABLE_CAS'] = '1';
+    process.env['ENDPOINT_test_endpoint'] = 'http://stub.local:8188';
+  });
+  afterEach(() => {
+    rmSync(bundleDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+    delete process.env['ENDPOINT_test_endpoint'];
+    if (savedMode === undefined) delete process.env['COMFY_MODE'];
+    else process.env['COMFY_MODE'] = savedMode;
+    if (savedCas === undefined) delete process.env['DHEE_DISABLE_CAS'];
+    else process.env['DHEE_DISABLE_CAS'] = savedCas;
+  });
+
+  function makeCtx(): RunnerContext {
+    const node: NodeDef = {
+      id: 'n',
+      kind: 'stage',
+      inputs: [],
+      outputs: { format: 'image', pattern: 'out.png' },
+      runner: { tool: 'comfy.test', config: {} },
+    };
+    return { projectDir, bundleDir, node, inputs: {}, log: () => {} };
+  }
+
+  it("surfaces the cloud execution_error instead of the generic 'no outputs' mask", async () => {
+    const stub: ComfyImageClient = {
+      async uploadImage() {
+        return { name: 'skip' };
+      },
+      async queueAndWait() {
+        return {
+          outputs: [],
+          errorMessage:
+            'ServiceError — model not found: ideogram4_nvfp4_mixed.safetensors — node=98:23',
+        };
+      },
+      async downloadOutput() {
+        throw new Error('should not download when there are no outputs');
+      },
+    };
+    const result = await executeComfyWorkflow({
+      ctx: makeCtx(),
+      tool: 'comfy.test',
+      workflowPath: 'workflows/wf.json',
+      manifestPath: 'workflows/wf.manifest.json',
+      endpoint: 'test.endpoint',
+      outputPath: 'out.png',
+      prompt: 'a dragon',
+      imageInputs: {},
+      clientFactory: () => stub,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/Comfy job failed:.*model not found: ideogram4_nvfp4_mixed/);
+      // The whole point: the generic mask must NOT be used when we have detail.
+      expect(result.error).not.toMatch(/may have failed silently/);
+    }
+  });
+
+  it('falls back to the generic message only when no errorMessage is provided', async () => {
+    const stub: ComfyImageClient = {
+      async uploadImage() {
+        return { name: 'skip' };
+      },
+      async queueAndWait() {
+        return { outputs: [] };
+      },
+      async downloadOutput() {
+        throw new Error('nope');
+      },
+    };
+    const result = await executeComfyWorkflow({
+      ctx: makeCtx(),
+      tool: 'comfy.test',
+      workflowPath: 'workflows/wf.json',
+      manifestPath: 'workflows/wf.manifest.json',
+      endpoint: 'test.endpoint',
+      outputPath: 'out.png',
+      prompt: 'a dragon',
+      imageInputs: {},
+      clientFactory: () => stub,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/no outputs/i);
+    }
+  });
 });

@@ -1,3 +1,4 @@
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
@@ -32,7 +33,6 @@ export default defineConfig({
   // desktop's electron-builder extraResources config from this
   // dist/bundles directory).
   async onSuccess() {
-    const { cpSync, existsSync, rmSync, mkdirSync } = await import('node:fs');
     const dstSkill = 'dist/skill';
     if (existsSync(dstSkill)) rmSync(dstSkill, { recursive: true, force: true });
     cpSync('src/agent/pi/skill', dstSkill, { recursive: true });

@@ -20,10 +20,10 @@
  *     scene_clip node or as a future chunking pass.
  */
 import 'dotenv/config';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join, basename, resolve } from 'node:path';
+import { dirname, join, basename, resolve, extname } from 'node:path';
 import { ComfyUIClient } from '../../services/comfyui/ComfyUIClient.js';
 import type { Runner, RunnerContext, RunnerDescription, RunnerResult } from '../schema.js';
 import { ffmpegBin, ffprobeBin } from './ffmpegBin.js';
@@ -54,6 +54,7 @@ export interface LtxDirectorConfig {
    * doesn't resolve. Local runs are unaffected (the endpoint URL isn't cloud).
    */
   workflowPathCloud?: string;
+  workflowId?: string;
   shots?: ShotInput[];
   firstFrames?: string[];
   globalPrompt?: string;
@@ -140,7 +141,7 @@ export interface LtxDirectorConfig {
  * `ENDPOINT_self_local`.
  */
 import { resolveEndpointUrl } from './endpointResolver.js';
-import { resolveWorkflowPath } from '../workflowPathResolver.js';
+import { isCloudEndpoint, resolveWorkflowPath } from '../workflowPathResolver.js';
 
 // ── Prompt-shaping helpers (ported verbatim from probe-ltx-director.ts) ──
 
@@ -308,6 +309,33 @@ export interface ResolvedLtxDirectorConfig extends LtxDirectorConfig {
   dependencies?: Array<{ nodeId: string; itemId?: string; role?: 'input' | 'context' | 'reference' | 'aggregate' }>;
 }
 
+type LtxDependency = NonNullable<ResolvedLtxDirectorConfig['dependencies']>[number];
+
+export interface AudioVolumeProbe {
+  meanVolumeDb?: number;
+  maxVolumeDb?: number;
+  silent: boolean;
+  error?: string;
+}
+
+export interface FrameSimilarityProbe {
+  ssim?: number;
+  sampleTimeSeconds?: number;
+  samples?: Array<{ timeSeconds: number; ssim?: number; error?: string }>;
+  error?: string;
+}
+
+export interface MotionOutputValidation {
+  ok: boolean;
+  errors: string[];
+  audio?: AudioVolumeProbe;
+  firstFrame?: FrameSimilarityProbe;
+}
+
+const SILENT_AUDIO_MAX_DB = -60;
+const MIN_ANCHOR_FRAME_SSIM = 0.4;
+const ANCHOR_FRAME_SAMPLE_SECONDS = [0, 0.5, 1, 2] as const;
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -332,6 +360,304 @@ function mediaDurationSeconds(path: string): number | null {
   } catch {
     return null;
   }
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function imageDataUri(path: string): string {
+  const ext = extname(path).toLowerCase();
+  const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+  return `data:${mime};base64,${readFileSync(path).toString('base64')}`;
+}
+
+function collectBeatRecords(plan: Record<string, unknown>): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const beats = plan['beats'];
+  if (Array.isArray(beats)) {
+    for (const beat of beats) {
+      const rec = asRecord(beat);
+      if (rec) out.push(rec);
+    }
+  }
+  const scenes = plan['scenes'];
+  if (Array.isArray(scenes)) {
+    for (const scene of scenes) {
+      const sceneRec = asRecord(scene);
+      const sceneBeats = sceneRec?.['beats'];
+      if (!Array.isArray(sceneBeats)) continue;
+      for (const beat of sceneBeats) {
+        const rec = asRecord(beat);
+        if (rec) out.push(rec);
+      }
+    }
+  }
+  return out;
+}
+
+function readBeatContextFromScenePlan(
+  ctx: RunnerContext,
+): { prompt?: string; dependency?: LtxDependency } {
+  const plan = asRecord(ctx.inputs['scene_plan']);
+  if (!plan || !ctx.itemId) return {};
+  const beat = collectBeatRecords(plan).find((b) => nonEmptyString(b['id']) === ctx.itemId);
+  if (!beat) return {};
+
+  const parts: string[] = [];
+  const vo = nonEmptyString(beat['vo']);
+  const imageBrief = nonEmptyString(beat['image_brief']);
+  const layout = nonEmptyString(beat['layout']);
+  if (vo) parts.push(`Narration context: ${vo}`);
+  if (imageBrief) parts.push(`Visual brief: ${imageBrief}`);
+  if (layout) parts.push(`Composition: ${layout}`);
+  if (parts.length === 0) return {};
+  return {
+    prompt: `${parts.join('. ')}.`,
+    dependency: { nodeId: 'scene_plan', itemId: ctx.itemId, role: 'context' },
+  };
+}
+
+function resolveAudioInputPath(ctx: RunnerContext, cfg: LtxDirectorConfig): string | undefined {
+  if (!cfg.audioInput) return undefined;
+  const value = ctx.inputs[cfg.audioInput];
+  return typeof value === 'string' && existsSync(value) ? value : undefined;
+}
+
+export function probeAudioVolume(path: string): AudioVolumeProbe {
+  const result = spawnSync(
+    ffmpegBin(),
+    ['-hide_banner', '-nostats', '-i', path, '-map', '0:a:0', '-af', 'volumedetect', '-f', 'null', '-'],
+    { encoding: 'utf-8' },
+  );
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  if (result.status !== 0) {
+    return { silent: true, error: output.trim().split('\n').slice(-4).join(' ') || 'ffmpeg volume probe failed' };
+  }
+  const meanMatch = output.match(/mean_volume:\s*(-?(?:inf|\d+(?:\.\d+)?))\s*dB/i);
+  const maxMatch = output.match(/max_volume:\s*(-?(?:inf|\d+(?:\.\d+)?))\s*dB/i);
+  const parseDb = (value: string | undefined): number | undefined => {
+    if (!value || value.toLowerCase() === '-inf') return undefined;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const meanVolumeDb = parseDb(meanMatch?.[1]);
+  const maxVolumeDb = parseDb(maxMatch?.[1]);
+  return {
+    ...(meanVolumeDb !== undefined ? { meanVolumeDb } : {}),
+    ...(maxVolumeDb !== undefined ? { maxVolumeDb } : {}),
+    silent: maxVolumeDb === undefined || maxVolumeDb <= SILENT_AUDIO_MAX_DB,
+  };
+}
+
+export function probeFirstFrameSimilarity(opts: {
+  sourceImagePath: string;
+  videoPath: string;
+  width: number;
+  height: number;
+}): FrameSimilarityProbe {
+  return probeFrameSimilarityAtTime({ ...opts, timeSeconds: 0 });
+}
+
+function probeFrameSimilarityAtTime(opts: {
+  sourceImagePath: string;
+  videoPath: string;
+  width: number;
+  height: number;
+  timeSeconds: number;
+}): FrameSimilarityProbe {
+  const { sourceImagePath, videoPath, width, height, timeSeconds } = opts;
+  const filter = [
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},format=gray[ref]`,
+    `[1:v]scale=${width}:${height},format=gray[cmp]`,
+    '[ref][cmp]ssim',
+  ].join(';');
+  const videoInputArgs = timeSeconds > 0 ? ['-ss', String(timeSeconds), '-i', videoPath] : ['-i', videoPath];
+  const result = spawnSync(
+    ffmpegBin(),
+    [
+      '-hide_banner',
+      '-nostats',
+      '-i',
+      sourceImagePath,
+      ...videoInputArgs,
+      '-filter_complex',
+      filter,
+      '-frames:v',
+      '1',
+      '-f',
+      'null',
+      '-',
+    ],
+    { encoding: 'utf-8' },
+  );
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  if (result.status !== 0) {
+    return { error: output.trim().split('\n').slice(-4).join(' ') || 'ffmpeg frame similarity probe failed' };
+  }
+  const match = output.match(/All:([0-9.]+)/);
+  const ssim = match ? Number(match[1]) : NaN;
+  return Number.isFinite(ssim) ? { ssim, sampleTimeSeconds: timeSeconds } : { error: 'ffmpeg did not report SSIM' };
+}
+
+export function probeAnchorFrameSimilarity(opts: {
+  sourceImagePath: string;
+  videoPath: string;
+  width: number;
+  height: number;
+}): FrameSimilarityProbe {
+  const samples = ANCHOR_FRAME_SAMPLE_SECONDS.map((timeSeconds) => ({
+    timeSeconds,
+    ...probeFrameSimilarityAtTime({ ...opts, timeSeconds }),
+  }));
+  let best: { timeSeconds: number; ssim: number } | undefined;
+  for (const sample of samples) {
+    if (typeof sample.ssim !== 'number') continue;
+    if (!best || sample.ssim > best.ssim) best = { timeSeconds: sample.timeSeconds, ssim: sample.ssim };
+  }
+  if (!best) {
+    return {
+      samples,
+      error: samples.map((sample) => sample.error).filter(Boolean).join('; ') || 'no comparable video frames',
+    };
+  }
+  return { ssim: best.ssim, sampleTimeSeconds: best.timeSeconds, samples };
+}
+
+export function muxOriginalAudio(videoPath: string, audioPath: string): { ok: true; volume: AudioVolumeProbe } | { ok: false; error: string } {
+  const tmpPath = videoPath.replace(/\.[^.]+$/, `.audiofix-${Date.now()}.mp4`);
+  try {
+    execFileSync(
+      ffmpegBin(),
+      [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', videoPath,
+        '-i', audioPath,
+        '-map', '0:v:0',
+        '-map', '1:a:0',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-shortest',
+        '-movflags', '+faststart',
+        tmpPath,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const volume = probeAudioVolume(tmpPath);
+    if (volume.silent) {
+      try { unlinkSync(tmpPath); } catch { /* best effort */ }
+      return {
+        ok: false,
+        error: `remuxed audio is silent${volume.maxVolumeDb !== undefined ? ` (max_volume=${volume.maxVolumeDb} dB)` : ''}`,
+      };
+    }
+    renameSync(tmpPath, videoPath);
+    return { ok: true, volume };
+  } catch (err) {
+    try { unlinkSync(tmpPath); } catch { /* best effort */ }
+    const stderr = (err as { stderr?: Buffer | string }).stderr;
+    const detail = Buffer.isBuffer(stderr) ? stderr.toString('utf-8') : typeof stderr === 'string' ? stderr : String(err);
+    return { ok: false, error: detail.trim().split('\n').slice(-4).join(' ') };
+  }
+}
+
+function validateMotionOutput(opts: {
+  videoPath: string;
+  audioPath?: string;
+  sourceImagePath?: string;
+  width: number;
+  height: number;
+}): MotionOutputValidation {
+  const errors: string[] = [];
+  let audio: AudioVolumeProbe | undefined;
+  let firstFrame: FrameSimilarityProbe | undefined;
+  if (opts.audioPath) {
+    audio = probeAudioVolume(opts.videoPath);
+    if (audio.silent) {
+      errors.push(`audio is silent${audio.maxVolumeDb !== undefined ? ` (max_volume=${audio.maxVolumeDb} dB)` : ''}`);
+    }
+  }
+  if (opts.sourceImagePath) {
+    firstFrame = probeAnchorFrameSimilarity({
+      sourceImagePath: opts.sourceImagePath,
+      videoPath: opts.videoPath,
+      width: opts.width,
+      height: opts.height,
+    });
+    if (firstFrame.error) {
+      errors.push(`anchor-frame validation failed: ${firstFrame.error}`);
+    } else if ((firstFrame.ssim ?? 0) < MIN_ANCHOR_FRAME_SSIM) {
+      const samples = firstFrame.samples
+        ?.filter((sample) => typeof sample.ssim === 'number')
+        .map((sample) => `${sample.timeSeconds}s:${(sample.ssim ?? 0).toFixed(4)}`)
+        .join(', ');
+      errors.push(
+        `anchor frame ignored source image (best_ssim=${(firstFrame.ssim ?? 0).toFixed(4)} at ${firstFrame.sampleTimeSeconds ?? 0}s` +
+          `${samples ? `; samples=${samples}` : ''})`,
+      );
+    }
+  }
+  return {
+    ok: errors.length === 0,
+    errors,
+    ...(audio ? { audio } : {}),
+    ...(firstFrame ? { firstFrame } : {}),
+  };
+}
+
+export function applyConfiguredLoras(
+  workflow: LtxWfNodes,
+  cfg: Pick<LtxDirectorConfig, 'loras'>,
+  log?: (message: string) => void,
+): boolean {
+  if (!Array.isArray(cfg.loras)) return false;
+  rebuildLoraChain(workflow, cfg.loras);
+  log?.(
+    cfg.loras.length > 0
+      ? `comfy.ltx_director: loras → ${cfg.loras.map((l) => `${l.name}@${l.strength ?? 0.8}`).join(', ')}`
+      : 'comfy.ltx_director: loras → none',
+  );
+  return true;
+}
+
+export function buildLtxTimelineData(opts: {
+  shots: ShotInput[];
+  uploadedNames: string[];
+  imageDataUris?: Array<string | undefined>;
+  segmentStarts: number[];
+  audioSegments?: unknown[];
+  localPrompts?: string[];
+  guideStrength: number;
+  lipSync?: boolean;
+}): { segments: Array<Record<string, unknown>>; audioSegments: unknown[] } {
+  const audioSegments = opts.audioSegments ?? [];
+  return {
+    segments: opts.shots.map((_, i) => {
+      const dataUri = opts.imageDataUris?.[i];
+      return {
+        type: 'image',
+        imageFile: dataUri ? '' : opts.uploadedNames[i]!,
+        ...(dataUri ? { imageB64: dataUri } : {}),
+        start: opts.segmentStarts[i]!,
+        strength: opts.guideStrength,
+        ...(opts.lipSync ? { prompt: `${opts.localPrompts?.[i] ?? ''}${LIP_SYNC_SUFFIX}` } : {}),
+      };
+    }),
+    audioSegments,
+  };
+}
+
+function redactTimelineData(timelineData: { segments: Array<Record<string, unknown>>; audioSegments: unknown[] }) {
+  return {
+    ...timelineData,
+    segments: timelineData.segments.map((segment) => ({
+      ...segment,
+      ...(typeof segment['imageB64'] === 'string'
+        ? { imageB64: `<embedded:${(segment['imageB64'] as string).length} chars>` }
+        : {}),
+    })),
+  };
 }
 
 function asStringMap(value: unknown): Record<string, string> | undefined {
@@ -435,26 +761,30 @@ export function resolveLtxDirectorConfigFromInputs(
     }
     const fps = cfg.fps ?? 24;
     let duration = cfg.duration ?? 5;
-    if (cfg.audioInput) {
-      const aVal = ctx.inputs[cfg.audioInput];
-      const aPath = typeof aVal === 'string' ? aVal : undefined;
-      if (aPath && existsSync(aPath)) {
+    const aPath = resolveAudioInputPath(ctx, cfg);
+    if (aPath) {
         const d = mediaDurationSeconds(aPath);
         if (d && d > 0) {
           // Cap so totalFrames stays under the LTX 1000-frame audio-latent ceiling.
           const maxSec = Math.floor((1000 - 16) / fps);
           duration = Math.min(Math.max(d, 2), maxSec);
         }
-      }
     }
     // Per-item motion directive (if wired) + globalPrompt as a shared style suffix.
     const motionVal = cfg.promptInput ? ctx.inputs[cfg.promptInput] : undefined;
     const motionPrompt = typeof motionVal === 'string' && motionVal.trim().length > 0 ? motionVal.trim() : undefined;
+    const beatContext = motionPrompt ? {} : readBeatContextFromScenePlan(ctx);
     const prompt =
-      [motionPrompt, cfg.globalPrompt].filter(Boolean).join(' ') ||
+      [motionPrompt ?? beatContext.prompt, cfg.globalPrompt].filter(Boolean).join(' ') ||
       'Subtle, elegant motion: a slow cinematic push-in with gentle parallax and a soft light shimmer; the composition stays crisp and readable.';
-    const deps: ResolvedLtxDirectorConfig['dependencies'] = [{ nodeId: cfg.imageInput, role: 'input' }];
+    const deps: ResolvedLtxDirectorConfig['dependencies'] = [
+      { nodeId: cfg.imageInput, ...(ctx.itemId ? { itemId: ctx.itemId } : {}), role: 'input' },
+    ];
+    if (aPath && cfg.audioInput) {
+      deps.push({ nodeId: cfg.audioInput, ...(ctx.itemId ? { itemId: ctx.itemId } : {}), role: 'input' });
+    }
     if (motionPrompt && cfg.promptInput) deps.push({ nodeId: cfg.promptInput, role: 'input' });
+    if (beatContext.dependency) deps.push(beatContext.dependency);
     return {
       ok: true,
       cfg: {
@@ -579,19 +909,6 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   const resolvedCfg = resolveLtxDirectorConfigFromInputs(ctx, rawCfg);
   if (!resolvedCfg.ok) return { ok: false, error: resolvedCfg.error };
   const cfg = resolvedCfg.cfg;
-
-  // Resume short-circuit: if the chunk's output mp4 already exists on
-  // disk, skip the (expensive) Comfy call and return success with the
-  // existing path. This lets a re-run after a Comfy crash pick up from
-  // where it left off without re-rendering completed chunks. Not a
-  // content-addressed cache (no upstream-change detection) — just an
-  // "output exists → trust it" pragmatic skip. Override by deleting the
-  // mp4 file or by setting DAG_BUNDLE_FORCE_RERENDER=1.
-  const outputAbs = join(ctx.projectDir, cfg.outputPath);
-  if (existsSync(outputAbs) && !process.env['DAG_BUNDLE_FORCE_RERENDER']) {
-    ctx.log(`comfy.ltx_director: ${cfg.outputPath} already exists — skipping render (set DAG_BUNDLE_FORCE_RERENDER=1 to force)`);
-    return { ok: true, outputPath: cfg.outputPath, metadata: { skipped: true, reason: 'output_exists' } };
-  }
   if (cfg.shots.length !== cfg.firstFrames.length) {
     return { ok: false, error: `comfy.ltx_director: shots (${cfg.shots.length}) must equal firstFrames (${cfg.firstFrames.length})` };
   }
@@ -606,6 +923,31 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   // Aligning here also matches the target we normalize first-frames to below.
   const width = snapToMultiple(cfg.width ?? 854, 32);
   const height = snapToMultiple(cfg.height ?? 480, 32);
+  const outputAbs = join(ctx.projectDir, cfg.outputPath);
+  const sourceAudioPath = resolveAudioInputPath(ctx, cfg);
+  const validationSourceImage = cfg.firstFrames.length > 0 ? cfg.firstFrames[0] : undefined;
+
+  // Resume short-circuit: if the chunk's output mp4 already exists on disk,
+  // skip the expensive Comfy call only when the existing artifact passes the
+  // same audio/anchor validation we apply to fresh cloud output.
+  if (existsSync(outputAbs) && !process.env['DAG_BUNDLE_FORCE_RERENDER']) {
+    const existing = validateMotionOutput({
+      videoPath: outputAbs,
+      ...(sourceAudioPath ? { audioPath: sourceAudioPath } : {}),
+      ...(validationSourceImage ? { sourceImagePath: validationSourceImage } : {}),
+      width,
+      height,
+    });
+    if (existing.ok) {
+      ctx.log(`comfy.ltx_director: ${cfg.outputPath} already exists and passed validation — skipping render (set DAG_BUNDLE_FORCE_RERENDER=1 to force)`);
+      return {
+        ok: true,
+        outputPath: cfg.outputPath,
+        metadata: { skipped: true, reason: 'output_exists', validation: existing },
+      };
+    }
+    ctx.log(`comfy.ltx_director: ${cfg.outputPath} exists but failed validation (${existing.errors.join('; ')}) — rerendering`);
+  }
 
   const segmentFrames = alignToLTX(cfg.shots.map((s) => s.duration * fps));
   const totalFrames = segmentFrames.reduce((a, b) => a + b, 0);
@@ -683,14 +1025,17 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   if (workflowPath !== cfg.workflowPath) {
     ctx.log(`comfy.ltx_director: cloud endpoint → using ${workflowPath}`);
   }
+  const workflowId = rawCfg.workflowId;
 
   const client = new ComfyUIClient({
     outputDir,
     ...(endpointBaseUrl ? { baseUrl: endpointBaseUrl } : {}),
   });
+  const embedTimelineImages = endpointBaseUrl ? isCloudEndpoint(endpointBaseUrl) : false;
 
   ctx.log(`comfy.ltx_director: uploading ${cfg.firstFrames.length} first-frame images...`);
   const uploadedNames: string[] = [];
+  const embeddedImageDataUris: Array<string | undefined> = [];
   for (let i = 0; i < cfg.firstFrames.length; i++) {
     // Normalize each anchor to the exact target W×H (cover + center-crop) so
     // all segments share one aspect ratio. Mixed-aspect first-frames (e.g. a
@@ -703,21 +1048,23 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     );
     ctx.log(`  shot ${cfg.shots[i]!.shotNumber}: ${basename(cfg.firstFrames[i]!)} → ${u.name}`);
     uploadedNames.push(u.name);
+    embeddedImageDataUris.push(embedTimelineImages ? imageDataUri(uploadPath) : undefined);
+  }
+  if (embedTimelineImages) {
+    ctx.log('comfy.ltx_director: embedding timeline guide images as base64 for Comfy Cloud LTXDirector');
   }
 
   // ── OPT-IN custom audio (audio-driven / lip-sync). Absent → legacy path. ──
   const audioSegments: unknown[] = [];
   let useCustomAudio = false;
   if (cfg.audioInput) {
-    const audioVal = ctx.inputs[cfg.audioInput];
-    const audioPath = typeof audioVal === 'string' ? audioVal : undefined;
-    if (audioPath && existsSync(audioPath)) {
-      const ua = await retryTransient(() => client.uploadImage(audioPath, 'input', true), {
+    if (sourceAudioPath && cfg.lipSync === true) {
+      const ua = await retryTransient(() => client.uploadImage(sourceAudioPath, 'input', true), {
         signal: ctx.signal,
         log: ctx.log,
         label: 'comfy.ltx_director upload audio',
       });
-      ctx.log(`comfy.ltx_director: custom audio ${basename(audioPath)} → ${ua.name} (use_custom_audio=true)`);
+      ctx.log(`comfy.ltx_director: custom audio ${basename(sourceAudioPath)} → ${ua.name} (use_custom_audio=true)`);
       audioSegments.push({
         id: 'seg_audio_0',
         type: 'audio',
@@ -726,10 +1073,14 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
         trimStart: 0,
         audioDurationFrames: totalFrames,
         audioFile: ua.name,
-        fileName: basename(audioPath),
+        fileName: basename(sourceAudioPath),
         waveformPeaks: [],
       });
       useCustomAudio = true;
+    } else if (sourceAudioPath) {
+      ctx.log(
+        `comfy.ltx_director: audioInput '${cfg.audioInput}' will be muxed after render (lipSync=false, use_custom_audio=false)`,
+      );
     } else {
       ctx.log(
         `comfy.ltx_director: audioInput '${cfg.audioInput}' set but no audio path resolved — using generated audio`,
@@ -737,16 +1088,17 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     }
   }
 
-  const timelineData = {
-    segments: cfg.shots.map((_, i) => ({
-      type: 'image',
-      imageFile: uploadedNames[i]!,
-      start: segmentStarts[i]!,
-      // lip-sync: carry the (augmented) prompt INSIDE the segment too.
-      ...(cfg.lipSync ? { prompt: localPrompts[i]! + LIP_SYNC_SUFFIX } : {}),
-    })),
+  const guideStrength = typeof cfg.guideStrength === 'number' ? cfg.guideStrength : 1.0;
+  const timelineData = buildLtxTimelineData({
+    shots: cfg.shots,
+    uploadedNames,
+    ...(embedTimelineImages ? { imageDataUris: embeddedImageDataUris } : {}),
+    segmentStarts,
     audioSegments,
-  };
+    localPrompts,
+    guideStrength,
+    lipSync: cfg.lipSync,
+  });
 
   const baseWorkflow = JSON.parse(readFileSync(workflowPath, 'utf-8')) as Record<
     string,
@@ -769,7 +1121,6 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   director.inputs['segment_lengths'] = segmentFrames.join(', ');
   director.inputs['frame_rate'] = fps;
   director.inputs['epsilon'] = 0.001;
-  const guideStrength = typeof cfg.guideStrength === 'number' ? cfg.guideStrength : 1.0;
   director.inputs['guide_strength'] = cfg.shots.map(() => String(guideStrength)).join(', ');
   director.inputs['use_custom_audio'] = useCustomAudio;
   director.inputs['custom_width'] = width;
@@ -778,13 +1129,9 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   director.inputs['divisible_by'] = 32;
   director.inputs['img_compression'] = 18;
 
-  // ── OPT-IN lora chain override (independent of audio). Absent → untouched. ──
-  if (cfg.loras && cfg.loras.length > 0) {
-    rebuildLoraChain(workflow as LtxWfNodes, cfg.loras);
-    ctx.log(
-      `comfy.ltx_director: loras → ${cfg.loras.map((l) => `${l.name}@${l.strength ?? 0.8}`).join(', ')}`,
-    );
-  }
+  // ── OPT-IN lora chain override (independent of audio). Absent → untouched.
+  // An explicit empty list means "remove the workflow's baked loras".
+  const loraOverrideApplied = applyConfiguredLoras(workflow as LtxWfNodes, cfg, ctx.log);
 
   // Apply per-endpoint workflow aliases (model-file rename +
   // class_type swap for GGUF / quant variants). Runs AFTER the lora
@@ -849,7 +1196,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
         if (p.percentage !== undefined && p.message) {
           ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
         }
-      }),
+      }, { ...(workflowId ? { workflowId } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) }),
     { signal: ctx.signal, log: ctx.log, label: 'comfy.ltx_director queue' },
   );
   ctx.log(`  complete in ${Math.floor((Date.now() - startTime) / 1000)}s (prompt_id=${promptId})`);
@@ -873,6 +1220,32 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
     downloadTargetName,
   );
 
+  let remuxVolume: AudioVolumeProbe | undefined;
+  if (sourceAudioPath) {
+    const mux = muxOriginalAudio(downloaded, sourceAudioPath);
+    if (!mux.ok) {
+      return { ok: false, error: `comfy.ltx_director: failed to mux original audio — ${mux.error}` };
+    }
+    remuxVolume = mux.volume;
+    ctx.log(
+      `comfy.ltx_director: muxed original audio ${basename(sourceAudioPath)} into ${basename(downloaded)} (max_volume=${remuxVolume.maxVolumeDb ?? 'unknown'} dB)`,
+    );
+  }
+
+  const outputValidation = validateMotionOutput({
+    videoPath: downloaded,
+    ...(sourceAudioPath ? { audioPath: sourceAudioPath } : {}),
+    ...(validationSourceImage ? { sourceImagePath: validationSourceImage } : {}),
+    width,
+    height,
+  });
+  if (!outputValidation.ok) {
+    return {
+      ok: false,
+      error: `comfy.ltx_director: rendered output failed validation — ${outputValidation.errors.join('; ')}`,
+    };
+  }
+
   // Write meta sidecar next to the video.
   const metaPath = outputAbs.replace(/\.[^.]+$/, '.meta.json');
   writeFileSync(
@@ -889,8 +1262,19 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
         fps,
         seed,
         promptId,
-        timelineData,
+        timelineData: redactTimelineData(timelineData),
         uploadedFrames: uploadedNames,
+        sourceFrames: cfg.firstFrames,
+        sourceAudio: sourceAudioPath,
+        loraOverrideApplied,
+        loras: cfg.loras ?? null,
+        remux: sourceAudioPath
+          ? {
+              sourceAudio: sourceAudioPath,
+              volume: remuxVolume,
+            }
+          : null,
+        validation: outputValidation,
         shots: cfg.shots.map((s) => ({ shotNumber: s.shotNumber, duration: s.duration })),
       },
       null,
@@ -907,6 +1291,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
       seed,
       totalFrames,
       fps,
+      validation: outputValidation,
       ...(cfg.dependencies ? { dependencies: cfg.dependencies } : {}),
     },
   };
@@ -925,6 +1310,7 @@ function describe(): RunnerDescription {
       properties: {
         workflowPath: { type: 'string', description: 'Path to LTX Director Comfy workflow JSON' },
         workflowPathCloud: { type: 'string', description: 'Cloud variant workflow (used when endpoint resolves to Comfy Cloud). Omit to use workflowPath everywhere.' },
+        workflowId: { type: 'string', description: 'Optional workflow reference forwarded to Comfy extra_data.' },
         shots: { type: 'array', items: { type: 'object' } },
         firstFrames: { type: 'array', items: { type: 'string' } },
         globalPrompt: { type: 'string' },

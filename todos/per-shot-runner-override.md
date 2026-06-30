@@ -231,7 +231,7 @@ more, no reason to keep an inferior option in the menu).
 | Walker reads `runnerOverride` from walkState (+ tests for failure modes 1, 3, 4, 5, 6, 7) | 0.5 |
 | `dhee_invalidate` accepts `runner` param (+ validation against alternates) | 0.25 |
 | Bundle schema `alternates` field (schema.ts + walker lookup) | 0.5 |
-| `nano-banana.gen-3` runner (OpenRouter HTTP, image-multipart upload, image-token billing-aware) | 1.0 |
+| `nano-banana.gen-3` runner (OpenRouter HTTP, image-multipart upload, image-token usage-aware) | 1.0 |
 | `nano-banana.gen-p` runner (mostly forks NB3) | 0.25 |
 | Agent prompt: data-driven alternates menu + dhee_invalidate docstring update | 0.25 |
 | End-to-end test: `dhee_invalidate runner=nbp.gen` then `dhee_run_to` → image re-renders via NBP | 0.5 |

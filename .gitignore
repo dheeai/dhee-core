@@ -35,6 +35,9 @@ pnpm-debug.log*
 # Misc
 *.tsbuildinfo
 
+# Local bundles (per-user / generated; not for git)
+bundles/
+
 # Subprojects
 prompt-optimizer/
 

@@ -7,8 +7,9 @@
  * It does the full setup so the agent enters a ready project:
  *
  *   1. Resolve the bundle manifest by id.
- *   2. For each `kind: 'file'` input: write the caller-supplied value
- *      to `<projectDir>/<decl.path>` (parent dir auto-created).
+ *   2. For each `kind: 'file'` input: write multiline text inputs or copy
+ *      selected binary files to `<projectDir>/<decl.path>` (parent dir
+ *      auto-created).
  *   3. For each `kind: 'project'` input: set the value (or
  *      `decl.default`) at `decl.field` on the project object.
  *   4. Required inputs without a value → return a structured error
@@ -86,6 +87,12 @@ export interface InitializeProjectParams {
 export type InitializeProjectResult =
   | { ok: true; projectDir: string }
   | { ok: false; error: string };
+
+type FileInputSource = {
+  sourcePath?: unknown;
+  path?: unknown;
+};
+type FileBundleInputDecl = Extract<BundleInputDecl, { kind: 'file' }>;
 
 export function initializeProject(params: InitializeProjectParams): InitializeProjectResult {
   const {
@@ -408,6 +415,29 @@ function setDeep(target: Record<string, unknown>, dottedField: string, value: un
   node[parts[parts.length - 1]!] = value;
 }
 
+function fileSourcePath(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim().length > 0) return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const file = value as FileInputSource;
+  if (typeof file.sourcePath === 'string' && file.sourcePath.trim().length > 0) {
+    return file.sourcePath;
+  }
+  if (typeof file.path === 'string' && file.path.trim().length > 0) {
+    return file.path;
+  }
+  return null;
+}
+
+function stringifyTextFileInput(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+
+function isTextFileInputDecl(decl: FileBundleInputDecl): boolean {
+  if (decl.multiline) return true;
+  const ext = decl.path.split('.').pop()?.toLowerCase() ?? '';
+  return ['txt', 'md', 'markdown', 'json', 'csv', 'tsv', 'yaml', 'yml'].includes(ext);
+}
+
 function applyBundleInputs(
   projectDir: string,
   project: Record<string, unknown>,
@@ -425,10 +455,21 @@ function applyBundleInputs(
         }
         continue;
       }
-      const content = typeof provided === 'string' ? provided : JSON.stringify(provided, null, 2);
       const absPath = join(projectDir, decl.path);
       mkdirSync(dirname(absPath), { recursive: true });
-      writeFileSync(absPath, content, 'utf8');
+      if (isTextFileInputDecl(decl)) {
+        writeFileSync(absPath, stringifyTextFileInput(provided), 'utf8');
+        continue;
+      }
+      const sourcePath = fileSourcePath(provided);
+      if (!sourcePath || !existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+        return {
+          error:
+            `Input '${decl.id}' expects a selected file for ${decl.path}. ` +
+            `Received text instead of a readable file path.`,
+        };
+      }
+      copyFileSync(sourcePath, absPath);
     } else {
       const resolved =
         provided !== undefined

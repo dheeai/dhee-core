@@ -46,21 +46,34 @@ describe('ltx23_director_cloud.json (issue #173)', () => {
 
   it('keeps the LTXDirector node and the runner-driven node ids intact', () => {
     expect(cloud['46']?.class_type).toBe('LTXDirector');
-    for (const id of ['28', '30', '46']) {
+    for (const id of ['28', '30', '46', '80', '81', '90']) {
       expect(cloud[id], `node ${id} missing`).toBeTruthy();
     }
     expect(cloud['28']?.class_type).toBe('RandomNoise');
     expect(cloud['30']?.class_type).toBe('SaveVideo');
+    expect(cloud['80']?.class_type).toBe('LoraLoaderModelOnly');
+    expect(cloud['80']?.inputs['lora_name']).toBe(
+      'LiconStudio__Ltx23-VBVR-lora-I2V__Ltx2.3-Licon-VBVR-I2V-96000-R32.safetensors',
+    );
+    expect(cloud['80']?.inputs['model']).toEqual(['77', 0]);
+    expect(cloud['81']?.class_type).toBe('LoraLoaderModelOnly');
+    expect(cloud['81']?.inputs['model']).toEqual(['80', 0]);
+    expect(cloud['90']?.class_type).toBe('CLIPTextEncode');
+    expect(cloud['90']?.inputs['clip']).toEqual(['84', 0]);
+    expect(cloud['5']?.inputs['negative']).toEqual(['90', 0]);
   });
 
-  it('differs from the local graph ONLY at node 84 clip_name1', () => {
+  it('differs from the local graph only where cloud model filenames differ', () => {
     const diffs: string[] = [];
     for (const [k, v] of cloudRefs) {
       const lv = localRefs.get(k);
       if (lv !== v) diffs.push(`${k}: cloud=${v} local=${lv}`);
     }
-    // Exactly one model ref differs — the gemma encoder swap.
+    // Cloud uses the namespaced Comfy Cloud copy of the VBVR I2V LoRA,
+    // plus the cloud Gemma encoder filename. The local bundle graph is
+    // intentionally left unchanged.
     expect(diffs).toEqual([
+      '80.lora_name: cloud=LiconStudio__Ltx23-VBVR-lora-I2V__Ltx2.3-Licon-VBVR-I2V-96000-R32.safetensors local=undefined',
       '84.clip_name1: cloud=gemma_3_12B_it_fp8_scaled.safetensors local=gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors',
     ]);
   });

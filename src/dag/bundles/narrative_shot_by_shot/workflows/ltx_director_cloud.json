@@ -30,7 +30,7 @@
         1
       ],
       "negative": [
-        "26",
+        "90",
         0
       ]
     },
@@ -505,6 +505,34 @@
       "title": "Load Diffusion Model (LTX 2.3 22B distilled, transformer-only fp8 scaled)"
     }
   },
+  "81": {
+    "inputs": {
+      "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
+      "strength_model": 0.8,
+      "model": [
+        "80",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA: OmniNFT-RL (strength 0.8)"
+    }
+  },
+  "80": {
+    "inputs": {
+      "lora_name": "LiconStudio__Ltx23-VBVR-lora-I2V__Ltx2.3-Licon-VBVR-I2V-96000-R32.safetensors",
+      "strength_model": 1,
+      "model": [
+        "77",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA: VBVR I2V (Cloud, strength 1.0)"
+    }
+  },
   "84": {
     "inputs": {
       "clip_name1": "gemma_3_12B_it_fp8_scaled.safetensors",
@@ -517,18 +545,17 @@
       "title": "DualCLIPLoader (Gemma 3 12B fp8 scaled + LTX text projection) - cloud"
     }
   },
-  "81": {
+  "90": {
     "inputs": {
-      "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
-      "strength_model": 0.8,
-      "model": [
-        "77",
+      "text": "",
+      "clip": [
+        "84",
         0
       ]
     },
-    "class_type": "LoraLoaderModelOnly",
+    "class_type": "CLIPTextEncode",
     "_meta": {
-      "title": "LoRA: OmniNFT-RL (strength 0.8)"
+      "title": "Negative Prompt"
     }
   }
 }

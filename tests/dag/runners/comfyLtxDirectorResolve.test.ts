@@ -19,11 +19,11 @@ afterEach(() => {
   rmSync(projectDir, { recursive: true, force: true });
 });
 
-function makeCtx(inputs: Record<string, unknown>): RunnerContext {
+function makeCtx(inputs: Record<string, unknown>, itemId = 'scene_1_chunk_1'): RunnerContext {
   return {
     projectDir,
     bundleDir: join(projectDir, 'bundle'),
-    itemId: 'scene_1_chunk_1',
+    itemId,
     node: {
       id: 'scene_clip',
       kind: 'collection',
@@ -42,6 +42,66 @@ function makeCtx(inputs: Record<string, unknown>): RunnerContext {
 }
 
 describe('comfy.ltx_director input resolution', () => {
+  it('uses scene_plan beat context and matching audio/image dependencies in single-still mode', () => {
+    const imagePath = join(projectDir, 'assets/images/beats/beat_suppression.png');
+    const audioPath = join(projectDir, 'assets/audio/beats/beat_suppression.wav');
+    mkdirSync(join(projectDir, 'assets/images/beats'), { recursive: true });
+    mkdirSync(join(projectDir, 'assets/audio/beats'), { recursive: true });
+    writeFileSync(imagePath, '');
+    writeFileSync(audioPath, '');
+
+    const cfg: LtxDirectorConfig = {
+      workflowPath: 'workflows/ltx_director_local.json',
+      outputPath: 'assets/videos/motion/beat_suppression.mp4',
+      imageInput: 'beat_image',
+      audioInput: 'beat_audio',
+      globalPrompt: 'No text, no new characters.',
+      fps: 30,
+    };
+    const result = resolveLtxDirectorConfigFromInputs(
+      makeCtx(
+        {
+          beat_image: imagePath,
+          beat_audio: audioPath,
+          scene_plan: {
+            beats: [
+              {
+                id: 'beat_suppression',
+                vo: 'The British responded with extreme force: over 60,000 arrested, 7,000 killed.',
+                image_brief: 'Soldiers with rifles silhouetted against flames, shattered windows',
+                layout: 'full',
+              },
+            ],
+          },
+        },
+        'beat_suppression',
+      ),
+      cfg,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.cfg.globalPrompt).toContain('The British responded with extreme force');
+    expect(result.cfg.globalPrompt).toContain('Soldiers with rifles silhouetted against flames');
+    expect(result.cfg.globalPrompt).toContain('No text, no new characters.');
+    expect(result.cfg.shots[0]?.description).toBe(result.cfg.globalPrompt);
+    expect(result.cfg.dependencies).toContainEqual({
+      nodeId: 'beat_image',
+      itemId: 'beat_suppression',
+      role: 'input',
+    });
+    expect(result.cfg.dependencies).toContainEqual({
+      nodeId: 'beat_audio',
+      itemId: 'beat_suppression',
+      role: 'input',
+    });
+    expect(result.cfg.dependencies).toContainEqual({
+      nodeId: 'scene_plan',
+      itemId: 'beat_suppression',
+      role: 'context',
+    });
+  });
+
   it('uses shot_motion_directive JSON as the local prompt source', () => {
     const first1 = join(projectDir, 'assets/images/scene_1_shot_1.png');
     const first2 = join(projectDir, 'assets/images/scene_1_shot_2.png');

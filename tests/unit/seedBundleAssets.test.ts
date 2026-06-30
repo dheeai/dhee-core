@@ -89,4 +89,76 @@ describe('initializeProject seeds bundle assets, user inputs override', () => {
     // the user-provided story overrides the shipped default
     expect(readFileSync(join(projectDir, 'inputs', 'story.md'), 'utf8')).toBe('USER OVERRODE THE STORY');
   });
+
+  it('copies provided binary file inputs instead of writing their path as text', () => {
+    const bundlesRoot = join(tmp, 'bundles');
+    const bundleDir = join(bundlesRoot, 'binary_input_bundle');
+    mkdirSync(bundleDir, { recursive: true });
+    writeFileSync(
+      join(bundleDir, 'bundle.json'),
+      JSON.stringify({
+        id: 'binary_input_bundle',
+        version: '1.0.0',
+        goal: 'final',
+        nodes: [],
+        inputs: [
+          { id: 'product_image', kind: 'file', path: 'inputs/product.png', required: true },
+          { id: 'brief', kind: 'file', path: 'inputs/brief.md', required: true },
+        ],
+      }),
+      'utf8',
+    );
+    process.env['DHEE_USER_BUNDLES_DIR'] = bundlesRoot;
+    const source = join(tmp, 'picked-product.png');
+    const pickedBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xaa, 0xbb, 0xcc]);
+    writeFileSync(source, pickedBytes);
+
+    const projectDir = join(tmp, 'binary-project');
+    mkdirSync(projectDir, { recursive: true });
+    const r = initializeProject({
+      projectDir,
+      name: 'Binary Test',
+      bundleId: 'binary_input_bundle',
+      inputs: {
+        product_image: { sourcePath: source, name: 'picked-product.png' },
+        brief: 'text brief',
+      },
+    });
+
+    expect(r.ok).toBe(true);
+    expect(readFileSync(join(projectDir, 'inputs', 'product.png'))).toEqual(pickedBytes);
+    expect(readFileSync(join(projectDir, 'inputs', 'brief.md'), 'utf8')).toBe('text brief');
+  });
+
+  it('rejects plain text for binary file inputs', () => {
+    const bundlesRoot = join(tmp, 'bundles');
+    const bundleDir = join(bundlesRoot, 'reject_text_image_bundle');
+    mkdirSync(bundleDir, { recursive: true });
+    writeFileSync(
+      join(bundleDir, 'bundle.json'),
+      JSON.stringify({
+        id: 'reject_text_image_bundle',
+        version: '1.0.0',
+        goal: 'final',
+        nodes: [],
+        inputs: [{ id: 'product_image', kind: 'file', path: 'inputs/product.png', required: true }],
+      }),
+      'utf8',
+    );
+    process.env['DHEE_USER_BUNDLES_DIR'] = bundlesRoot;
+    const projectDir = join(tmp, 'reject-project');
+    mkdirSync(projectDir, { recursive: true });
+
+    const r = initializeProject({
+      projectDir,
+      name: 'Reject Test',
+      bundleId: 'reject_text_image_bundle',
+      inputs: { product_image: 'this is not image bytes' },
+    });
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/expects a selected file/i);
+    expect(existsSync(join(projectDir, 'inputs', 'product.png'))).toBe(false);
+    expect(existsSync(join(projectDir, 'project.json'))).toBe(false);
+  });
 });

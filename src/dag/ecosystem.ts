@@ -19,8 +19,10 @@
  * so it runs once per process.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { REPO_ROOT } from '../agent/pi/paths.js';
 import { RunnerRegistry, getGlobalRegistry, type RunnerManifest } from './runners/registry.js';
 import type { Runner } from './schema.js';
 
@@ -65,10 +67,21 @@ export function getNodeModulesRoots(): string[] {
   const env = process.env['DHEE_NODE_MODULES_DIRS']?.trim();
   if (env) return env.split(/[:,]/).map((s) => s.trim()).filter(Boolean);
   const roots: string[] = [];
+  const addRoot = (root: string): void => {
+    if (root && existsSync(root) && !roots.includes(root)) roots.push(root);
+  };
+
+  // Dev monorepo source packages should win over the installed studio
+  // copies, so a local fix in ../dhee-packages is picked up by headless
+  // CLI/dev runs without needing to repack/reinstall every runner.
+  addRoot(resolve(REPO_ROOT, '..', 'dhee-packages'));
+  // Packaged/desktop-compatible external runner install location.
+  addRoot(join(homedir(), 'dhee-studios', 'runners', 'node_modules'));
+
   let dir = process.cwd();
   for (;;) {
     const nm = join(dir, 'node_modules');
-    if (existsSync(nm)) roots.push(nm);
+    addRoot(nm);
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

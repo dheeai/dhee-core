@@ -414,6 +414,7 @@ function materializeCollection(
   projectAspect?: string,
   projectResolution?: number,
   gpuVramBytes?: number | null,
+  materializedCollectionIds?: ReadonlySet<string>,
 ): NodeInstance[] {
   // Resolution- AND GPU-aware chunk cap. `chunkBy.limit` is the model's
   // audio-latent frame cap (resolution-independent); `maxFramePixels`
@@ -484,7 +485,15 @@ function materializeCollection(
   // here for clarity.
   if (node.itemSource) {
     const upstream = upstreamInstances.get(node.itemSource);
-    if (!upstream || upstream.length === 0) {
+    if (!upstream) {
+      throw new Error(
+        `materializeCollection: itemSource '${node.itemSource}' has no instances (upstream not materialized yet)`,
+      );
+    }
+    if (upstream.length === 0) {
+      if (materializedCollectionIds?.has(node.itemSource) && collectionAllowsEmptyItems(node)) {
+        return [];
+      }
       throw new Error(
         `materializeCollection: itemSource '${node.itemSource}' has no instances (upstream not materialized yet)`,
       );
@@ -537,6 +546,7 @@ function materializeCollection(
         }
       }
       if (items.length === 0) {
+        if (collectionAllowsEmptyItems(node)) return [];
         throw new Error(
           `materializeCollection: upstream '${node.itemSource}' output ${upstreamPath} has no items to materialize`,
         );
@@ -660,6 +670,10 @@ function materializeCollection(
 
   // No itemSource: treat as a stage node with one instance.
   return [{ def: node, status: 'pending' }];
+}
+
+function collectionAllowsEmptyItems(node: NodeDef): boolean {
+  return (node as NodeDef & { allowEmptyItems?: boolean }).allowEmptyItems === true;
 }
 
 /**
@@ -1236,21 +1250,22 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   // upstream will be completed by the time we reach this node thanks
   // to topo order.
   const instancesById = new Map<string, NodeInstance[]>();
+  const materializedCollectionIds = new Set<string>();
   for (const node of ordered) {
     if (node.kind === 'collection') {
       if (node.itemSource === 'scene' && cli.sceneIds && cli.sceneIds.length > 0) {
-        instancesById.set(
-          node.id,
-          materializeCollection(
-            node,
-            opts.projectDir,
-            cli,
-            instancesById,
-            typeof bundleInputs['aspect'] === 'string' ? bundleInputs['aspect'] : undefined,
-            typeof bundleInputs['resolution'] === 'number' ? bundleInputs['resolution'] : undefined,
-            gpuVramBytes,
-          ),
+        const materialized = materializeCollection(
+          node,
+          opts.projectDir,
+          cli,
+          instancesById,
+          typeof bundleInputs['aspect'] === 'string' ? bundleInputs['aspect'] : undefined,
+          typeof bundleInputs['resolution'] === 'number' ? bundleInputs['resolution'] : undefined,
+          gpuVramBytes,
+          materializedCollectionIds,
         );
+        instancesById.set(node.id, materialized);
+        materializedCollectionIds.add(node.id);
       } else {
         // Lazy: empty for now; materialized when we reach the node.
         instancesById.set(node.id, []);
@@ -1318,7 +1333,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     // order, every input.from upstream has already run; their output
     // files exist on disk and their instance metadata is in
     // instancesById. materializeCollection reads from these.
-    if (node.kind === 'collection' && (instancesById.get(node.id) ?? []).length === 0) {
+    if (node.kind === 'collection' && !materializedCollectionIds.has(node.id)) {
       try {
         const materialized = materializeCollection(
           node,
@@ -1328,8 +1343,10 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           typeof bundleInputs['aspect'] === 'string' ? bundleInputs['aspect'] : undefined,
           typeof bundleInputs['resolution'] === 'number' ? bundleInputs['resolution'] : undefined,
           gpuVramBytes,
+          materializedCollectionIds,
         );
         instancesById.set(node.id, materialized);
+        materializedCollectionIds.add(node.id);
       } catch (e) {
         const err = `${node.id}: materializeCollection failed: ${(e as Error).message}`;
         log(`✗ ${err}`);
@@ -1550,6 +1567,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       for (const inp of node.inputs) {
         const upInsts = instancesById.get(inp.from) ?? [];
         if (upInsts.length === 0) {
+          if (inp.scope === 'all') resolvedInputs[inp.from] = {};
           // For previousN: still expose an empty array so the
           // downstream template can reference {{inp.from}} without
           // failing — shot 1 of each scene legitimately has no priors.

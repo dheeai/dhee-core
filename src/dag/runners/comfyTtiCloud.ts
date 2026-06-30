@@ -19,7 +19,7 @@
  *
  * The env defaults are idempotent + non-clobbering: an explicit operator
  * config always wins; only missing values are filled. Same workflow, manifest,
- * CAS cache, and billing workflowId ('zimage_cloud') as comfy.tti.
+ * and CAS cache as comfy.tti.
  */
 import { createComfyTtiRunner } from './comfyTti.js';
 import type { Runner } from '../schema.js';

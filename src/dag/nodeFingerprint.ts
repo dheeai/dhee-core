@@ -72,6 +72,9 @@ export function computeNodeDefFingerprint(node: NodeDef, bundleDir?: string): st
       outputPattern: node.outputs?.pattern ?? '',
       itemSource: node.itemSource ?? null,
       itemKey: node.itemKey ?? null,
+      ...((node as NodeDef & { allowEmptyItems?: boolean }).allowEmptyItems === true
+        ? { allowEmptyItems: true }
+        : {}),
     },
     config: {},
   });

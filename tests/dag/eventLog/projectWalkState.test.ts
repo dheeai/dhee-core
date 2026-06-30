@@ -92,6 +92,29 @@ describe('projectWalkState', () => {
     expect(w.nodes['a']?.error).toBe('boom');
   });
 
+  it('node.started and node.completed clear stale failure errors', () => {
+    const running = projectWalkState([
+      mkEvent(1, 'node.started', { nodeId: 'a' }),
+      mkEvent(2, 'node.failed', { nodeId: 'a', error: 'boom' }),
+      mkEvent(3, 'node.started', { nodeId: 'a' }),
+    ]);
+    expect(running.nodes['a']?.status).toBe('in_progress');
+    expect(running.nodes['a']?.error).toBeUndefined();
+
+    const completed = projectWalkState([
+      mkEvent(1, 'node.started', { nodeId: 'a' }),
+      mkEvent(2, 'node.failed', { nodeId: 'a', error: 'boom' }),
+      mkEvent(3, 'node.started', { nodeId: 'a' }),
+      mkEvent(4, 'node.completed', {
+        nodeId: 'a',
+        versionId: 'v1',
+        outputPath: 'out/a.md',
+      }),
+    ]);
+    expect(completed.nodes['a']?.status).toBe('completed');
+    expect(completed.nodes['a']?.error).toBeUndefined();
+  });
+
   it('node.invalidated removes the entry and tracks lastInvalidatedIds', () => {
     const w = projectWalkState([
       mkEvent(1, 'node.completed', {

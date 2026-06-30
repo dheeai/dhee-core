@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   alignToLTX,
+  buildLtxTimelineData,
   buildLocalPrompt,
   stripDialogueParaphrase,
   reformatDialogue,
@@ -97,5 +98,38 @@ describe('buildLocalPrompt', () => {
     const out = buildLocalPrompt({ ...base, description: 'An empty street.' });
     expect(out).toBe('An empty street.');
     expect(out).not.toContain('Audio:');
+  });
+});
+
+describe('buildLtxTimelineData', () => {
+  it('passes image guide strength into every timeline segment', () => {
+    const timeline = buildLtxTimelineData({
+      shots: [
+        { shotNumber: 1, duration: 2 },
+        { shotNumber: 2, duration: 3 },
+      ],
+      uploadedNames: ['beat_1.png', 'beat_2.png'],
+      segmentStarts: [0, 61],
+      guideStrength: 1.0,
+    });
+
+    expect(timeline.segments).toEqual([
+      { type: 'image', imageFile: 'beat_1.png', start: 0, strength: 1.0 },
+      { type: 'image', imageFile: 'beat_2.png', start: 61, strength: 1.0 },
+    ]);
+  });
+
+  it('embeds cloud guide images as imageB64 instead of relying on imageFile lookup', () => {
+    const timeline = buildLtxTimelineData({
+      shots: [{ shotNumber: 1, duration: 2 }],
+      uploadedNames: ['beat_1.png'],
+      imageDataUris: ['data:image/png;base64,abc123'],
+      segmentStarts: [0],
+      guideStrength: 1.0,
+    });
+
+    expect(timeline.segments).toEqual([
+      { type: 'image', imageFile: '', imageB64: 'data:image/png;base64,abc123', start: 0, strength: 1.0 },
+    ]);
   });
 });
