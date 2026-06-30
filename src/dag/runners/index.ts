@@ -104,11 +104,10 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: comfyFl2vRunner,
   },
-  // comfy.ltx_director is now provided by the external npm runner
-  // `dhee-runner-ltx-director` (LTX Director 2.0.2, with the CreateVideo audio
-  // slot-7 fix). The built-in registration was a leftover from the extraction
-  // and shadowed the npm runner (ecosystem skips a tool already in the registry),
-  // so it has been removed.
+  // comfy.ltx_director moved OUT of core into its own external runner package
+  // (dhee-runner-ltx-director) — discovered at startup like the other
+  // dhee-runner-* packages. Bundles declaring `comfy.ltx_director` resolve it
+  // from there. See the open-runner-ecosystem convention.
   {
     manifest: {
       tool: 'comfy.qwen_edit_chain',

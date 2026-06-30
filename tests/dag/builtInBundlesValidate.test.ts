@@ -18,6 +18,32 @@ const BUNDLE_IDS = [
 
 const BUNDLES_DIR = resolve(__dirname, '../../src/dag/bundles');
 
+// `comfy.ltx_director` now ships as an EXTERNAL runner package
+// (dhee-runner-ltx-director), discovered from the npm ecosystem at runtime
+// rather than registered as a built-in. Several narrative relay bundles still
+// declare it, so register a stub into the global registry here to reflect that
+// it is provided externally — keeping this structural check honest without
+// depending on the external package being installed in CI.
+{
+  const reg = getGlobalRegistry();
+  if (!reg.get('comfy.ltx_director')) {
+    reg.register(
+      { tool: 'comfy.ltx_director', version: '0.2.0', engineCompat: '>=0.1.0', credentials: [] },
+      {
+        describe: () => ({
+          id: 'comfy.ltx_director',
+          displayName: 'LTX Director (external stub)',
+          description: 'Provided by dhee-runner-ltx-director (external).',
+          capabilities: [],
+          modalities: { input: ['image', 'text'], output: ['video'] },
+          configSchema: {},
+        }),
+        run: async () => ({ ok: true as const, outputPath: '' }),
+      },
+    );
+  }
+}
+
 function loadBundle(id: string): DagBundle {
   return JSON.parse(readFileSync(join(BUNDLES_DIR, id, 'bundle.json'), 'utf-8')) as DagBundle;
 }

@@ -23,14 +23,14 @@
     "inputs": {
       "frame_rate": [
         "46",
-        6
+        5
       ],
       "positive": [
         "46",
         1
       ],
       "negative": [
-        "90",
+        "26",
         0
       ]
     },
@@ -182,26 +182,19 @@
     }
   },
   "15": {
+    "class_type": "VAEDecode",
     "inputs": {
-      "spatial_tiles": 4,
-      "spatial_overlap": 1,
-      "temporal_tile_length": 16,
-      "temporal_overlap": 1,
-      "last_frame_fix": false,
-      "working_device": "auto",
-      "working_dtype": "auto",
+      "samples": [
+        "14",
+        2
+      ],
       "vae": [
         "3",
         0
-      ],
-      "latents": [
-        "14",
-        2
       ]
     },
-    "class_type": "LTXVSpatioTemporalTiledVAEDecode",
     "_meta": {
-      "title": "LTXV Spatio Temporal Tiled VAE Decode"
+      "title": "VAE Decode (video) - ported from LTX Director Fixed V2"
     }
   },
   "16": {
@@ -224,7 +217,7 @@
     "inputs": {
       "fps": [
         "46",
-        6
+        5
       ],
       "images": [
         "15",
@@ -315,11 +308,7 @@
       "audio_vae": [
         "4",
         0
-      ],
-      "start_second": 0,
-      "end_second": 5,
-      "start_frame": 0,
-      "end_frame": 120
+      ]
     },
     "class_type": "LTXDirector",
     "_meta": {
@@ -516,30 +505,16 @@
       "title": "Load Diffusion Model (LTX 2.3 22B distilled, transformer-only fp8 scaled)"
     }
   },
-  "80": {
-    "inputs": {
-      "lora_name": "ltx2.3-transition.safetensors",
-      "strength_model": 1.0,
-      "model": [
-        "77",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoRA: LTX 2.3 Transition (strength 1.0)"
-    }
-  },
   "84": {
     "inputs": {
-      "clip_name1": "gemma_3_12B_it_heretic_fp8_e4m3fn.safetensors",
+      "clip_name1": "gemma_3_12B_it_fp8_scaled.safetensors",
       "clip_name2": "ltx-2.3_text_projection_bf16.safetensors",
       "type": "ltxv",
       "device": "default"
     },
     "class_type": "DualCLIPLoader",
     "_meta": {
-      "title": "DualCLIPLoader (Gemma 3 12B Heretic fp8 + LTX text projection)"
+      "title": "DualCLIPLoader (Gemma 3 12B fp8 scaled + LTX text projection) - cloud"
     }
   },
   "81": {
@@ -547,26 +522,13 @@
       "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
       "strength_model": 0.8,
       "model": [
-        "80",
+        "77",
         0
       ]
     },
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "LoRA: OmniNFT-RL (strength 0.8)"
-    }
-  },
-  "90": {
-    "inputs": {
-      "text": "",
-      "clip": [
-        "84",
-        0
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "Negative Prompt"
     }
   }
 }

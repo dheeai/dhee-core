@@ -76,3 +76,6 @@ e2e-out/
 
 # generated render outputs (local scratch)
 ltx-compare-out/
+
+# also ignore a bare node_modules symlink (worktree dev convenience)
+node_modules
