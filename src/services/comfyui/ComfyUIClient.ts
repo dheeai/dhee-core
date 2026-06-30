@@ -72,6 +72,7 @@ export interface ComfyUIClientConfig {
 }
 
 export interface QueueWorkflowOptions {
+  /** Optional workflow reference forwarded in Comfy extra_data. */
   workflowId?: string;
   /**
    * Optional cancellation signal. When fired mid-`queueAndWaitWS`, the
@@ -489,18 +490,15 @@ export class ComfyUIClient {
       client_id: clientId,
     };
 
-    // ComfyUI Cloud vendor nodes (GrokImageEditNode, etc.) check the
-    // service key from `extra_data.api_key_comfy_org` for billing. Without
-    // it, vendor-backed jobs submit cleanly but never execute — silent
-    // timeout, no execution_error. Non-vendor nodes (Klein, LTX) ignore
-    // the field, so it's safe to always include it on cloud runs.
-    if (this.apiKey) {
-      const extraDataPayload: Record<string, unknown> = { api_key_comfy_org: this.apiKey };
+    // ComfyUI Cloud vendor nodes (GrokImageEditNode, etc.) check the service
+    // key from `extra_data.api_key_comfy_org`. Also forward optional workflow
+    // metadata for proxies/services that associate prompts with workflows.
+    if (this.apiKey || options.workflowId) {
+      const extraDataPayload: Record<string, unknown> = {};
+      if (this.apiKey) extraDataPayload['api_key_comfy_org'] = this.apiKey;
       if (options.workflowId) {
-        // Back-compat: routes accept legacy `dhee_*` and current `dhee_*` keys.
-        extraDataPayload['dhee_workflow_id'] = options.workflowId;
-        extraDataPayload['dhee_workflow_id'] = options.workflowId;
         extraDataPayload['workflowId'] = options.workflowId;
+        extraDataPayload['dhee'] = { workflowId: options.workflowId };
       }
       payload['extra_data'] = extraDataPayload;
     }

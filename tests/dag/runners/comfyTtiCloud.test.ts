@@ -84,7 +84,6 @@ function makeCtx(): RunnerContext {
         workflowPath: 'workflows/zimage_tti.json',
         manifestPath: 'workflows/zimage_tti.manifest.json',
         endpoint: 'public.cloud',
-        workflowId: 'zimage_cloud',
         width: 1024,
         height: 1024,
         prompt: 'a portrait of joyce',

@@ -49,7 +49,7 @@ The proxy is the only piece of cloud infrastructure we need to operate. The core
 1. **Heavy infrastructure.** The core orchestrates long-running pipelines, runs FFmpeg, manages large media files, and writes per-project state to disk. Hosting it means we run real compute, real storage, and real lifecycle (queues, workers, retries) on our side — for every active user.
 2. **Project data leaves the user's machine.** Stories, characters, generated frames, and final videos all live on our servers in cloud mode. That's a privacy and trust burden we don't need.
 3. **Two code paths to maintain.** "Local mode" and "cloud mode" are subtly different deployments of the same core, with different file system assumptions, different auth surfaces, and different failure modes. Bugs in one don't reproduce in the other.
-4. **The reason we're doing this is small.** The actual goal is **metering and billing for paid API calls.** Hosting the entire orchestration engine just to observe two outbound HTTP destinations is overkill.
+4. **The reason we're doing this is small.** The actual goal is **usage metering for paid API calls.** Hosting the entire orchestration engine just to observe two outbound HTTP destinations is overkill.
 
 ---
 
@@ -181,7 +181,7 @@ In `dhee-core`, the upstream URLs are already configurable (see `COMFY_MODE` / `
 1. **Phase 1 — Build proxy.** Stand up `proxy.dhee.cloud` with auth, ledger, and pass-through for both upstreams. Test against a single dev account.
 2. **Phase 2 — Desktop integration.** Add login flow, token storage, and `dhee_CLOUD` mode to the desktop app. Internal dogfooding.
 3. **Phase 3 — Sunset cloud-core.** Once the proxy path is healthy, deprecate the hosted core. Existing cloud-mode users get migrated to "logged-in desktop" mode.
-4. **Phase 4 — Plans and billing UI.** Subscription tiers, top-ups, usage dashboard. None of this needs the hosted core; it's all proxy-side.
+4. **Phase 4 — Plans and usage UI.** Subscription tiers, top-ups, usage dashboard. None of this needs the hosted core; it's all proxy-side.
 
 ---
 

@@ -54,6 +54,7 @@ export interface LtxDirectorConfig {
    * doesn't resolve. Local runs are unaffected (the endpoint URL isn't cloud).
    */
   workflowPathCloud?: string;
+  workflowId?: string;
   shots?: ShotInput[];
   firstFrames?: string[];
   globalPrompt?: string;
@@ -1024,6 +1025,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
   if (workflowPath !== cfg.workflowPath) {
     ctx.log(`comfy.ltx_director: cloud endpoint → using ${workflowPath}`);
   }
+  const workflowId = rawCfg.workflowId;
 
   const client = new ComfyUIClient({
     outputDir,
@@ -1194,7 +1196,7 @@ async function runComfyLtxDirector(ctx: RunnerContext): Promise<RunnerResult> {
         if (p.percentage !== undefined && p.message) {
           ctx.log(`  [${p.percentage.toFixed(0)}%] ${p.message}`);
         }
-      }),
+      }, { ...(workflowId ? { workflowId } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}) }),
     { signal: ctx.signal, log: ctx.log, label: 'comfy.ltx_director queue' },
   );
   ctx.log(`  complete in ${Math.floor((Date.now() - startTime) / 1000)}s (prompt_id=${promptId})`);
@@ -1308,6 +1310,7 @@ function describe(): RunnerDescription {
       properties: {
         workflowPath: { type: 'string', description: 'Path to LTX Director Comfy workflow JSON' },
         workflowPathCloud: { type: 'string', description: 'Cloud variant workflow (used when endpoint resolves to Comfy Cloud). Omit to use workflowPath everywhere.' },
+        workflowId: { type: 'string', description: 'Optional workflow reference forwarded to Comfy extra_data.' },
         shots: { type: 'array', items: { type: 'object' } },
         firstFrames: { type: 'array', items: { type: 'string' } },
         globalPrompt: { type: 'string' },

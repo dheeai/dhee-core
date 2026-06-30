@@ -1,10 +1,10 @@
 /**
  * llmUsageAnalytics — forward per-call LLM usage to PostHog, PER USER,
- * for CLOUD-BILLED accounts only (issue #102 #0 follow-up).
+ * for opted-in cloud accounts only (issue #102 #0 follow-up).
  *
- * Privacy model: dhee-core never decides who is cloud-billed — only the
- * desktop knows (it owns auth + billing). The desktop calls
- * `enableCloudUsageAnalytics({ userId })` ONLY for a cloud-billed account,
+ * Privacy model: dhee-core never decides which account should report usage —
+ * only the desktop knows (it owns auth + account state). The desktop calls
+ * `enableCloudUsageAnalytics({ userId })` ONLY for an opted-in cloud account,
  * which registers the forwarder as a usage listener. For local / BYO-key
  * accounts the desktop never calls it, so their usage is never sent — it
  * stays in the local JSONL on their machine and nothing more.

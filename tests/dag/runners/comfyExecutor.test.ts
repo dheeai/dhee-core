@@ -189,6 +189,33 @@ describe('executeComfyWorkflow — required inputs (manifest-driven)', () => {
     expect((wf['2'] as { inputs: { image: string } }).inputs.image).toBe('up_base.png');
     expect(existsSync(join(projectDir, 'out.png'))).toBe(true);
   });
+
+  it('forwards explicit workflow metadata from node config', async () => {
+    const img = join(projectDir, 'base.png');
+    writeFileSync(img, Buffer.from('img'));
+    const ctx = makeCtx();
+    (ctx.node.runner.config as Record<string, unknown>)['workflowId'] = 'workflow-ref-1';
+    const queued: Array<Record<string, unknown>> = [];
+    let seenWorkflowId: string | undefined;
+
+    const result = await executeComfyWorkflow({
+      ctx,
+      tool: 'comfy.test',
+      workflowPath: 'workflows/wf.json',
+      manifestPath: 'workflows/wf.manifest.json',
+      endpoint: 'test.endpoint',
+      outputPath: 'workflow-ref.png',
+      prompt: 'a cloud image',
+      imageInputs: { base_image: img },
+      clientFactory: (opts) => {
+        seenWorkflowId = opts.workflowId;
+        return makeStubClient(queued);
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(seenWorkflowId).toBe('workflow-ref-1');
+  });
 });
 
 // ── executeComfyWorkflow: cloud execution_error surfacing ─────────────

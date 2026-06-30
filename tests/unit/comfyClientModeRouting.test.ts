@@ -147,6 +147,27 @@ describe('ComfyUIClient mode routing — actual fetch URL', () => {
     expect(headers['X-API-Key']).toBeUndefined();
   });
 
+  it('includes generic workflow metadata in queued prompts', async () => {
+    process.env['COMFY_MODE'] = 'cloud';
+    process.env['COMFYUI_BASE_URL'] = 'https://dhee-website.example/comfy/api';
+    process.env['COMFY_CLOUD_API_KEY'] = 'desktop-jwt';
+    const mockFetch = makeFetchMock();
+    globalThis.fetch = mockFetch;
+
+    const { ComfyUIClient } = await import('../../src/services/comfyui/ComfyUIClient.js');
+    const client = new ComfyUIClient({ outputDir: tempDir });
+    await client.queueWorkflow({ nodes: [], links: [] }, 'client-1', false, {
+      workflowId: 'workflow-ref-1',
+    });
+
+    const [, calledInit] = mockFetch.mock.calls[0];
+    const body = JSON.parse(calledInit.body as string);
+    expect(body.extra_data).toMatchObject({
+      workflowId: 'workflow-ref-1',
+      dhee: { workflowId: 'workflow-ref-1' },
+    });
+  });
+
   it('local mode: NEVER hits cloud.comfy.org (regression guard for the dhee-Cloud-override bug)', async () => {
     process.env['COMFY_MODE'] = 'local';
     process.env['COMFYUI_BASE_URL'] = 'http://127.0.0.1:8188';

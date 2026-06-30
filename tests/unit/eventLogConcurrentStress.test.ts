@@ -10,7 +10,7 @@
  *   2. COST ROLLUP over a concurrently-built log — interleave cached and
  *      paid completions across handles and assert computeCostLedger sums
  *      exactly right (the review called out cost-under-cache/retry as an
- *      untested billing risk).
+ *      untested cost-accounting risk).
  *   3. TORN/MALFORMED line tolerance in SEQ DERIVATION (not just read) —
  *      a half-written final line must not corrupt the next seq.
  */

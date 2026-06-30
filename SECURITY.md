@@ -53,7 +53,7 @@ These are not treated as security vulnerabilities unless chained to an in-scope 
 - A local user reading or modifying files already accessible to their OS account.
 - Malicious third-party ComfyUI workflows, custom nodes, scripts, or models that an operator chose to install without review.
 - Provider-side issues in OpenAI, OpenRouter, Gemini, xAI, Comfy Cloud, LM Studio, or local ComfyUI.
-- API cost, quota, or billing impact caused by an authorized user action.
+- API cost or quota impact caused by an authorized user action.
 
 ## Deployment Hardening
 
