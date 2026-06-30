@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { describe, it, expect } from 'vitest';
 
-import { rebuildLoraChain } from '../../../src/dag/runners/comfyLtxDirector.js';
+import { applyConfiguredLoras, rebuildLoraChain } from '../../../src/dag/runners/comfyLtxDirector.js';
 
 type Wf = Record<string, { inputs: Record<string, unknown>; class_type: string }>;
 
@@ -63,6 +63,14 @@ describe('rebuildLoraChain', () => {
     expect(wf['ltxlora_2']!.inputs['model']).toEqual(['ltxlora_1', 0]);
     expect(wf['ltxlora_2']!.inputs['strength_model']).toBe(0.8); // default applied
     expect(wf['46']!.inputs['model']).toEqual(['ltxlora_2', 0]);
+  });
+
+  it('runtime config with loras: [] clears baked workflow loras', () => {
+    const wf = baseWorkflow();
+    const applied = applyConfiguredLoras(wf, { loras: [] });
+    expect(applied).toBe(true);
+    expect(loraNodes(wf)).toEqual([]);
+    expect(wf['46']!.inputs['model']).toEqual(['77', 0]);
   });
 });
 

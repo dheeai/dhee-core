@@ -112,7 +112,7 @@ export function projectWalkState(
       case 'node.started': {
         const p = e.payload as NodeStartedPayload;
         const k = keyFor(p.nodeId, p.itemId);
-        const prior = state.nodes[k] ?? {};
+        const prior: Partial<ProjectedNodeStateEntry> = state.nodes[k] ?? {};
         const { error: _staleError, ...priorWithoutError } = prior;
         state.nodes[k] = {
           ...priorWithoutError,
