@@ -11,13 +11,13 @@ import type { Runner } from '../schema.js';
 import { comfyKleinRunner } from './comfyKlein.js';
 import { comfyTtiRunner } from './comfyTti.js';
 import { comfyFl2vRunner } from './comfyFl2v.js';
-import { comfyLtxDirectorRunner } from './comfyLtxDirector.js';
 import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { ffmpegOverlayRunner } from './ffmpegOverlay.js';
 import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
+import { cvCaptionsRunner } from './cvCaptions.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
 // Dhee Cloud media runners — first-party runners for the Dhee Cloud media
@@ -104,22 +104,11 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: comfyFl2vRunner,
   },
-  {
-    manifest: {
-      tool: 'comfy.ltx_director',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      // No env credentials — the runner resolves its Comfy endpoint by
-      // semantic name (e.g. self.local) through ENDPOINT_<name> vars,
-      // which are user-config and validated at runner.run() time with a
-      // clear pointer to which env var to set.
-      credentials: [],
-      displayName: 'Comfy LTX Director',
-      description:
-        'Drives the LTX Director / Director Chain ComfyUI workflow to render per-scene relay clips from first-frame anchors + motion directives.',
-    },
-    runner: comfyLtxDirectorRunner,
-  },
+  // comfy.ltx_director is now provided by the external npm runner
+  // `dhee-runner-ltx-director` (LTX Director 2.0.2, with the CreateVideo audio
+  // slot-7 fix). The built-in registration was a leftover from the extraction
+  // and shadowed the npm runner (ecosystem skips a tool already in the registry),
+  // so it has been removed.
   {
     manifest: {
       tool: 'comfy.qwen_edit_chain',
@@ -167,6 +156,20 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Animates one still image with a subtle Ken Burns zoom/pan and muxes narration audio, sized to that audio. Keeps text-heavy stills (infographics, slides) pixel-sharp — unlike generative video.',
     },
     runner: ffmpegKenBurnsRunner,
+  },
+  {
+    // Legacy built-in (peer of ffmpeg.concat/kenburns) — local whisper + ffmpeg +
+    // a bundle-shipped python renderer. Restored to the registry; was orphaned.
+    manifest: {
+      tool: 'cv.captions',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Karaoke Captions',
+      description:
+        'Burns karaoke / Instagram-style animated captions onto a video. Local faster-whisper word timestamps → a bundle-shipped python (Pillow) renderer; no API key for transcription.',
+    },
+    runner: cvCaptionsRunner,
   },
   {
     manifest: {
