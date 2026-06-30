@@ -17,6 +17,7 @@ import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { ffmpegOverlayRunner } from './ffmpegOverlay.js';
 import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
+import { cvCaptionsRunner } from './cvCaptions.js';
 import { llmGenerateRunner } from './llmGenerate.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
 // Dhee Cloud media runners — first-party runners for the Dhee Cloud media
@@ -154,6 +155,20 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Animates one still image with a subtle Ken Burns zoom/pan and muxes narration audio, sized to that audio. Keeps text-heavy stills (infographics, slides) pixel-sharp — unlike generative video.',
     },
     runner: ffmpegKenBurnsRunner,
+  },
+  {
+    // Legacy built-in (peer of ffmpeg.concat/kenburns) — local whisper + ffmpeg +
+    // a bundle-shipped python renderer. Restored to the registry; was orphaned.
+    manifest: {
+      tool: 'cv.captions',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Karaoke Captions',
+      description:
+        'Burns karaoke / Instagram-style animated captions onto a video. Local faster-whisper word timestamps → a bundle-shipped python (Pillow) renderer; no API key for transcription.',
+    },
+    runner: cvCaptionsRunner,
   },
   {
     manifest: {
