@@ -499,9 +499,7 @@ function materializeCollection(
         }
       }
       if (items.length === 0) {
-        throw new Error(
-          `materializeCollection: upstream '${node.itemSource}' output ${upstreamPath} has no items to materialize`,
-        );
+        return [];
       }
       // ── chunkBy on upstream-driven materializer ──
       // When the node declares chunkBy AND items are scenes (itemKey='scenes')

@@ -90,6 +90,24 @@ function makeBundle(itemKey?: string): DagBundle {
   };
 }
 
+function makeBundleWithFinalAfterCollection(itemKey?: string): DagBundle {
+  const bundle = makeBundle(itemKey);
+  return {
+    ...bundle,
+    goal: 'final',
+    nodes: [
+      ...bundle.nodes,
+      {
+        id: 'final',
+        kind: 'stage',
+        inputs: [{ from: 'fanout', usage: 'input' }],
+        outputs: { format: 'json', pattern: 'final.json' },
+        runner: { tool: 'stub.recorder', config: {} },
+      },
+    ],
+  };
+}
+
 function preSeedUpstream(content: Record<string, unknown>): void {
   mkdirSync(projectDir, { recursive: true });
   writeFileSync(join(projectDir, 'upstream.json'), JSON.stringify(content));
@@ -148,6 +166,17 @@ describe('BUG-002 — walker materializer itemKey selection', () => {
     });
     expect(result.ok).toBe(true);
     expect(seenItems.sort()).toEqual(['scene_1', 'scene_2']);
+  });
+
+  it('treats an explicitly empty upstream item array as a no-op collection', async () => {
+    preSeedUpstream({ items: [] });
+    const result = await walkBundle({
+      projectDir,
+      bundle: makeBundleWithFinalAfterCollection('items'),
+      bundleSource: 'built-in:item-key-test',
+    });
+    expect(result.ok).toBe(true);
+    expect(seenItems).toEqual(['<stage>']);
   });
 
   it('(d) errors clearly when itemKey names a non-array property', async () => {
