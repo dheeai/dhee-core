@@ -1597,7 +1597,13 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             // LLM gets opaque paths and can't make a sensible chain-base
             // choice — it'll think every shot has no useful prior.
             const upstreamNode = opts.bundle.nodes.find((nd) => nd.id === inp.from);
-            const inlineJson = upstreamNode?.outputs.format === 'json';
+            const upstreamFormat = upstreamNode?.outputs.format;
+            const inlineJson = upstreamFormat === 'json';
+            // Text-representable formats (json/md/text) get their content
+            // inlined; image/video/audio previousN chains (e.g. the Qwen
+            // Edit shot-chaining base image) stay path-only — reading a
+            // binary file as utf-8 would just produce garbage nobody reads.
+            const inlineContent = inlineJson || upstreamFormat === 'md' || upstreamFormat === 'text';
             for (const u of upInsts) {
               if (!u.outputRel || u.status !== 'completed') continue;
               const uShot = parseShotNum(u.itemId);
@@ -1607,9 +1613,10 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
               const entry: { shotNumber: number; itemId: string; outputAbs: string; content?: unknown } = {
                 shotNumber: uShot, itemId: u.itemId ?? '', outputAbs: abs,
               };
-              if (inlineJson) {
+              if (inlineContent) {
                 try {
-                  entry.content = JSON.parse(readFileSync(abs, 'utf-8'));
+                  const raw = readFileSync(abs, 'utf-8');
+                  entry.content = inlineJson ? JSON.parse(raw) : raw;
                 } catch { /* ignore */ }
               }
               priors.push(entry);
@@ -1627,13 +1634,42 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         // collection references (e.g. shot_image references
         // character_image:naia by id). The walker doesn't try to
         // pick a "matching" instance here — the consumer decides.
+        //
+        // llm.generate is the one exception: its template substitution
+        // just JSON.stringifies whatever it's handed, so an id→path map
+        // would silently bake useless file paths into the prompt instead
+        // of the content the bundle author meant to inline (verified bug:
+        // narrative_speech_shot_by_shot's shot_state/shot_image_prompt
+        // nodes consume scene_staging via scope:'all', expecting the
+        // staging text, and only ever got path strings). For that
+        // consumer, resolve to { [itemId]: content } instead — parsed
+        // JSON for JSON-format producers, raw text otherwise — mirroring
+        // the binary/json handling the 'matching' branch below already
+        // does for a single upstream value. Non-llm.generate consumers
+        // (comfy.*, ffmpeg.*, remotion.*, …) still need real paths, so
+        // they keep the existing map untouched.
         if (inp.scope === 'all' && upInsts.some((u) => u.itemId !== undefined)) {
+          const inlineForLlm = node.runner.tool === 'llm.generate';
           const pathsById: Record<string, string> = {};
+          const contentById: Record<string, unknown> = {};
           for (const u of upInsts) {
             if (!u.itemId || !u.outputRel) continue;
             const abs = resolve(opts.projectDir, u.outputRel);
             if (existsSync(abs)) {
               pathsById[u.itemId] = abs;
+              if (inlineForLlm) {
+                const isBinary = /\.(png|jpg|jpeg|webp|gif|mp4|webm|mov|wav|mp3)$/i.test(u.outputRel);
+                if (isBinary) {
+                  contentById[u.itemId] = abs;
+                } else {
+                  try {
+                    const raw = readFileSync(abs, 'utf-8');
+                    contentById[u.itemId] = abs.endsWith('.json') ? JSON.parse(raw) : raw;
+                  } catch {
+                    contentById[u.itemId] = abs;
+                  }
+                }
+              }
               // Chunk-aware dep narrowing: a chunked consumer (scene_clip
               // with a shotRange) only depends on the shots inside its
               // chunk, even though scope='all' exposes every shot's path.
@@ -1650,7 +1686,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
               }
             }
           }
-          resolvedInputs[inp.from] = pathsById;
+          resolvedInputs[inp.from] = inlineForLlm ? contentById : pathsById;
           continue;
         }
 
