@@ -26,7 +26,7 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
 import { openEventLog } from './eventLog/EventLog.js';
 import type { BundleInputDecl, DagBundle, NodeDef } from './schema.js';
@@ -356,11 +356,28 @@ function resolveBundleRootDir(bundleId: string): string | null {
 }
 
 /**
+ * Text/markdown extensions that hold a generative BRIEF (topic, story,
+ * script, product description, ...) rather than a talent ASSET. Never
+ * seeded — see `seedBundleAssets` below for why.
+ */
+const BRIEF_TEXT_EXTENSIONS = new Set(['.md', '.txt']);
+
+/**
  * Copy a bundle's shipped `inputs/` assets into the project's `inputs/` dir.
  * Shallow (bundle inputs/ are flat files), binary-safe (copyFileSync). Returns
  * the seeded filenames. No-op when the bundle has no `inputs/` dir. Called
  * BEFORE applyBundleInputs so user-provided inputs overwrite the seeded
  * defaults. Exported for unit testing.
+ *
+ * Deliberately skips `.md`/`.txt` files: across every bundle's `inputs/`
+ * dir, the text files are exactly the generative BRIEFS (topic.md,
+ * story.md, script.md, product.md, ...), never genuine talent assets
+ * (those are always binary — voice_ref.wav, portrait.png, logo.png, ...).
+ * Seeding a brief silently substituted the bundle's SAMPLE brief for a
+ * missing user topic (e.g. remotion_explainer's sample "Helm AI support
+ * agent" brief leaking into unrelated projects created without a topic —
+ * see initializeProject.ts's header). A missing brief should surface as a
+ * required-input error, not silently default to the bundle's demo copy.
  */
 export function seedBundleAssets(bundleDir: string, projectDir: string): string[] {
   const srcInputs = join(bundleDir, 'inputs');
@@ -370,6 +387,7 @@ export function seedBundleAssets(bundleDir: string, projectDir: string): string[
   const seeded: string[] = [];
   for (const entry of readdirSync(srcInputs, { withFileTypes: true })) {
     if (!entry.isFile()) continue;
+    if (BRIEF_TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
     copyFileSync(join(srcInputs, entry.name), join(destInputs, entry.name));
     seeded.push(entry.name);
   }

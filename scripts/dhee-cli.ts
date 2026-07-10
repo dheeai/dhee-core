@@ -207,12 +207,18 @@ async function cmdNew(args: ParsedArgs): Promise<void> {
   }
 
   const story = readStoryInput(args.flags);
-  const rawStyle = flagStr(args.flags, 'style') ?? 'cinematic_realism';
-  const style = STYLE_ALIASES[rawStyle.toLowerCase()] ?? rawStyle;
+  // Only resolve/pass a `style` input when the user actually supplied
+  // `--style`. Previously this defaulted to the bare id 'cinematic_realism'
+  // and ALWAYS set inputs.style, so applyBundleInputs() always saw a
+  // provided value and never fell through to a bundle's own `style` input
+  // default — clobbering bundles (e.g. remotion_explainer) whose default
+  // is a rich style sentence, not a bare id, with the bare alias id.
+  const rawStyle = flagStr(args.flags, 'style');
+  const style = rawStyle ? (STYLE_ALIASES[rawStyle.toLowerCase()] ?? rawStyle) : undefined;
 
   const inputs: Record<string, unknown> = {
     story_input: story,
-    style,
+    ...(style !== undefined ? { style } : {}),
     aspect: flagStr(args.flags, 'aspect') ?? '16:9',
     resolution: Number(flagStr(args.flags, 'resolution') ?? 1080),
     targetDuration: Number(flagStr(args.flags, 'duration') ?? 60),
@@ -231,7 +237,7 @@ async function cmdNew(args: ParsedArgs): Promise<void> {
   if (!r.ok) fail(r.error);
 
   console.log(`Created '${name}' (bundle: ${bundleId}) at ${projectDir}`);
-  console.log(`  style=${style} aspect=${inputs['aspect']} resolution=${inputs['resolution']} duration=${inputs['targetDuration']}s`);
+  console.log(`  style=${style ?? '(bundle default)'} aspect=${inputs['aspect']} resolution=${inputs['resolution']} duration=${inputs['targetDuration']}s`);
   console.log(`Next: pnpm dhee run ${name}        # run to the final video`);
   console.log(`  or: pnpm dhee run ${name} --to scenes_plan   # stop after a stage`);
 }
@@ -344,14 +350,16 @@ async function cmdOverride(args: ParsedArgs): Promise<void> {
   if (!from) fail('--from <file> is required (the new content for the node).');
   const p = resolve(from);
   if (!existsSync(p)) fail(`--from file not found: ${p}`);
-  const content = readFileSync(p, 'utf8');
   const itemId = flagStr(args.flags, 'item');
   const reason = flagStr(args.flags, 'reason');
   printToolResult(
     await callTool(dheeWriteNodeContentTool, {
       projectDir,
       nodeId,
-      payload: { kind: 'text', content },
+      // localFile reads raw bytes (readFileSync with no encoding) — unlike
+      // kind:'text', which forces a lossy UTF-8 decode and corrupts any
+      // binary --from file (wav/flac/png/etc). Safe for text files too.
+      payload: { kind: 'localFile', sourcePath: p },
       ...(itemId ? { itemId } : {}),
       ...(reason ? { reason } : {}),
       ...(args.flags['confirm'] ? { confirm: true } : {}),
