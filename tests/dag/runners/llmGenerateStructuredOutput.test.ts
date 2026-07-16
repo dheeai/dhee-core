@@ -2,18 +2,20 @@
  * Layer 1 — grammar-constrained structured output in `llm.generate`.
  *
  * When `config.outputFormat==='json'` AND `config.outputSchema` is set,
- * the runner should send the parsed schema as
+ * a node can OPT IN to sending the parsed schema as
  * `response_format:{type:'json_schema', json_schema:{name, strict, schema}}`
- * instead of the old `{type:'json_object'}` — so providers that support
+ * instead of the legacy `{type:'json_object'}` — so providers that support
  * grammar-constrained decoding (llama.cpp GBNF, OpenAI structured outputs)
  * can guarantee schema-conforming output instead of merely "valid JSON".
  *
- * `config.structuredMode` ('auto' default | 'object' | 'schema') and
- * `config.structuredStrict` let a bundle author opt out, and control the
- * OpenAI-style `strict` flag. A provider that rejects `response_format:
- * json_schema` with a 4xx must fall back to `json_object` for THAT call
- * and cache the decision per client (baseUrl|model) so subsequent calls
- * to the same endpoint/model skip straight to json_object.
+ * `config.structuredMode` defaults to `'object'` (legacy behavior: always
+ * `json_object`, regardless of whether outputSchema is set) — a node must
+ * explicitly set `'schema'` (or `'auto'`, an alias) to opt into sending
+ * json_schema. `config.structuredStrict` controls the OpenAI-style
+ * `strict` flag on an opted-in request. A provider that rejects
+ * `response_format:json_schema` with a 4xx must fall back to `json_object`
+ * for THAT call and cache the decision per client (baseUrl|model) so
+ * subsequent calls to the same endpoint/model skip straight to json_object.
  *
  * ajv post-validation, the cache-breakpoint split, and the retry loop
  * are all unaffected — this only changes what's sent as `response_format`.
@@ -123,7 +125,7 @@ function makeCtx(opts: { nodeId?: string; config: Record<string, unknown> }): Ru
 }
 
 describe('llm.generate — structured (json_schema) output', () => {
-  it("mode 'auto' (default) with outputSchema set → sends response_format.type='json_schema' with the parsed schema + a derived name", async () => {
+  it('no structuredMode set (default) + outputSchema set → sends legacy response_format.type=\'json_object\' (opt-in required for json_schema)', async () => {
     const behavior: StubBehavior = { respond: () => ({ content: '{"name": "Naia"}' }) };
     const client = makeStubClient(behavior);
     const runner = createLlmGenerateRunner({ clientFactory: () => client });
@@ -142,6 +144,29 @@ describe('llm.generate — structured (json_schema) output', () => {
     );
 
     expect(result.ok).toBe(true);
+    expect(behavior.requests![0]!.responseFormat).toEqual({ type: 'json_object' });
+  });
+
+  it("structuredMode:'schema' with outputSchema set → sends response_format.type='json_schema' with the parsed schema + a derived name", async () => {
+    const behavior: StubBehavior = { respond: () => ({ content: '{"name": "Naia"}' }) };
+    const client = makeStubClient(behavior);
+    const runner = createLlmGenerateRunner({ clientFactory: () => client });
+
+    const result = await runner.run(
+      makeCtx({
+        nodeId: 'my_node',
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'out.json',
+          tier: 'heavy',
+          outputFormat: 'json',
+          outputSchema: 'schemas/thing.schema.json',
+          structuredMode: 'schema',
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
     const req = behavior.requests![0]!;
     const rf = req.responseFormat as { type: string; json_schema?: { name?: string; schema?: unknown; strict?: boolean } };
     expect(rf.type).toBe('json_schema');
@@ -150,7 +175,31 @@ describe('llm.generate — structured (json_schema) output', () => {
     expect(rf.json_schema?.name).toMatch(/my_node/);
   });
 
-  it("structuredMode:'object' keeps the old {type:'json_object'} behavior even with outputSchema set", async () => {
+  it("structuredMode:'auto' behaves the same as 'schema' — sends json_schema when outputSchema is set", async () => {
+    const behavior: StubBehavior = { respond: () => ({ content: '{"name": "Naia"}' }) };
+    const client = makeStubClient(behavior);
+    const runner = createLlmGenerateRunner({ clientFactory: () => client });
+
+    const result = await runner.run(
+      makeCtx({
+        nodeId: 'my_node',
+        config: {
+          promptTemplate: 'prompts/p.md',
+          outputPath: 'out.json',
+          tier: 'heavy',
+          outputFormat: 'json',
+          outputSchema: 'schemas/thing.schema.json',
+          structuredMode: 'auto',
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    const rf = behavior.requests![0]!.responseFormat as { type: string };
+    expect(rf.type).toBe('json_schema');
+  });
+
+  it("structuredMode:'object' keeps the legacy {type:'json_object'} behavior even with outputSchema set (same as leaving structuredMode unset)", async () => {
     const behavior: StubBehavior = { respond: () => ({ content: '{"name": "Naia"}' }) };
     const client = makeStubClient(behavior);
     const runner = createLlmGenerateRunner({ clientFactory: () => client });
@@ -172,7 +221,7 @@ describe('llm.generate — structured (json_schema) output', () => {
     expect(behavior.requests![0]!.responseFormat).toEqual({ type: 'json_object' });
   });
 
-  it('respects an explicit structuredStrict value on the json_schema request', async () => {
+  it("respects an explicit structuredStrict value on the json_schema request (requires opting in via structuredMode:'schema')", async () => {
     const behavior: StubBehavior = { respond: () => ({ content: '{"name": "Naia"}' }) };
     const client = makeStubClient(behavior);
     const runner = createLlmGenerateRunner({ clientFactory: () => client });
@@ -185,6 +234,7 @@ describe('llm.generate — structured (json_schema) output', () => {
           tier: 'heavy',
           outputFormat: 'json',
           outputSchema: 'schemas/thing.schema.json',
+          structuredMode: 'schema',
           structuredStrict: true,
         },
       }),
@@ -244,6 +294,7 @@ describe('llm.generate — structured (json_schema) output', () => {
             tier: 'heavy',
             outputFormat: 'json',
             outputSchema: 'schemas/thing.schema.json',
+            structuredMode: 'schema', // opt in so the first attempt sends json_schema
             maxRetries: 0, // the fallback retry must NOT consume the retry budget
           },
         }),
@@ -284,6 +335,7 @@ describe('llm.generate — structured (json_schema) output', () => {
             tier: 'heavy',
             outputFormat: 'json',
             outputSchema: 'schemas/thing.schema.json',
+            structuredMode: 'schema', // opt in so the first attempt sends json_schema
           },
         }),
       );
@@ -301,6 +353,7 @@ describe('llm.generate — structured (json_schema) output', () => {
             tier: 'heavy',
             outputFormat: 'json',
             outputSchema: 'schemas/thing.schema.json',
+            structuredMode: 'schema',
           },
         }),
       );
@@ -332,6 +385,7 @@ describe('llm.generate — structured (json_schema) output', () => {
             tier: 'heavy',
             outputFormat: 'json',
             outputSchema: 'schemas/thing.schema.json',
+            structuredMode: 'schema', // opt in so the first attempt sends json_schema
             maxRetries: 0,
           },
         }),

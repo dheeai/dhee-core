@@ -119,17 +119,19 @@ export interface LlmGenerateConfig {
   normalizeVisualScreenplayBeats?: boolean;
   /**
    * How to request structured JSON output from the provider.
-   *  - 'auto' (default): when `outputSchema` is set, send it as
+   *  - 'object' (default): always send `{type:'json_object'}` — the
+   *    legacy behavior, regardless of whether outputSchema is set. ajv
+   *    post-validation + the retry-with-feedback loop still run either
+   *    way. A node must explicitly opt in (below) to get json_schema.
+   *  - 'schema' (opt-in): when `outputSchema` is set, send it as
    *    `response_format:{type:'json_schema', json_schema:{...}}` so
    *    providers that support grammar-constrained decoding (llama.cpp
    *    GBNF, OpenAI structured outputs) can guarantee schema-conforming
    *    output. Falls back to `json_object` when the provider 4xxs on
    *    json_schema (see the module-level fallback cache below).
-   *  - 'object': always send `{type:'json_object'}` — today's behavior,
-   *    regardless of whether outputSchema is set. ajv post-validation
-   *    still runs either way.
-   *  - 'schema': same as 'auto' (schema sent whenever outputSchema is
-   *    set) — spelled out for bundle authors who want to be explicit.
+   *  - 'auto' (opt-in, alias of 'schema'): same behavior — schema sent
+   *    whenever outputSchema is set — spelled out for bundle authors
+   *    who want to name the semantics rather than the mechanism.
    */
   structuredMode?: 'schema' | 'object' | 'auto';
   /**
@@ -856,11 +858,12 @@ export function createLlmGenerateRunner(opts?: {
     }
 
     // Layer 1 — structured (json_schema) response_format. 'auto'/'schema'
-    // send the schema whenever one is declared; 'object' keeps the old
-    // json_object-only behavior. A provider that has already 4xx'd on
-    // json_schema for this exact client (baseUrl|model) — see the
-    // fallback-catch below — skips straight to json_object.
-    const structuredMode = cfg.structuredMode ?? 'auto';
+    // (explicit opt-in) send the schema whenever one is declared;
+    // 'object' — the default when a node doesn't set structuredMode —
+    // keeps the legacy json_object-only behavior. A provider that has
+    // already 4xx'd on json_schema for this exact client (baseUrl|model)
+    // — see the fallback-catch below — skips straight to json_object.
+    const structuredMode = cfg.structuredMode ?? 'object';
     const clientKey = `${client.getBaseUrl?.() ?? ''}|${client.getModel()}`;
     const wantsStructuredSchema =
       isJson && parsedSchema !== undefined && structuredMode !== 'object';
