@@ -19,6 +19,7 @@ import { ffmpegOverlayRunner } from './ffmpegOverlay.js';
 import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
 import { cvCaptionsRunner } from './cvCaptions.js';
 import { llmGenerateRunner } from './llmGenerate.js';
+import { planAssembleRunner } from './planAssemble.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
 // Dhee Cloud media runners — first-party runners for the Dhee Cloud media
 // proxy lane (image/video generation via /api/cloud/media/*). Implemented
@@ -193,6 +194,18 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Talking-head clip with a pixel-exact screenshot that pops in as a top-right inset, expands to fullscreen, holds, then collapses back — deterministic, lip-sync preserved.',
     },
     runner: ffmpegDemoOverlayRunner,
+  },
+  {
+    manifest: {
+      tool: 'plan.assemble',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Plan Assemble',
+      description:
+        'Deterministic (no LLM calls) assembly of the canonical scenes_plan.json from per-scene fragments (a scope:all collection) plus the outline stage title.',
+    },
+    runner: planAssembleRunner,
   },
   {
     manifest: {

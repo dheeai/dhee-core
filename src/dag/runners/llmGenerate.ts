@@ -102,6 +102,114 @@ export interface LlmGenerateConfig {
    * by construction. No-op for output with no top-level `shots` array.
    */
   normalizeShotIds?: boolean;
+  /**
+   * When true, coerce common near-miss shapes on `beats[].startState` and
+   * `beats[].carryToNext` BEFORE schema validation. Motivated by a real
+   * failure: deepseek-v4-flash reliably emits `startState` as a single
+   * object (or an object with string values) instead of an array of
+   * `{ actor: ... }` refs, and `carryToNext` items as objects (e.g.
+   * `{ text: "..." }`) instead of plain strings — failing strict schema
+   * validation on all retries even after the prompt shows the correct
+   * shape. This is a narrow, field-scoped backstop (not a schema
+   * weakening): it only reshapes data that is unambiguously the same
+   * near-miss pattern, it never invents content, and a beat with no
+   * recoverable actor/string is left as-is so the schema still rejects
+   * genuine garbage. No-op unless `value` has a top-level `beats` array.
+   */
+  normalizeVisualScreenplayBeats?: boolean;
+  /**
+   * How to request structured JSON output from the provider.
+   *  - 'auto' (default): when `outputSchema` is set, send it as
+   *    `response_format:{type:'json_schema', json_schema:{...}}` so
+   *    providers that support grammar-constrained decoding (llama.cpp
+   *    GBNF, OpenAI structured outputs) can guarantee schema-conforming
+   *    output. Falls back to `json_object` when the provider 4xxs on
+   *    json_schema (see the module-level fallback cache below).
+   *  - 'object': always send `{type:'json_object'}` — today's behavior,
+   *    regardless of whether outputSchema is set. ajv post-validation
+   *    still runs either way.
+   *  - 'schema': same as 'auto' (schema sent whenever outputSchema is
+   *    set) — spelled out for bundle authors who want to be explicit.
+   */
+  structuredMode?: 'schema' | 'object' | 'auto';
+  /**
+   * OpenAI-style `strict` flag on the json_schema response_format.
+   * Default `false`: our schemas commonly have OPTIONAL (non-required)
+   * fields, and `strict:true` formally requires every property to be
+   * `required` + `additionalProperties:false` — providers that actually
+   * enforce that (e.g. OpenRouter/deepseek) would reject an optional-
+   * field schema on every call. llama.cpp's GBNF grammar constraint was
+   * empirically permissive either way (probed against g4-meromero-192k),
+   * so `false` is the safe default across both kinds of backend.
+   */
+  structuredStrict?: boolean;
+}
+
+/**
+ * Per-client (baseUrl|model) memory of "this provider 4xx'd on
+ * response_format:json_schema" — set after the first rejection, read
+ * before every subsequent call so we don't keep paying for a doomed
+ * json_schema attempt against a provider that has already told us it
+ * doesn't support structured outputs.
+ */
+const structuredOutputUnsupportedCache = new Map<string, boolean>();
+
+/** Test-only: clear the module-level structured-output fallback cache. */
+export function __resetStructuredOutputFallbackCacheForTesting(): void {
+  structuredOutputUnsupportedCache.clear();
+}
+
+/**
+ * Sanitize a string down to the character set OpenAI-style
+ * `json_schema.name` fields require (`^[a-zA-Z0-9_-]+$`-ish): safe
+ * for llama.cpp/OpenRouter too since it's a strict subset.
+ */
+function slugify(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64);
+}
+
+/** Derive the json_schema `name` from the node id, falling back to outputPath. */
+function deriveSchemaName(nodeId: string, outputPath: string): string {
+  return slugify(nodeId) || slugify(outputPath) || 'output_schema';
+}
+
+type LlmResponseFormat =
+  | { type: 'json_object' }
+  | { type: 'json_schema'; json_schema: { name: string; strict?: boolean; schema: Record<string, unknown> } };
+
+/**
+ * Extract an HTTP status code from a thrown error, however deeply it's
+ * wrapped (LLMClient's formatOperationError wraps the original error in
+ * `.cause`; the OpenAI SDK's APIError exposes `.status`/`.statusCode`
+ * directly on whichever layer threw).
+ */
+function extractHttpStatus(err: unknown, depth = 0): number | undefined {
+  if (!err || typeof err !== 'object' || depth > 5) return undefined;
+  const anyErr = err as { status?: unknown; statusCode?: unknown; cause?: unknown };
+  if (typeof anyErr.status === 'number') return anyErr.status;
+  if (typeof anyErr.statusCode === 'number') return anyErr.statusCode;
+  if (anyErr.cause) return extractHttpStatus(anyErr.cause, depth + 1);
+  return undefined;
+}
+
+/**
+ * Is `err` a provider rejection of `response_format:json_schema`
+ * specifically (as opposed to an unrelated 4xx like a bad API key or
+ * rate limit)? Requires BOTH a 4xx status AND the message naming
+ * response_format/json_schema/structured output — either signal alone
+ * is too weak (a 4xx auth error shouldn't trigger a silent format
+ * downgrade; a message mentioning "schema" in an unrelated validation
+ * error shouldn't either).
+ */
+function isStructuredOutputUnsupportedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const mentionsStructuredOutput = /response_format|json_schema|structured\s*output/i.test(message);
+  if (!mentionsStructuredOutput) return false;
+  const status = extractHttpStatus(err);
+  if (status !== undefined) return status >= 400 && status < 500;
+  // No explicit status field (e.g. a plain Error from a test stub or a
+  // minimal client) — fall back to sniffing a 4xx code in the message.
+  return /\b4\d\d\b/.test(message);
 }
 
 export interface LlmGenerateDerivedInput {
@@ -132,11 +240,18 @@ export interface LlmGenerateClient {
   generate(opts: {
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
     signal?: AbortSignal;
-    responseFormat?: { type: 'json_object' };
+    responseFormat?: LlmResponseFormat;
     temperature?: number;
     maxTokens?: number;
   }): Promise<{ content?: string; usage?: LlmGenerateUsage }>;
   getModel(): string;
+  /**
+   * Optional: the endpoint this client talks to. Used (with getModel())
+   * to key the structured-output-unsupported fallback cache so the
+   * decision is per (baseUrl, model), not global. Clients that omit it
+   * (legacy test stubs) just key on model alone.
+   */
+  getBaseUrl?(): string;
 }
 
 export type LlmClientFactory = (tier: LLMTier, purpose?: LLMPurpose) => LlmGenerateClient;
@@ -168,12 +283,12 @@ function defaultClientFactory(tier: LLMTier, purpose?: LLMPurpose): LlmGenerateC
   const client = router.getClient(eff);
   return {
     async generate(opts) {
-      // LLMClient supports responseFormat: { type: 'json_object' } but
-      // not { type: 'text' } — for text format we just omit it.
-      const passResponseFormat =
-        opts.responseFormat && opts.responseFormat.type === 'json_object'
-          ? { responseFormat: { type: 'json_object' as const } }
-          : {};
+      // LLMClient supports both responseFormat shapes (json_object AND
+      // json_schema — see GenerateOptions in core/llm/types.ts) but not
+      // { type: 'text' } — for text format we just omit it.
+      const passResponseFormat = opts.responseFormat
+        ? { responseFormat: opts.responseFormat }
+        : {};
       const resp = await client.generate({
         messages: opts.messages,
         ...(opts.signal ? { signal: opts.signal } : {}),
@@ -186,6 +301,7 @@ function defaultClientFactory(tier: LLMTier, purpose?: LLMPurpose): LlmGenerateC
       return { content: resp.content ?? undefined, usage: resp.usage };
     },
     getModel: () => client.getModel(),
+    getBaseUrl: () => client.getConnectionInfo().baseUrl,
   };
 }
 
@@ -350,13 +466,15 @@ function tryParseJson(raw: string): { ok: true; value: unknown } | { ok: false; 
   }
 }
 
-function validateAgainstSchema(value: unknown, schemaPath: string): { ok: true } | { ok: false; error: string } {
-  let schema: unknown;
-  try {
-    schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
-  } catch (err) {
-    return { ok: false, error: `Failed to load JSON schema at ${schemaPath}: ${(err as Error).message}` };
-  }
+/**
+ * Validate `value` against an already-parsed JSON Schema object. Takes
+ * the parsed schema (not a path) so the caller can load it ONCE and
+ * reuse the same object both for ajv compilation here AND for the
+ * `response_format.json_schema.schema` sent to the provider — the two
+ * were previously divergent reads of the same file (ajv re-read it on
+ * every retry attempt).
+ */
+function validateAgainstSchema(value: unknown, schema: Record<string, unknown>): { ok: true } | { ok: false; error: string } {
   const ajv = new Ajv({ allErrors: true });
   addFormats(ajv);
   const validate = ajv.compile(schema as Record<string, unknown>) as ((data: unknown) => boolean) & {
@@ -423,6 +541,74 @@ export function normalizeSceneShotIds(value: unknown): void {
   }
 }
 
+/**
+ * Coerce a single `startState`/`enters`/etc.-style actor ref into
+ * `{ actor: string, ... }`. Handles the shapes deepseek-v4-flash actually
+ * emits for a near-miss: a bare string (the actor id itself), or an
+ * object missing `actor` but carrying an alias (`id`, `name`, `subject`).
+ * Returns undefined when nothing recoverable is present (caller drops it,
+ * leaving the array short rather than injecting a fabricated actor).
+ */
+function coerceActorRef(item: unknown): Record<string, unknown> | undefined {
+  if (typeof item === 'string') {
+    const s = item.trim();
+    return s ? { actor: s } : undefined;
+  }
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+  const obj = item as Record<string, unknown>;
+  if (typeof obj['actor'] === 'string' && obj['actor'].trim()) return obj;
+  const alias = obj['id'] ?? obj['name'] ?? obj['subject'];
+  if (typeof alias === 'string' && alias.trim()) return { ...obj, actor: alias };
+  return undefined;
+}
+
+/** Coerce a single `carryToNext` entry down to a plain string. */
+function coerceCarryString(item: unknown): string | undefined {
+  if (typeof item === 'string') {
+    const s = item.trim();
+    return s || undefined;
+  }
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    const obj = item as Record<string, unknown>;
+    const candidate = obj['text'] ?? obj['detail'] ?? obj['note'] ?? obj['carry'] ?? obj['description'];
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Reshape `beats[].startState` and `beats[].carryToNext` to the arrays the
+ * schema requires, in place, BEFORE validation. See
+ * `LlmGenerateConfig.normalizeVisualScreenplayBeats` for motivation.
+ * No-op unless `value` is an object with a top-level `beats` array.
+ */
+export function normalizeVisualScreenplayBeats(value: unknown): void {
+  if (!value || typeof value !== 'object') return;
+  const obj = value as { beats?: unknown };
+  if (!Array.isArray(obj.beats)) return;
+
+  for (const raw of obj.beats) {
+    if (!raw || typeof raw !== 'object') continue;
+    const beat = raw as { startState?: unknown; carryToNext?: unknown };
+
+    if ('startState' in beat && !Array.isArray(beat.startState)) {
+      const ss = beat.startState;
+      const asArray = ss && typeof ss === 'object' && !Array.isArray(ss) ? Object.values(ss as Record<string, unknown>) : [ss];
+      beat.startState = asArray.map(coerceActorRef).filter((v): v is Record<string, unknown> => v !== undefined);
+    } else if (Array.isArray(beat.startState)) {
+      beat.startState = beat.startState.map(coerceActorRef).filter((v): v is Record<string, unknown> => v !== undefined);
+    }
+
+    if ('carryToNext' in beat && !Array.isArray(beat.carryToNext)) {
+      const ct = beat.carryToNext;
+      const asArray = ct && typeof ct === 'object' && !Array.isArray(ct) ? Object.values(ct as Record<string, unknown>) : [ct];
+      beat.carryToNext = asArray.map(coerceCarryString).filter((v): v is string => v !== undefined);
+    } else if (Array.isArray(beat.carryToNext)) {
+      beat.carryToNext = beat.carryToNext.map(coerceCarryString).filter((v): v is string => v !== undefined);
+    }
+  }
+}
+
 // ── The runner factory ─────────────────────────────────────────────────
 
 export function createLlmGenerateRunner(opts?: {
@@ -452,6 +638,9 @@ export function createLlmGenerateRunner(opts?: {
         temperature:    { type: 'number' },
         derivedInputs:  { type: 'array' },
         normalizeShotIds: { type: 'boolean' },
+        normalizeVisualScreenplayBeats: { type: 'boolean' },
+        structuredMode:  { type: 'string', enum: ['schema', 'object', 'auto'] },
+        structuredStrict: { type: 'boolean' },
       },
     },
   });
@@ -649,14 +838,44 @@ export function createLlmGenerateRunner(opts?: {
     // cost (e.g. a local / non-cost-reporting OpenAI-compatible endpoint).
     let costUsd: number | undefined;
 
-    // Resolve schema path once if applicable.
+    // Resolve + parse the schema ONCE if applicable. The parsed object is
+    // reused both for ajv validation below AND (Layer 1) for the
+    // `response_format.json_schema.schema` sent to the provider.
     let schemaAbs: string | undefined;
+    let parsedSchema: Record<string, unknown> | undefined;
     if (isJson && cfg.outputSchema) {
       schemaAbs = resolve(ctx.bundleDir, cfg.outputSchema);
       if (!existsSync(schemaAbs)) {
         return { ok: false, error: `llm.generate: outputSchema not found at ${schemaAbs}` };
       }
+      try {
+        parsedSchema = JSON.parse(readFileSync(schemaAbs, 'utf-8')) as Record<string, unknown>;
+      } catch (err) {
+        return { ok: false, error: `Failed to load JSON schema at ${schemaAbs}: ${(err as Error).message}` };
+      }
     }
+
+    // Layer 1 — structured (json_schema) response_format. 'auto'/'schema'
+    // send the schema whenever one is declared; 'object' keeps the old
+    // json_object-only behavior. A provider that has already 4xx'd on
+    // json_schema for this exact client (baseUrl|model) — see the
+    // fallback-catch below — skips straight to json_object.
+    const structuredMode = cfg.structuredMode ?? 'auto';
+    const clientKey = `${client.getBaseUrl?.() ?? ''}|${client.getModel()}`;
+    const wantsStructuredSchema =
+      isJson && parsedSchema !== undefined && structuredMode !== 'object';
+    let currentResponseFormat: LlmResponseFormat | undefined = !isJson
+      ? undefined
+      : wantsStructuredSchema && structuredOutputUnsupportedCache.get(clientKey) !== true
+        ? {
+            type: 'json_schema',
+            json_schema: {
+              name: deriveSchemaName(ctx.node.id, cfg.outputPath),
+              strict: cfg.structuredStrict ?? false,
+              schema: parsedSchema!,
+            },
+          }
+        : { type: 'json_object' };
 
     // Retry loop covers BOTH transient network failures AND schema
     // validation failures. On a schema error we feed the error message
@@ -699,7 +918,7 @@ export function createLlmGenerateRunner(opts?: {
         const resp = await client.generate({
           messages,
           ...(ctx.signal ? { signal: ctx.signal } : {}),
-          ...(isJson ? { responseFormat: { type: 'json_object' as const } } : {}),
+          ...(currentResponseFormat ? { responseFormat: currentResponseFormat } : {}),
           ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
           ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
         });
@@ -762,8 +981,9 @@ export function createLlmGenerateRunner(opts?: {
           // by the model getting the string right. The strict schema then
           // doubles as a post-condition check on our own normalization.
           if (cfg.normalizeShotIds) normalizeSceneShotIds(parsed.value);
-          if (schemaAbs) {
-            const v = validateAgainstSchema(parsed.value, schemaAbs);
+          if (cfg.normalizeVisualScreenplayBeats) normalizeVisualScreenplayBeats(parsed.value);
+          if (parsedSchema) {
+            const v = validateAgainstSchema(parsed.value, parsedSchema);
             if (!v.ok) {
               lastErr = v.error;
               if (attempt < maxRetries) {
@@ -780,6 +1000,24 @@ export function createLlmGenerateRunner(opts?: {
         content = got;
         break;
       } catch (err) {
+        // Layer 1 graceful fallback: this specific provider (client key
+        // = baseUrl|model) just told us it doesn't support
+        // response_format:json_schema. Downgrade to json_object for
+        // THIS call — retried immediately, not counted against
+        // maxRetries (the `attempt--` below cancels the for-loop's
+        // increment) — and cache the decision so every subsequent call
+        // to the same client skips straight to json_object. Never
+        // touches the node's model/tier/purpose, only response_format.
+        if (currentResponseFormat?.type === 'json_schema' && isStructuredOutputUnsupportedError(err)) {
+          structuredOutputUnsupportedCache.set(clientKey, true);
+          currentResponseFormat = { type: 'json_object' };
+          ctx.log(
+            `llm.generate: provider rejected response_format:json_schema (${(err as Error).message.slice(0, 160)}); ` +
+              `falling back to json_object for this and future calls to '${clientKey}'`,
+          );
+          attempt--;
+          continue;
+        }
         lastErr = (err as Error).message;
         if (ctx.signal?.aborted) {
           return { ok: false, error: `llm.generate: aborted (${lastErr})` };

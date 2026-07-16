@@ -35,6 +35,16 @@ export interface ProjectFeatures {
    * docs/feature-flags.md.
    */
   budgetCapUsd?: unknown;
+  /**
+   * Whether this project narrates its scenes (voiceover track). **Strict
+   * opt-in**: only the literal `true` enables. Read by `plan.assemble`
+   * (src/dag/runners/planAssemble.ts) to decide whether
+   * `narration_section_ids` is computed from each section's
+   * `mode==='narration'` or forced to `[]` — a project with no narration
+   * track shouldn't accidentally wire up narration-only downstream nodes
+   * just because an upstream planner happened to tag a section that way.
+   */
+  narration?: unknown;
 }
 
 interface ProjectWithFeatures {
@@ -77,4 +87,19 @@ export function getBudgetCapUsd(project: unknown): number | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Narration feature state. **Strict opt-in**: returns `true` ONLY when
+ * `project.features.narration === true`. Missing field, missing
+ * `features`, or a non-boolean value → `false`.
+ */
+export function isNarrationEnabled(project: unknown): boolean {
+  if (project && typeof project === 'object') {
+    const features = (project as ProjectWithFeatures).features;
+    if (features && typeof features === 'object') {
+      return features.narration === true;
+    }
+  }
+  return false;
 }

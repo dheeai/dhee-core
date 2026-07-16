@@ -5,7 +5,7 @@
  * true, missing features, non-object project, wrong-type value) → ON.
  */
 import { describe, it, expect } from 'vitest';
-import { isGateAfterCollectionsEnabled, getBudgetCapUsd } from '../../src/dag/projectFeatures.js';
+import { isGateAfterCollectionsEnabled, getBudgetCapUsd, isNarrationEnabled } from '../../src/dag/projectFeatures.js';
 
 describe('isGateAfterCollectionsEnabled (default ON / opt-out)', () => {
   it('ON when explicitly true', () => {
@@ -65,5 +65,20 @@ describe('getBudgetCapUsd (strict opt-in number)', () => {
     expect(getBudgetCapUsd(null)).toBeUndefined();
     expect(getBudgetCapUsd(undefined)).toBeUndefined();
     expect(getBudgetCapUsd('project')).toBeUndefined();
+  });
+});
+
+describe('isNarrationEnabled (strict opt-in, default OFF)', () => {
+  it('true only when explicitly true', () => {
+    expect(isNarrationEnabled({ features: { narration: true } })).toBe(true);
+  });
+
+  it('false when explicitly false, missing, or wrong-typed', () => {
+    expect(isNarrationEnabled({ features: { narration: false } })).toBe(false);
+    expect(isNarrationEnabled({ features: {} })).toBe(false);
+    expect(isNarrationEnabled({ features: { narration: 'true' } })).toBe(false);
+    expect(isNarrationEnabled({})).toBe(false);
+    expect(isNarrationEnabled(null)).toBe(false);
+    expect(isNarrationEnabled(undefined)).toBe(false);
   });
 });

@@ -159,6 +159,29 @@ a paid backend.
 
 Landed 2026-06-10.
 
+### `narration`
+
+**Default: `false` (strict opt-in).**
+
+Whether this project narrates its scenes (a voiceover track). Consumed
+by the `plan.assemble` runner (`src/dag/runners/planAssemble.ts`) when
+computing `narration_section_ids` on the assembled `scenes_plan.json`:
+with the flag ON, sections whose `mode==='narration'` are collected (in
+scene order) into `narration_section_ids`; with the flag OFF (or
+missing/legacy projects), `narration_section_ids` is always `[]`
+regardless of what the upstream planner tagged — a non-narrated project
+shouldn't accidentally wire up narration-only downstream nodes just
+because a scene fragment happened to carry `mode:'narration'`.
+
+**Read / consumed by:**
+- `isNarrationEnabled` (`src/dag/projectFeatures.ts`) — the reader.
+- `plan.assemble` (`src/dag/runners/planAssemble.ts`) — gates
+  `narration_section_ids`.
+- `initializeProject` (`src/dag/initializeProject.ts`) — seeds `false`
+  so new projects show the field.
+
+Landed 2026-07-16.
+
 ### `skipHoldingBeatLF`
 
 **Default: `false`**

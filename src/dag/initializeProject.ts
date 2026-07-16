@@ -129,6 +129,9 @@ export function initializeProject(params: InitializeProjectParams): InitializePr
     // seed just makes the default visible/editable.
     features: {
       gateAfterCollections: true,
+      // Strict opt-in (default OFF) — see src/dag/projectFeatures.ts
+      // isNarrationEnabled and docs/feature-flags.md.
+      narration: false,
       // Budget backstop: stamped only when the caller (desktop) supplies
       // a valid cap. The reader (getBudgetCapUsd) treats a missing /
       // ≤0 / non-finite value as "no cap", so omitting it keeps headless

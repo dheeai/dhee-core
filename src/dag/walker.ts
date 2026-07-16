@@ -886,6 +886,62 @@ function classifyLocalResource(
   };
 }
 
+/**
+ * How many instances of `node`'s collection may run concurrently.
+ * Resolution order: `node.runner.config.concurrency` (number) → env
+ * `DHEE_COLLECTION_CONCURRENCY` → `1` (today's serial behavior).
+ *
+ * Hard guards clamp to 1 regardless of config/env:
+ *   - the node's tool is not an `llm.*` call (GPU/ffmpeg/comfy/cv/vlm
+ *     runners stay serial — concurrency here is scoped to cheap,
+ *     network-bound LLM calls only).
+ *   - the node has any `scope: 'previousN'` input — those instances read
+ *     the PRIOR instance's completed output, an inherent serial
+ *     dependency that concurrency would silently break.
+ */
+function resolveCollectionConcurrency(node: NodeDef): number {
+  const forceSerial =
+    !node.runner.tool.startsWith('llm.') ||
+    node.inputs.some((inp) => inp.scope === 'previousN');
+  if (forceSerial) return 1;
+
+  const cfgVal = (node.runner.config as Record<string, unknown> | undefined)?.['concurrency'];
+  if (typeof cfgVal === 'number' && Number.isFinite(cfgVal) && cfgVal >= 1) {
+    return Math.floor(cfgVal);
+  }
+
+  const envVal = process.env['DHEE_COLLECTION_CONCURRENCY'];
+  if (envVal !== undefined) {
+    const n = Number(envVal);
+    if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+  }
+
+  return 1;
+}
+
+/**
+ * Bounded promise-pool: runs `worker` over `items`, at most `limit` at
+ * once. Workers pull the next index from a shared cursor as they free
+ * up, so a fast item doesn't wait on a slow sibling before picking up
+ * the next piece of work.
+ */
+async function runWithConcurrencyPool<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const lanes = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      await worker(items[i]!);
+    }
+  });
+  await Promise.all(lanes);
+}
+
 /** Walk the bundle and run every reachable node to completion. */
 interface WalkResult {
   ok: boolean;
@@ -1369,7 +1425,23 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     // by the in-loop short-circuit below, pending nodes run. No outer
     // filter needed.
 
-    for (const inst of insts) {
+    /**
+     * Outcome of processing one instance, so the dispatch loop below
+     * (serial for-loop OR bounded pool) can translate it into the same
+     * continue/break/return control flow the old inline loop body used.
+     */
+    type InstanceStepOutcome =
+      | { kind: 'skip' }
+      | { kind: 'budget-halt' }
+      | { kind: 'fail'; error: string }
+      | { kind: 'done' };
+
+    // The full per-instance body, unchanged from the pre-concurrency
+    // inline loop except that `continue`/`break`/`return {ok:false,...}`
+    // are now `return`s of an InstanceStepOutcome so the dispatch loop
+    // can decide what to do — serially (identical order/timing to
+    // before) or via the bounded pool below.
+    const runInstance = async (inst: NodeInstance): Promise<InstanceStepOutcome> => {
       const stateKey = inst.itemId ? `${node.id}:${inst.itemId}` : node.id;
 
       // State-as-truth resume: if walkState says completed AND the
@@ -1403,7 +1475,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
               persistState();
             }
             log(`◌ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} (already completed)`);
-            continue;
+            return { kind: 'skip' };
           }
         }
       }
@@ -1448,7 +1520,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             // Best-effort — the budget halt still returns via WalkResult.
           }
         }
-        break;
+        return { kind: 'budget-halt' };
       }
 
       // Honor any agent-recorded runner.swapped events for this
@@ -1472,7 +1544,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
           state.nodes[stateKey] = { status: 'failed', error: err };
           persistState();
         }
-        return { ok: false, error: err, instances: allInstances };
+        return { kind: 'fail', error: err };
       }
 
       const cfg = buildRunnerConfig(inst, opts.projectDir, instancesById);
@@ -1855,7 +1927,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             },
           });
         }
-        return { ok: false, error: result.error, instances: allInstances };
+        return { kind: 'fail', error: result.error };
       }
 
       inst.status = 'completed';
@@ -1972,6 +2044,41 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         }
       }
       log(`✓ ${node.id}${inst.itemId ? `[${inst.itemId}]` : ''} → ${result.outputPath}`);
+      return { kind: 'done' };
+    };
+
+    // Dispatch this node's instances. Default (concurrency<=1) is a
+    // plain serial for-loop over `runInstance` — the exact same
+    // operations, in the exact same order, as the pre-concurrency
+    // inline loop body, so default behavior is unchanged. concurrency>1
+    // (opt-in, and only reachable when resolveCollectionConcurrency's
+    // hard guards allow it) runs a bounded pool instead.
+    const collectionConcurrency = resolveCollectionConcurrency(node);
+    if (collectionConcurrency <= 1) {
+      for (const inst of insts) {
+        const outcome = await runInstance(inst);
+        if (outcome.kind === 'budget-halt') break;
+        if (outcome.kind === 'fail') {
+          return { ok: false, error: outcome.error, instances: allInstances };
+        }
+        // 'skip' | 'done' → advance to the next instance.
+      }
+    } else {
+      let poolFailure: string | undefined;
+      let poolBudgetHalt = false;
+      await runWithConcurrencyPool(insts, collectionConcurrency, async (inst) => {
+        // Once a failure or budget-halt has been observed, stop
+        // dispatching NEW instances — workers already in flight are
+        // left to finish (their side effects are self-contained: a
+        // distinct stateKey, their own event-log entries).
+        if (poolFailure !== undefined || poolBudgetHalt) return;
+        const outcome = await runInstance(inst);
+        if (outcome.kind === 'fail' && poolFailure === undefined) poolFailure = outcome.error;
+        if (outcome.kind === 'budget-halt') poolBudgetHalt = true;
+      });
+      if (poolFailure !== undefined) {
+        return { ok: false, error: poolFailure, instances: allInstances };
+      }
     }
 
     // Stop-after-each-collection gate. Fires once this collection node
