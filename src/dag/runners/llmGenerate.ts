@@ -461,6 +461,18 @@ function tryParseJson(raw: string): { ok: true; value: unknown } | { ok: false; 
   try {
     return { ok: true, value: JSON.parse(s) };
   } catch (err) {
+    // Tolerate trailing junk after an otherwise-complete value: some models repeat
+    // their object, or leak a role token (e.g. "response") between duplicate copies.
+    // JSON.parse reports the offset where the extra non-whitespace begins — re-parse
+    // just the valid prefix so one clean object still succeeds.
+    const m = /position (\d+)/.exec((err as Error).message);
+    if (m) {
+      try {
+        return { ok: true, value: JSON.parse(s.slice(0, Number(m[1]))) };
+      } catch {
+        /* fall through to the error below */
+      }
+    }
     return {
       ok: false,
       error: `LLM returned malformed JSON. Parse error: ${(err as Error).message}. Raw output: ${raw}`,

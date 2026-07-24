@@ -889,21 +889,24 @@ function classifyLocalResource(
 /**
  * How many instances of `node`'s collection may run concurrently.
  * Resolution order: `node.runner.config.concurrency` (number) → env
- * `DHEE_COLLECTION_CONCURRENCY` → `1` (today's serial behavior).
+ * `DHEE_COLLECTION_CONCURRENCY` → `1` (serial, the default).
  *
- * Hard guards clamp to 1 regardless of config/env:
- *   - the node's tool is not an `llm.*` call (GPU/ffmpeg/comfy/cv/vlm
- *     runners stay serial — concurrency here is scoped to cheap,
- *     network-bound LLM calls only).
- *   - the node has any `scope: 'previousN'` input — those instances read
- *     the PRIOR instance's completed output, an inherent serial
- *     dependency that concurrency would silently break.
+ * Concurrency is OPT-IN and available to ANY runner — a node runs its
+ * instances in parallel only when the bundle author explicitly sets
+ * `config.concurrency` (or the env is set). The engine does not restrict
+ * this by tool type: a runner that is safe to parallelise (isolated
+ * per-item outputs/workdirs — e.g. `remotion.agentic`, `llm.generate`, or a
+ * future parallel image runner) simply opts in; the default stays serial so
+ * nothing parallelises by accident.
+ *
+ * The ONE hard correctness guard (clamps to 1 regardless of opt-in):
+ *   - the node has any `scope: 'previousN'` input — those instances read the
+ *     PRIOR instance's completed output, an inherent serial dependency that
+ *     concurrency would silently break.
  */
 function resolveCollectionConcurrency(node: NodeDef): number {
-  const forceSerial =
-    !node.runner.tool.startsWith('llm.') ||
-    node.inputs.some((inp) => inp.scope === 'previousN');
-  if (forceSerial) return 1;
+  // Correctness-only guard: previousN makes item N depend on item N-1.
+  if (node.inputs.some((inp) => inp.scope === 'previousN')) return 1;
 
   const cfgVal = (node.runner.config as Record<string, unknown> | undefined)?.['concurrency'];
   if (typeof cfgVal === 'number' && Number.isFinite(cfgVal) && cfgVal >= 1) {
@@ -1730,7 +1733,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             if (existsSync(abs)) {
               pathsById[u.itemId] = abs;
               if (inlineForLlm) {
-                const isBinary = /\.(png|jpg|jpeg|webp|gif|mp4|webm|mov|wav|mp3)$/i.test(u.outputRel);
+                const isBinary = /\.(png|jpg|jpeg|webp|gif|mp4|webm|mov|wav|mp3|flac|ogg|m4a|aac)$/i.test(u.outputRel);
                 if (isBinary) {
                   contentById[u.itemId] = abs;
                 } else {
@@ -1776,7 +1779,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         // path on ctx.inputs[<upstream>]. Reading them as utf-8 would
         // be useless. Text files (.md, .json) → expose the content
         // (parsed for json).
-        const isBinary = /\.(png|jpg|jpeg|webp|gif|mp4|webm|mov|wav|mp3)$/i.test(matching.outputRel);
+        const isBinary = /\.(png|jpg|jpeg|webp|gif|mp4|webm|mov|wav|mp3|flac|ogg|m4a|aac)$/i.test(matching.outputRel);
         if (isBinary) {
           resolvedInputs[inp.from] = upAbs;
           continue;
