@@ -15,7 +15,8 @@
  * are trivial in-memory stubs; they aren't what's under test here.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 
@@ -24,13 +25,24 @@ import { __resetGlobalRegistryForTesting, getGlobalRegistry } from '../../src/da
 import '../../src/dag/runners/index.js'; // side-effect: bootstraps real 'plan.assemble' etc. (re-registered fresh below anyway)
 import { createLlmGenerateRunner } from '../../src/dag/runners/llmGenerate.js';
 import { planAssembleRunner } from '../../src/dag/runners/planAssemble.js';
-// The bundle's scenes_plan node uses the EXTERNAL plan.assemble_keyframes runner.
-// __resetGlobalRegistryForTesting() drops ecosystem-discovered runners, so it has
-// to be re-registered by hand below alongside the core ones.
-import { runners as planKeyframeRunners } from 'dhee-runner-plan-keyframes';
+// NOTE: `plan.assemble_keyframes` (the runner the bundle's scenes_plan node now
+// uses) lives in the EXTERNAL dhee-runner-plan-keyframes package, which is only
+// present via a local symlink. It is loaded dynamically in beforeEach so this file
+// still parses where the package is absent, and the suite skips instead of erroring.
 import type { DagBundle, NodeDef, Runner, RunnerContext } from '../../src/dag/schema.js';
 
-const BUNDLE_DIR = '/Users/ganaraj/.kshana/bundles/illustrated_story_animated';
+const BUNDLE_DIR =
+  process.env['DHEE_ILLUSTRATED_STORY_BUNDLE_DIR'] ??
+  join(homedir(), '.kshana', 'bundles', 'illustrated_story_animated');
+
+/**
+ * This file drives the REAL external bundle plus the REAL external
+ * `plan.assemble_keyframes` runner, so it can only run where both are
+ * installed. On CI (and any clone without them) it SKIPS rather than fails —
+ * a machine-specific integration test must not be reported as a broken engine.
+ * Properly, it belongs in the bundle's own repo; see dheeai/dhee-core#192.
+ */
+const CAN_RUN = existsSync(join(BUNDLE_DIR, 'bundle.json'));
 
 function loadRealBundleJson(): { nodes: NodeDef[]; inputs: Array<Record<string, unknown>> } {
   return JSON.parse(readFileSync(join(BUNDLE_DIR, 'bundle.json'), 'utf-8'));
@@ -336,7 +348,7 @@ function writeProjectJson(narration: boolean): void {
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify({ id: 'p1', name: 'Test', narration }));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   projectDir = mkdtempSync(join(tmpdir(), 'istory-anim-split-'));
   capturedRequests = [];
   sceneDetailStartOrder = [];
@@ -377,7 +389,10 @@ beforeEach(() => {
     { tool: 'stub.motion_draft', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
     makeStubProducer(JSON.stringify({ motion: 'slow push-in', intensity: 'subtle' })),
   );
-  for (const { manifest, runner } of planKeyframeRunners) {
+  const planKeyframes = (await import('dhee-runner-plan-keyframes')) as {
+    runners: Array<{ manifest: Parameters<typeof reg.register>[0]; runner: Parameters<typeof reg.register>[1] }>;
+  };
+  for (const { manifest, runner } of planKeyframes.runners) {
     reg.register(manifest, runner);
   }
 });
@@ -387,7 +402,7 @@ afterEach(() => {
   __resetGlobalRegistryForTesting();
 });
 
-describe('illustrated_story_animated — scenes_plan split (scene_outline → scene_detail → plan.assemble)', () => {
+describe.skipIf(!CAN_RUN)('illustrated_story_animated — scenes_plan split (scene_outline → scene_detail → plan.assemble)', () => {
   it('fans scene_detail out to one instance per outline scene, runs them in parallel (concurrency:4), and assembles a schema-valid scenes_plan.json', async () => {
     writeProjectJson(true);
 
