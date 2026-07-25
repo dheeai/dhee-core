@@ -34,7 +34,34 @@ describe('computeDemoSegments', () => {
   });
 });
 
-describe('ffmpeg.demo_overlay behavioral', () => {
+/**
+ * `ffmpeg.demo_overlay` builds its inset→fullscreen→collapse choreography with
+ * the `xfade` filter, which is NOT in every ffmpeg build. CI hits exactly that:
+ * `[AVFilterGraph] No such filter: 'xfade'`.
+ *
+ * Skip the behavioural render where the filter is absent, but print the resolved
+ * binary and its version first — a bare skip would hide a real portability
+ * problem (the one bundle using this runner, ugc_ad_software_desktop, would fail
+ * on such a host), and without the path/version there is no way to tell WHICH
+ * ffmpeg got picked. See dheeai/dhee-core#203.
+ */
+function xfadeAvailable(): boolean {
+  const bin = ffmpegBin();
+  const filters = spawnSync(bin, ['-hide_banner', '-filters'], { encoding: 'utf-8' });
+  const has = (filters.stdout ?? '').split('\n').some((l) => /^\s*\S+\s+xfade\s/.test(l));
+  if (!has) {
+    const v = spawnSync(bin, ['-hide_banner', '-version'], { encoding: 'utf-8' });
+    console.warn(
+      `[demo_overlay] SKIPPING behavioural render — no 'xfade' filter.\n` +
+        `  ffmpegBin() -> ${bin}\n` +
+        `  ${(v.stdout ?? '').split('\n')[0] ?? 'version unavailable'}`,
+    );
+  }
+  return has;
+}
+const HAS_XFADE = xfadeAvailable();
+
+describe.skipIf(!HAS_XFADE)('ffmpeg.demo_overlay behavioral', () => {
   let dir: string, base: string, shot: string, out: string;
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'demo-ov-'));
