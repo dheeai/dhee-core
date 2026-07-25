@@ -8,7 +8,6 @@
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';
-import { comfyTtiRunner } from './comfyTti.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 // `cv.captions` REMOVED — it is superseded by the external `video.captions`
 // (dhee-runner-presenter), and its source was never committed here, so this
@@ -72,18 +71,11 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
   // editConfig, driven by the external comfy.image_edit. Verified: identical
   // pruned graphs for 0-3 present references, including the transitive 2-hop
   // and 3-hop redirect cases and non-contiguous holes. Same play as comfy.boogu.
-  {
-    manifest: {
-      tool: 'comfy.tti',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy text-to-image',
-      description:
-        'Generates an image from a text prompt via a ComfyUI text-to-image workflow (no reference images). Used for character / setting reference renders.',
-    },
-    runner: comfyTtiRunner,
-  },
+  // comfy.tti RETIRED — not externalized into its own package. A text-to-image
+  // workflow is just an image workflow with ZERO input images, so the external
+  // comfy.image_edit serves it from the same manifest-driven engine (v0.7.0),
+  // with editConfig.imageSlots: []. Verified: identical submitted graphs on both
+  // tti workflow variants. Registering it here would SHADOW that package.
   // comfy.fl2v DELETED — zero usage anywhere. No external bundle node referenced
   // it, and its only consumer was the built-in narrative_shot_by_shot, which had
   // 0 of 91 projects and is archived. Nothing to externalize.
