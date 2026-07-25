@@ -10,8 +10,8 @@ import { createComfyTtiRunner } from '../../../src/dag/runners/comfyTti.js';
 import type { ComfyImageClient } from '../../../src/dag/runners/comfyExecutor.js';
 import type { RunnerContext, NodeDef } from '../../../src/dag/schema.js';
 
-const REAL_TTI = resolve('src/dag/bundles/narrative_prompt_relay/workflows/zimage_tti.json');
-const REAL_TTI_MANIFEST = resolve('src/dag/bundles/narrative_prompt_relay/workflows/zimage_tti.manifest.json');
+const REAL_TTI = '/Users/ganaraj/.kshana/bundles/narrative_prompt_relay/workflows/zimage_tti.json';
+const REAL_TTI_MANIFEST = '/Users/ganaraj/.kshana/bundles/narrative_prompt_relay/workflows/zimage_tti.manifest.json';
 
 interface Stub {
   queued: Array<Record<string, { inputs: Record<string, unknown> }>>;

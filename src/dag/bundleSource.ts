@@ -21,9 +21,6 @@
  *      kshana-core/dist/bundles → <app>/Resources/bundles).
  *   3. ~/.kshana/bundles     — legacy `user:` location, kept for
  *      back-compat with projects created before externalization.
- *   4. <REPO_ROOT>/src/dag/bundles — dev/source fallback (the path
- *      that worked pre-externalization). Lets vitest + headless
- *      scripts keep running without env vars.
  *
  * Parse and resolve are deliberately separate functions: the parser
  * never touches the filesystem (pure, runs in tests without setup);
@@ -33,7 +30,6 @@
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { REPO_ROOT } from '../agent/pi/paths.js';
 import { resolveNpmBundleDir } from './ecosystem.js';
 
 export type BundleSource =
@@ -134,9 +130,10 @@ export function getBundleSearchRoots(): string[] {
   // Legacy `user:` location — back-compat for projects that predate
   // the env-driven layout.
   roots.push(resolve(homedir(), '.kshana/bundles'));
-  // Dev / source fallback — the in-repo source tree. Keeps vitest +
-  // headless scripts working without setting env vars.
-  roots.push(resolve(REPO_ROOT, 'src/dag/bundles'));
+  // The in-repo `src/dag/bundles` fallback is GONE. It only existed to let
+  // vitest + headless scripts run without env vars, and it was the last thing
+  // keeping bundles inside the engine (dheeai/dhee-core#191, #200). Tests now
+  // seed their own fixture bundles; product bundles live in their own repos.
   return roots;
 }
 

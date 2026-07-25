@@ -9,9 +9,7 @@
  */
 import type { Runner } from '../schema.js';
 import { comfyTtiRunner } from './comfyTti.js';
-import { comfyFl2vRunner } from './comfyFl2v.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
-import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { ffmpegOverlayRunner } from './ffmpegOverlay.js';
 import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
@@ -84,18 +82,9 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: comfyTtiRunner,
   },
-  {
-    manifest: {
-      tool: 'comfy.fl2v',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy first/last-frame to video',
-      description:
-        'Renders a short video from a required first frame, an optional last frame, and a motion prompt via a ComfyUI FL2V workflow.',
-    },
-    runner: comfyFl2vRunner,
-  },
+  // comfy.fl2v DELETED — zero usage anywhere. No external bundle node referenced
+  // it, and its only consumer was the built-in narrative_shot_by_shot, which had
+  // 0 of 91 projects and is archived. Nothing to externalize.
   // comfy.ltx_director moved OUT of core into its own external runner package
   // (dhee-runner-ltx-director) — discovered at startup like the other
   // dhee-runner-* packages. Bundles declaring `comfy.ltx_director` resolve it
@@ -117,18 +106,10 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: ffmpegConcatRunner,
   },
-  {
-    manifest: {
-      tool: 'ffmpeg.shot_clip',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'ffmpeg shot clip (stub)',
-      description:
-        'Synthesizes a 10s MP4 clip for one shot from a shot_breakdown entry. Stand-in for the real LTX video runner — produces real binary artifacts (animated colored boxes; no text overlay) so end-to-end tests flow real videos through events + CAS + branches without needing GPU.',
-    },
-    runner: ffmpegShotClipRunner,
-  },
+  // ffmpeg.shot_clip DELETED — a TEST stub, never a product runner. Zero external
+  // bundle nodes; its only consumer was the archived narrative_text_video. The
+  // GPU-free "real video bytes" role belongs in tests/fixtures (#192), not in the
+  // shipped registry.
   {
     manifest: {
       tool: 'ffmpeg.kenburns',

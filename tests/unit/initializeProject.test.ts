@@ -114,7 +114,7 @@ describe('initializeProject', () => {
     initializeProject({
       projectDir,
       name: 'X',
-      bundleId: 'narrative_shot_by_shot',
+      bundleId: 'narrative_prompt_relay',
       inputs: {
         story_input: story,
         targetDuration: 30,
