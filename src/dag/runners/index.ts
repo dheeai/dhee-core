@@ -8,7 +8,6 @@
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';
-import { comfyKleinRunner } from './comfyKlein.js';
 import { comfyTtiRunner } from './comfyTti.js';
 import { comfyFl2vRunner } from './comfyFl2v.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
@@ -69,21 +68,11 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: llmGenerateRunner,
   },
-  {
-    // Bound to the Flux 2 Klein edit workflow. Endpoint URL resolved at
-    // runner.run() time from ENDPOINT_<name> env (same as the other comfy
-    // runners), validated with an actionable error pointing at Settings.
-    manifest: {
-      tool: 'comfy.klein',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy Klein (Flux 2 reference edit)',
-      description:
-        'Drives the Flux 2 Klein edit workflow: a base reference image plus up to 3 optional references threaded through a ReferenceLatent chain. Absent optional references are pruned from the graph; uploads + parameter injection + output download handled by the shared executor.',
-    },
-    runner: comfyKleinRunner,
-  },
+  // comfy.klein RETIRED — not externalized. Its only real code was a node-id
+  // prune table, which is now DATA in each bundle's klein.manifest.json
+  // editConfig, driven by the external comfy.image_edit. Verified: identical
+  // pruned graphs for 0-3 present references, including the transitive 2-hop
+  // and 3-hop redirect cases and non-contiguous holes. Same play as comfy.boogu.
   {
     manifest: {
       tool: 'comfy.tti',

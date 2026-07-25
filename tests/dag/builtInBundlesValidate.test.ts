@@ -47,6 +47,16 @@ const EXTERNAL_RUNNER_STUBS: Array<{
     pkg: 'dhee-runner-qwen-edit-chain',
     output: 'image',
   },
+  {
+    // RETIRED rather than externalized: comfy.klein's node-id prune table is now
+    // editConfig data in each bundle's klein.manifest.json, driven by
+    // comfy.image_edit. Bundles still naming comfy.klein are stale.
+    tool: 'comfy.klein',
+    version: '0.1.0',
+    displayName: 'Comfy Klein (retired → comfy.image_edit)',
+    pkg: 'dhee-runner-image-edit',
+    output: 'image',
+  },
 ];
 {
   const reg = getGlobalRegistry();
