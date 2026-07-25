@@ -21,7 +21,6 @@ import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
 // is preserved at dhee-runner-presenter `reference/cv-captions-legacy.ts` as
 // the input for porting its `asrEngine:'llm'` + `translateTo` paths (#196).
 import { llmGenerateRunner } from './llmGenerate.js';
-import { planAssembleRunner } from './planAssemble.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
 // Dhee Cloud media runners — first-party runners for the Dhee Cloud media
 // proxy lane (image/video generation via /api/cloud/media/*). Implemented
@@ -166,18 +165,12 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: ffmpegDemoOverlayRunner,
   },
-  {
-    manifest: {
-      tool: 'plan.assemble',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Plan Assemble',
-      description:
-        'Deterministic (no LLM calls) assembly of the canonical scenes_plan.json from per-scene fragments (a scope:all collection) plus the outline stage title.',
-    },
-    runner: planAssembleRunner,
-  },
+  // plan.assemble DELETED — dead code, not externalized. Zero bundles dispatch
+  // it: every consumer moved to the EXTERNAL plan.assemble_keyframes
+  // (dhee-runner-plan-keyframes), which documents itself as "a STRICT SUPERSET
+  // of dhee-core's built-in plan.assemble" and ships a parity suite asserting
+  // byte-identical output at keyframe ceiling 1. So the behaviour is still
+  // guarded — just not here. (#197's "one consumer" premise was stale.)
   {
     manifest: {
       tool: 'vlm.judge',

@@ -24,7 +24,6 @@ import { walkBundle } from '../../src/dag/walker.js';
 import { __resetGlobalRegistryForTesting, getGlobalRegistry } from '../../src/dag/runners/registry.js';
 import '../../src/dag/runners/index.js'; // side-effect: bootstraps real 'plan.assemble' etc. (re-registered fresh below anyway)
 import { createLlmGenerateRunner } from '../../src/dag/runners/llmGenerate.js';
-import { planAssembleRunner } from '../../src/dag/runners/planAssemble.js';
 // NOTE: `plan.assemble_keyframes` (the runner the bundle's scenes_plan node now
 // uses) lives in the EXTERNAL dhee-runner-plan-keyframes package, which is only
 // present via a local symlink. It is loaded dynamically in beforeEach so this file
@@ -376,10 +375,6 @@ beforeEach(async () => {
   reg.register(
     { tool: 'llm.generate', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
     createLlmGenerateRunner({ clientFactory: () => makeMockLlmClient() }),
-  );
-  reg.register(
-    { tool: 'plan.assemble', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
-    planAssembleRunner,
   );
   reg.register(
     { tool: 'stub.character_state', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
