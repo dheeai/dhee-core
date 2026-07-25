@@ -94,10 +94,24 @@ describe('narrative_qwen_chain_relay bundle', () => {
     expect(tmpl).toMatch(/primary subject first/i);
   });
 
-  it('comfy.qwen_edit_chain runner is registered in the global registry', () => {
-    const reg = getGlobalRegistry();
-    const r = reg.get('comfy.qwen_edit_chain');
-    expect(r, 'comfy.qwen_edit_chain runner must be registered').toBeTruthy();
-    expect(r?.describe().id).toBe('comfy.qwen_edit_chain');
+  it('comfy.qwen_edit_chain resolves from the EXTERNAL runner package, not a built-in', async () => {
+    // The runner moved out to dhee-runner-qwen-edit-chain (#194), so it is no
+    // longer in BUILTIN_MANIFESTS — it arrives through the ecosystem scan.
+    //
+    // Asserting it is NOT a built-in is the load-bearing half: ecosystem.ts
+    // skips a tool already in the registry, so a leftover built-in would
+    // silently SHADOW the external package (the bug 4e7bf411 fixed for
+    // comfy.ltx_director). A plain "is it registered" check passes either way
+    // and would not have caught that.
+    const { getGlobalRegistry: freshRegistry } = await import('../../src/dag/runners/index.js');
+    expect(freshRegistry().get('comfy.qwen_edit_chain')).toBeUndefined();
+
+    const { ensureNpmRunnersLoaded } = await import('../../src/dag/ecosystem.js');
+    await ensureNpmRunnersLoaded();
+    const r = getGlobalRegistry().get('comfy.qwen_edit_chain');
+    // Skip rather than fail where the external package isn't installed (CI):
+    // this asserts wiring, and a missing optional package is not a broken engine.
+    if (!r) return;
+    expect(r.describe().id).toBe('comfy.qwen_edit_chain');
   });
 });

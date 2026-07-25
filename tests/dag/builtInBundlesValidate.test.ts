@@ -18,24 +18,49 @@ const BUNDLE_IDS = [
 
 const BUNDLES_DIR = resolve(__dirname, '../../src/dag/bundles');
 
-// `comfy.ltx_director` now ships as an EXTERNAL runner package
-// (dhee-runner-ltx-director), discovered from the npm ecosystem at runtime
-// rather than registered as a built-in. Several narrative relay bundles still
-// declare it, so register a stub into the global registry here to reflect that
-// it is provided externally — keeping this structural check honest without
-// depending on the external package being installed in CI.
+// Runners these bundles declare that now ship as EXTERNAL packages, discovered
+// from the npm ecosystem at runtime rather than registered as built-ins. Stub
+// them into the registry so this structural check stays honest without
+// depending on the external packages being installed in CI.
+//
+// This list only grows as dheeai/dhee-core#191 proceeds. It is also the signal
+// that this whole file belongs in the bundle repos (#192): it validates PRODUCT
+// bundles, so every runner they externalize adds a stub here.
+const EXTERNAL_RUNNER_STUBS: Array<{
+  tool: string;
+  version: string;
+  displayName: string;
+  pkg: string;
+  output: 'video' | 'image';
+}> = [
+  {
+    tool: 'comfy.ltx_director',
+    version: '0.2.0',
+    displayName: 'LTX Director',
+    pkg: 'dhee-runner-ltx-director',
+    output: 'video',
+  },
+  {
+    tool: 'comfy.qwen_edit_chain',
+    version: '0.2.0',
+    displayName: 'Comfy Qwen Edit chain',
+    pkg: 'dhee-runner-qwen-edit-chain',
+    output: 'image',
+  },
+];
 {
   const reg = getGlobalRegistry();
-  if (!reg.get('comfy.ltx_director')) {
+  for (const s of EXTERNAL_RUNNER_STUBS) {
+    if (reg.get(s.tool)) continue;
     reg.register(
-      { tool: 'comfy.ltx_director', version: '0.2.0', engineCompat: '>=0.1.0', credentials: [] },
+      { tool: s.tool, version: s.version, engineCompat: '>=0.1.0', credentials: [] },
       {
         describe: () => ({
-          id: 'comfy.ltx_director',
-          displayName: 'LTX Director (external stub)',
-          description: 'Provided by dhee-runner-ltx-director (external).',
+          id: s.tool,
+          displayName: `${s.displayName} (external stub)`,
+          description: `Provided by ${s.pkg} (external).`,
           capabilities: [],
-          modalities: { input: ['image', 'text'], output: ['video'] },
+          modalities: { input: ['image', 'text'], output: [s.output] },
           configSchema: {},
         }),
         run: async () => ({ ok: true as const, outputPath: '' }),

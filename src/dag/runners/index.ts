@@ -11,7 +11,6 @@ import type { Runner } from '../schema.js';
 import { comfyKleinRunner } from './comfyKlein.js';
 import { comfyTtiRunner } from './comfyTti.js';
 import { comfyFl2vRunner } from './comfyFl2v.js';
-import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
 import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
@@ -113,18 +112,11 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
   // (dhee-runner-ltx-director) — discovered at startup like the other
   // dhee-runner-* packages. Bundles declaring `comfy.ltx_director` resolve it
   // from there. See the open-runner-ecosystem convention.
-  {
-    manifest: {
-      tool: 'comfy.qwen_edit_chain',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy Qwen Edit chain',
-      description:
-        'Qwen Image Edit 2511 + Multi-Angle LoRA + Lightning 4-step LoRA. Iteratively edits a prior shot (LLM-picked from previousN candidates) into the next shot via camera-rotation guidance. Enables consistent character/setting continuity across a scene at low cost.',
-    },
-    runner: comfyQwenEditChainRunner,
-  },
+  // comfy.qwen_edit_chain moved OUT of core into its own external package
+  // (dhee-runner-qwen-edit-chain) — discovered at startup like the other
+  // dhee-runner-* packages. It must NOT be registered here: ecosystem.ts skips a
+  // tool already in the registry, so a leftover built-in silently SHADOWS the
+  // external runner (the bug 4e7bf411 fixed for comfy.ltx_director).
   {
     manifest: {
       tool: 'ffmpeg.concat',
