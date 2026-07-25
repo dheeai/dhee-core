@@ -13,7 +13,7 @@
  * bundle. See docs/dag-bundles-sketch.md "Backward walker" section.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, extname, relative, resolve } from 'node:path';
 import { openEventLog } from './eventLog/EventLog.js';
 import { computeCostLedger } from './eventLog/projectCost.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
@@ -40,8 +40,18 @@ function formatSrtTime(totalSeconds: number): string {
     `${ms.toString().padStart(3, '0')}`
   );
 }
-import type { DagBundle, LLMAccess, NodeDef, RunnerContext, RunnerResult } from './schema.js';
+import type {
+  DagBundle,
+  GenerationCacheAccess,
+  LLMAccess,
+  NodeDef,
+  ProjectAccess,
+  RunnerContext,
+  RunnerResult,
+} from './schema.js';
 import type { BundleInputDecl } from './schema.js';
+import { openGenerationCache } from './cas/GenerationCache.js';
+import { getProjectCacheScope } from './projectIdentity.js';
 import { createRunnerLLMAccess } from './llmAccess.js';
 import { getRunner } from './runners/index.js';
 import { getGlobalRegistry } from './runners/registry.js';
@@ -1102,6 +1112,24 @@ async function walkBundleWithReviewLoop(
  * walkState says it's already done + output exists). See `walkBundle`
  * for the review-loop wrapper.
  */
+/**
+ * `project.features` for `ctx.project.features`, tolerating a missing or
+ * malformed project.json — feature flags are advisory, so an unreadable file
+ * means "no flags", never a failed walk.
+ */
+function readProjectFeatures(projectDir: string): Readonly<Record<string, unknown>> {
+  try {
+    const raw = readFileSync(resolve(projectDir, 'project.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as { features?: unknown };
+    const f = parsed.features;
+    return f && typeof f === 'object' && !Array.isArray(f)
+      ? Object.freeze({ ...(f as Record<string, unknown>) })
+      : Object.freeze({});
+  } catch {
+    return Object.freeze({});
+  }
+}
+
 async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const cli = opts.cli ?? {};
@@ -1109,6 +1137,53 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   // walk. Runners (esp. SDK-only third-party ones) use this instead of
   // importing a provider directly.
   const runnerLlm = opts.llm ?? createRunnerLLMAccess(opts.projectDir);
+
+  // CAS + project identity handed to every runner via ctx.cache / ctx.project —
+  // built once per walk, mirroring ctx.llm. This is what lets an EXTERNALIZED
+  // runner keep content-addressed caching: previously only in-core runners could
+  // reach GenerationCache, so moving one out silently cost it CAS dedup.
+  // See dheeai/dhee-runner-sdk#4.
+  //
+  // Both are best-effort by contract: `fetch` returning null and `store`
+  // returning null must leave a runner correct, just uncached.
+  const casEnabled = process.env['DHEE_DISABLE_CAS'] !== '1';
+  const runnerCache: GenerationCacheAccess = {
+    enabled: casEnabled,
+    async fetch(key, destAbsPath) {
+      if (!casEnabled) return null;
+      try {
+        const cache = openGenerationCache(
+          process.env['DHEE_CACHE_ROOT'] ? { cacheRoot: process.env['DHEE_CACHE_ROOT'] } : undefined,
+        );
+        const hit = cache.linkInto(key, destAbsPath);
+        return hit ? { hash: hit.hash, ...(hit.metadata ? { metadata: hit.metadata } : {}) } : null;
+      } catch {
+        return null; // a broken cache must never fail a run
+      }
+    },
+    async store(key, sourceAbsPath, o) {
+      if (!casEnabled) return null;
+      try {
+        const cache = openGenerationCache(
+          process.env['DHEE_CACHE_ROOT'] ? { cacheRoot: process.env['DHEE_CACHE_ROOT'] } : undefined,
+        );
+        const ext = o?.ext ?? extname(sourceAbsPath).slice(1) ?? '';
+        const put = cache.put({
+          key,
+          sourcePath: sourceAbsPath,
+          ext,
+          ...(o?.metadata ? { metadata: o.metadata } : {}),
+        });
+        return { hash: put.hash };
+      } catch {
+        return null; // best-effort: the artifact is already produced
+      }
+    },
+  };
+  const runnerProject: ProjectAccess = {
+    cacheScope: getProjectCacheScope(opts.projectDir),
+    features: readProjectFeatures(opts.projectDir),
+  };
 
   // Bundle dependency validation — fail BEFORE walking when a declared
   // runner isn't registered, version doesn't satisfy, or required
@@ -1805,6 +1880,8 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         ...(opts.signal ? { signal: opts.signal } : {}),
         log: (m) => log(`  ${m}`),
         llm: runnerLlm,
+        cache: runnerCache,
+        project: runnerProject,
       };
 
       if (state) {

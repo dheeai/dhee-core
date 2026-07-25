@@ -1,7 +1,7 @@
 {
   "name": "dhee-core",
   "version": "0.1.0",
-  "description": "AI video generation engine — story → screenplay → shots → keyframes → clips → final assembly.",
+  "description": "AI video generation engine \u2014 story \u2192 screenplay \u2192 shots \u2192 keyframes \u2192 clips \u2192 final assembly.",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -139,7 +139,7 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
-    "@dheeai/runner-sdk": "^0.1.0",
+    "@dheeai/runner-sdk": "^0.5.0",
     "@eslint/js": "^9.28.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.29",

@@ -1,6 +1,26 @@
 // kshana-core public entry point (bundle architecture only).
 export * from './dag/walker.js';
+// NOTE: `export *` from both walker and schema is ambiguous for the workflow-alias
+// names. schema.ts is `export type * from '@dheeai/runner-sdk'`, and the SDK now
+// ships its own alias module (v0.4.0) — so `applyAliases`, `readAliases`,
+// `writeAliases`, `endpointSlug`, `WorkflowAliases` and `ComfyWorkflow` arrive
+// from BOTH sides. dhee-core's copies win here because they are the values these
+// consumers already bind to.
+//
+// The real fix is to delete dhee-core's now-duplicate src/dag/workflowAliases.ts
+// and use the SDK's — 9 importers + 2 test files, so it is its own change.
 export * from './dag/schema.js';
+// Explicit re-exports resolve the star-import ambiguity above: dhee-core's own
+// alias module and the SDK's both provide these names. dhee-core's win, because
+// they are the values existing consumers bind to.
+export {
+  applyAliases,
+  endpointSlug,
+  readAliases,
+  writeAliases,
+} from './dag/workflowAliases.js';
+export type { WorkflowAliases } from './dag/workflowAliases.js';
+export type { ComfyWorkflow } from './dag/workflowVerify.js';
 export * from './dag/bundleSource.js';
 export {
   addLocalResourceStartListener,
