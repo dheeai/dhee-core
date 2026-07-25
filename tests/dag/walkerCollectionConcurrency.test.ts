@@ -196,8 +196,23 @@ describe('walker collection concurrency', () => {
     expect(maxInFlight).toBe(1);
   });
 
-  it('stays serial for a non-llm.* tool, even with concurrency configured', async () => {
+  it('honors explicit concurrency for a non-llm.* tool too (opt-in is tool-agnostic)', async () => {
+    // 75ec0b0c dropped the llm.*-only restriction: concurrency is opt-in and
+    // available to ANY runner that is safe to parallelise. The engine does not
+    // gate it by tool type — the default stays serial so nothing parallelises
+    // by accident, and `previousN` remains the one hard clamp (above).
     const bundle = makeBundle({ tool: 'comfy.test', itemCount: 5, concurrency: 5 });
+    const result = await walkBundle({ projectDir, bundle });
+
+    expect(result.ok).toBe(true);
+    expect(maxInFlight).toBe(5);
+  });
+
+  it('still defaults a non-llm.* tool to serial when concurrency is NOT set', async () => {
+    // The important half of "opt-in": absent config, a comfy-style runner must
+    // not suddenly fan out just because the llm.* gate was removed.
+    delete process.env['DHEE_COLLECTION_CONCURRENCY'];
+    const bundle = makeBundle({ tool: 'comfy.test', itemCount: 5 });
     const result = await walkBundle({ projectDir, bundle });
 
     expect(result.ok).toBe(true);

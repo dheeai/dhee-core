@@ -17,7 +17,11 @@ import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
 import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
 import { ffmpegOverlayRunner } from './ffmpegOverlay.js';
 import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
-import { cvCaptionsRunner } from './cvCaptions.js';
+// `cv.captions` REMOVED — it is superseded by the external `video.captions`
+// (dhee-runner-presenter), and its source was never committed here, so this
+// import broke the build on every clone but this one (#202). The legacy source
+// is preserved at dhee-runner-presenter `reference/cv-captions-legacy.ts` as
+// the input for porting its `asrEngine:'llm'` + `translateTo` paths (#196).
 import { llmGenerateRunner } from './llmGenerate.js';
 import { planAssembleRunner } from './planAssemble.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
@@ -156,20 +160,6 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
         'Animates one still image with a subtle Ken Burns zoom/pan and muxes narration audio, sized to that audio. Keeps text-heavy stills (infographics, slides) pixel-sharp — unlike generative video.',
     },
     runner: ffmpegKenBurnsRunner,
-  },
-  {
-    // Legacy built-in (peer of ffmpeg.concat/kenburns) — local whisper + ffmpeg +
-    // a bundle-shipped python renderer. Restored to the registry; was orphaned.
-    manifest: {
-      tool: 'cv.captions',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Karaoke Captions',
-      description:
-        'Burns karaoke / Instagram-style animated captions onto a video. Local faster-whisper word timestamps → a bundle-shipped python (Pillow) renderer; no API key for transcription.',
-    },
-    runner: cvCaptionsRunner,
   },
   {
     manifest: {
