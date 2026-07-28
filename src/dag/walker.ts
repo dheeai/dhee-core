@@ -285,6 +285,11 @@ interface NodeInstance {
   chunkIndex?: number;
   /** Total chunks for the parent scene. */
   chunkCount?: number;
+  /** Position of this item in its itemSource ordering (0-based). The generic
+   * ordering key for `scope: 'previousN'` when the itemId is NOT shot-shaped
+   * (e.g. flattened beats), so any ordered collection — not just `*_shot_N`
+   * chains — can read its predecessors. */
+  itemIndex?: number;
   /** Status. */
   status: 'pending' | 'completed' | 'failed';
   /** After completion: absolute path to the output artifact. */
@@ -649,7 +654,7 @@ function materializeCollection(
         return out;
       }
 
-      return items.map((item) => {
+      return items.map((item, idx) => {
         const itemId =
           typeof item === 'string'
             ? item.replace(/\s+/g, '_').toLowerCase()
@@ -668,6 +673,7 @@ function materializeCollection(
           def: node,
           itemId,
           ...(sceneNumber !== undefined ? { sceneNumber } : {}),
+          itemIndex: idx,
           status: 'pending' as const,
         };
       });
@@ -675,10 +681,11 @@ function materializeCollection(
     // For collection upstreams (e.g. shot_breakdown is one-per-shot,
     // and shot_image is also one-per-shot), each upstream instance
     // becomes one downstream instance with the same itemId.
-    return upstream.map((u) => ({
+    return upstream.map((u, idx) => ({
       def: node,
       ...(u.itemId !== undefined ? { itemId: u.itemId } : {}),
       ...(u.sceneNumber !== undefined ? { sceneNumber: u.sceneNumber } : {}),
+      itemIndex: u.itemIndex ?? idx,
       status: 'pending' as const,
     }));
   }
@@ -1737,8 +1744,15 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             const m = id.match(/(?:^|_)shot_(\d+)$/);
             return m ? parseInt(m[1]!, 10) : undefined;
           };
+          // Generic ordering key: prefer a shot-shaped id (byte-for-byte
+          // back-compat with the shot chains), else fall back to the item's
+          // position in its itemSource ordering — so ANY ordered collection
+          // (e.g. flattened beats) can read its predecessors, not just
+          // `*_shot_N` ids. A collection's items are homogeneous, so there is
+          // no shot/index mixing within one node.
           const currentShotNum = parseShotNum(inst.itemId);
-          if (currentShotNum !== undefined) {
+          const currentOrder = currentShotNum ?? inst.itemIndex;
+          if (currentOrder !== undefined) {
             const n = inp.n ?? 5;
             const priors: Array<{ shotNumber: number; itemId: string; outputAbs: string; content?: unknown }> = [];
             // For JSON-output upstream collections, read the file content
@@ -1756,8 +1770,8 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
             const inlineContent = inlineJson || upstreamFormat === 'md' || upstreamFormat === 'text';
             for (const u of upInsts) {
               if (!u.outputRel || u.status !== 'completed') continue;
-              const uShot = parseShotNum(u.itemId);
-              if (uShot === undefined || uShot >= currentShotNum) continue;
+              const uShot = parseShotNum(u.itemId) ?? u.itemIndex;
+              if (uShot === undefined || uShot >= currentOrder) continue;
               const abs = resolve(opts.projectDir, u.outputRel);
               if (!existsSync(abs)) continue;
               const entry: { shotNumber: number; itemId: string; outputAbs: string; content?: unknown } = {
