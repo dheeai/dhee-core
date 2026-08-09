@@ -29,6 +29,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
+import { allowlistForItem, checkAuthoredIds, injectEnums, type PerItemEnumsConfig } from './perItemEnums.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
 import { getProjectCacheScope } from '../projectIdentity.js';
@@ -76,6 +77,14 @@ export interface LlmGenerateConfig {
   outputFormat?: 'markdown' | 'json';
   /** Path to a JSON Schema (relative to bundle dir) for json output. */
   outputSchema?: string;
+  /**
+   * Bind id-valued fields of the output to the ids THIS collection item is
+   * licensed to use, read from a sibling plan artifact. Injected into the
+   * schema as an `enum` (so a GBNF-compiling gateway makes a stray id
+   * undecodable), re-checked after the call, and repaired by the retry loop.
+   * Ignored on non-collection nodes, which have no item to scope to.
+   */
+  perItemEnums?: PerItemEnumsConfig;
   /** Max retry attempts on transient failure. Default 2 (i.e. 3 total attempts). */
   maxRetries?: number;
   /** Re-render even if outputPath exists. Default false. */
@@ -488,6 +497,8 @@ function tryParseJson(raw: string): { ok: true; value: unknown } | { ok: false; 
  * were previously divergent reads of the same file (ajv re-read it on
  * every retry attempt).
  */
+// Per-item enum binding lives in its own module because it is pure and the
+// interesting parts deserve to be unit-tested without an LLM in the loop.
 function validateAgainstSchema(value: unknown, schema: Record<string, unknown>): { ok: true } | { ok: false; error: string } {
   const ajv = new Ajv({ allErrors: true });
   addFormats(ajv);
@@ -646,6 +657,7 @@ export function createLlmGenerateRunner(opts?: {
         purpose:        { type: 'string' },
         outputFormat:   { type: 'string', enum: ['markdown', 'json'] },
         outputSchema:   { type: 'string' },
+        perItemEnums:   { type: 'object' },
         maxRetries:     { type: 'integer', minimum: 0 },
         forceRerun:     { type: 'boolean' },
         maxTokens:      { type: 'integer', minimum: 1 },
@@ -869,6 +881,43 @@ export function createLlmGenerateRunner(opts?: {
       }
     }
 
+    // Per-item enum binding. Resolved BEFORE the response_format is built, so
+    // the schema that travels to the provider is the item-scoped one. The
+    // allowlist comes from the SAME artifact the downstream consumer reads its
+    // expected ids from, which is what makes authoring and consumption agree by
+    // construction rather than by luck.
+    let itemAllowlist: string[] | undefined;
+    let schemaForCall = parsedSchema;
+    if (cfg.perItemEnums && ctx.itemId !== undefined && parsedSchema) {
+      const pie = cfg.perItemEnums;
+      const planInput = ctx.inputs[pie.from];
+      if (planInput === undefined) {
+        return { ok: false, error: `llm.generate: perItemEnums.from='${pie.from}' is not among this node's declared inputs` };
+      }
+      const licensed = allowlistForItem(planInput, {
+        itemsKey: pie.itemsKey ?? 'sections',
+        matchField: pie.matchField ?? 'id',
+        valuesField: pie.valuesField ?? 'entities',
+        itemId: ctx.itemId,
+      });
+      if (!licensed.ok) {
+        return { ok: false, error: `llm.generate: ${ctx.itemId}: ${licensed.error}` };
+      }
+      itemAllowlist = licensed.ids;
+      const pointers = pie.enumSchemaPaths ?? [];
+      if (pointers.length) {
+        const injected = injectEnums(parsedSchema, pointers, itemAllowlist);
+        if (!injected.ok) {
+          return { ok: false, error: `llm.generate: ${ctx.itemId}: ${injected.error}` };
+        }
+        schemaForCall = injected.schema;
+      }
+      ctx.log(
+        `llm.generate: ${ctx.itemId}: ${itemAllowlist.length} licensed id(s) — ${itemAllowlist.join(', ')}` +
+          (pointers.length ? ` (enum-bound at ${pointers.length} schema path(s))` : ' (checked only — no enumSchemaPaths)'),
+      );
+    }
+
     // Layer 1 — structured (json_schema) response_format. 'auto'/'schema'
     // (explicit opt-in) send the schema whenever one is declared;
     // 'object' — the default when a node doesn't set structuredMode —
@@ -887,7 +936,7 @@ export function createLlmGenerateRunner(opts?: {
             json_schema: {
               name: deriveSchemaName(ctx.node.id, cfg.outputPath),
               strict: cfg.structuredStrict ?? false,
-              schema: parsedSchema!,
+              schema: schemaForCall!,
             },
           }
         : { type: 'json_object' };
@@ -998,13 +1047,30 @@ export function createLlmGenerateRunner(opts?: {
           if (cfg.normalizeShotIds) normalizeSceneShotIds(parsed.value);
           if (cfg.normalizeVisualScreenplayBeats) normalizeVisualScreenplayBeats(parsed.value);
           if (parsedSchema) {
-            const v = validateAgainstSchema(parsed.value, parsedSchema);
+            const v = validateAgainstSchema(parsed.value, schemaForCall ?? parsedSchema);
             if (!v.ok) {
               lastErr = v.error;
               if (attempt < maxRetries) {
                 messages.push({ role: 'assistant', content: got });
                 messages.push({ role: 'user', content: `Your previous response failed schema validation: ${v.error}. Please re-emit the JSON object using ONLY values from the declared enums. Return the JSON object only, no preamble.` });
                 ctx.log(`llm.generate: attempt ${attempt + 1} schema validation failed (${v.error.slice(0, 160)}); retrying with feedback`);
+                continue;
+              }
+              break;
+            }
+          }
+          // Per-item id check. Runs AFTER the schema passes, because a
+          // document that is structurally wrong should say so first. A
+          // violation is fed back the same way a schema failure is — that loop
+          // already demonstrably self-corrects on this shape of hint.
+          if (cfg.perItemEnums && itemAllowlist) {
+            const idProblem = checkAuthoredIds(parsed.value, cfg.perItemEnums, itemAllowlist);
+            if (idProblem) {
+              lastErr = idProblem;
+              if (attempt < maxRetries) {
+                messages.push({ role: 'assistant', content: got });
+                messages.push({ role: 'user', content: `Your previous response was rejected. ${idProblem} Return the corrected JSON object only, no preamble.` });
+                ctx.log(`llm.generate: ${ctx.itemId ?? ''} attempt ${attempt + 1} used bad ids (${idProblem.slice(0, 160)}); retrying with feedback`);
                 continue;
               }
               break;
