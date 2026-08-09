@@ -636,6 +636,49 @@ export function normalizeVisualScreenplayBeats(value: unknown): void {
 
 // ── The runner factory ─────────────────────────────────────────────────
 
+
+/**
+ * Re-validate an artifact restored from a cache instead of generated.
+ *
+ * Both cache paths — the path-based skip and the CAS hit — return an artifact
+ * WITHOUT running any of the per-item checks, because those live in the
+ * generation loop. That makes a validation fix unreachable: the run that would
+ * have caught the defect never calls the model, so the same bad document comes
+ * back forever, and an end user re-running gets a byte-identical failure with
+ * no way to break the cycle.
+ *
+ * Measured 2026-08-09: a scene document staged an id its own `references[]`
+ * never declared, `requireDeclared` was added to catch exactly that, the node
+ * was reset and re-run — and `CAS hit 4e68104d` replayed the identical file.
+ * The fix could not take effect on the project that motivated it.
+ *
+ * So a cached artifact is now held to the SAME contract as a fresh one. A
+ * failing one is treated as a cache MISS and regenerated, rather than trusted
+ * because it happens to be on disk.
+ */
+function cachedArtifactPasses(
+  ctx: RunnerContext,
+  cfg: LlmGenerateConfig,
+  outAbs: string,
+  allowlist: string[] | undefined,
+  origin: string,
+): boolean {
+  if (!cfg.perItemEnums || !allowlist?.length) return true;
+  try {
+    const parsed = tryParseJson(readFileSync(outAbs, 'utf-8'));
+    if (!parsed.ok) return true; // not our contract to police here
+    const problem = checkAuthoredIds(parsed.value, cfg.perItemEnums, allowlist);
+    if (!problem) return true;
+    ctx.log(
+      `llm.generate: ${ctx.itemId ?? ctx.node.id}: ${origin} artifact FAILS the id contract ` +
+        `(${problem.slice(0, 160)}) — regenerating instead of trusting it`,
+    );
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export function createLlmGenerateRunner(opts?: {
   clientFactory?: LlmClientFactory;
 }): Runner {
@@ -703,6 +746,23 @@ export function createLlmGenerateRunner(opts?: {
     //    bypass the cache. Critique check is deferred to step 3b but
     //    we need its key here to gate cache reads.
     const outAbs = resolve(ctx.projectDir, cfg.outputPath);
+    // Resolved here rather than at first use: the cache paths below return
+    // early, and a cached artifact must be held to the same contract as a
+    // generated one.
+    let itemAllowlist: string[] | undefined;
+    if (cfg.perItemEnums && ctx.itemId !== undefined) {
+      const pie = cfg.perItemEnums;
+      const planInput = ctx.inputs[pie.from];
+      if (planInput !== undefined) {
+        const licensed = allowlistForItem(planInput, {
+          itemsKey: pie.itemsKey ?? 'sections',
+          matchField: pie.matchField ?? 'id',
+          valuesField: pie.valuesField ?? 'entities',
+          itemId: ctx.itemId,
+        });
+        if (licensed.ok) itemAllowlist = licensed.ids;
+      }
+    }
     const critiqueKeyForCache = ctx.itemId
       ? `${ctx.node.id}:${ctx.itemId}`
       : ctx.node.id;
@@ -728,15 +788,17 @@ export function createLlmGenerateRunner(opts?: {
       try {
         const st = statSync(outAbs);
         if (st.isFile() && st.size > 0) {
-          ctx.log(`llm.generate: cached → ${cfg.outputPath}`);
-          return {
-            ok: true,
-            outputPath: cfg.outputPath,
-            metadata: {
-              cached: true,
-              ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
-            },
-          };
+          if (cachedArtifactPasses(ctx, cfg, outAbs, itemAllowlist, 'on-disk')) {
+            ctx.log(`llm.generate: cached → ${cfg.outputPath}`);
+            return {
+              ok: true,
+              outputPath: cfg.outputPath,
+              metadata: {
+                cached: true,
+                ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
+              },
+            };
+          }
         }
       } catch {
         // Fall through to re-render.
@@ -806,6 +868,8 @@ export function createLlmGenerateRunner(opts?: {
       if (hit) {
         mkdirSync(dirname(outAbs), { recursive: true });
         copyFileSync(hit.storePath, outAbs);
+        const casUsable = cachedArtifactPasses(ctx, cfg, outAbs, itemAllowlist, `CAS ${hit.hash.slice(0, 8)}`);
+        if (casUsable) {
         ctx.log(`llm.generate: CAS hit ${hit.hash.slice(0, 8)} → ${cfg.outputPath}`);
         const inputsHashCS = hit.hash;
         return {
@@ -819,6 +883,7 @@ export function createLlmGenerateRunner(opts?: {
             ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
           },
         };
+        }
       }
     }
 
@@ -881,12 +946,12 @@ export function createLlmGenerateRunner(opts?: {
       }
     }
 
+    // (allowlist resolved earlier, before the cache checks — see itemAllowlist)
     // Per-item enum binding. Resolved BEFORE the response_format is built, so
     // the schema that travels to the provider is the item-scoped one. The
     // allowlist comes from the SAME artifact the downstream consumer reads its
     // expected ids from, which is what makes authoring and consumption agree by
     // construction rather than by luck.
-    let itemAllowlist: string[] | undefined;
     let schemaForCall = parsedSchema;
     if (cfg.perItemEnums && ctx.itemId !== undefined && parsedSchema) {
       const pie = cfg.perItemEnums;
