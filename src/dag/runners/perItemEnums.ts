@@ -304,6 +304,54 @@ export function misslotHint(
   return `Subject slot validation failed: ${lines.join('; ')}. Move each id to the correct field and re-emit the whole document.`;
 }
 
+/**
+ * Ids a shot USES that the document never DECLARES.
+ *
+ * A third failure, independent of the other two and reachable even when both
+ * pass: an id that is licensed by the plan AND sitting in the right slot, but
+ * absent from the document's own `references[]`. The enum cannot catch it —
+ * the id is legal — and the allowlist check cannot either, for the same
+ * reason. It is a contract INSIDE the document: whatever a shot stages must
+ * also be declared, with its type and appearance, or the consumer has no plate
+ * to bind it to.
+ *
+ * Measured 2026-08-09 on the first run authored by a DIFFERENT model
+ * (g4-meromero rather than thinkingcap-27b): section entities licensed
+ * `the_deep_quarries`, shot 0 staged it in `sceneryIds`, and `references[]`
+ * listed only three of the four. The film died at the last scene with
+ * `shots[0] references unknown id the_deep_quarries`. thinkingcap had simply
+ * always declared them, so three green films hid a hole in the contract.
+ */
+export function findUndeclaredIds(
+  doc: unknown,
+  usePaths: readonly IdPath[],
+  declaredPath: IdPath,
+): Array<{ path: string; value: string }> {
+  const declared = new Set(collectIds(doc, declaredPath).map((h) => h.value.toLowerCase()));
+  const out: Array<{ path: string; value: string }> = [];
+  for (const path of usePaths) {
+    for (const hit of collectIds(doc, path)) {
+      if (!declared.has(hit.value.toLowerCase())) out.push(hit);
+    }
+  }
+  return out;
+}
+
+/** Corrective message for used-but-undeclared ids. */
+export function undeclaredHint(
+  violations: ReadonlyArray<{ path: string; value: string }>,
+  declaredPath: IdPath,
+): string {
+  const offenders = [...new Set(violations.map((v) => `${v.path}="${v.value}"`))].join(', ');
+  const ids = [...new Set(violations.map((v) => v.value))].join(', ');
+  return (
+    `Undeclared id validation failed: ${offenders}. ` +
+    `Every id a shot stages must ALSO be declared in \`${declaredPath.replace(/\[\]\.id$/, '')}\` ` +
+    `with its own entry — id, type and appearance. Add an entry for: ${ids}. ` +
+    `Do not remove it from the shot instead unless the beat genuinely does not need it.`
+  );
+}
+
 // ── the config a bundle writes, and the one place it is interpreted ────────
 
 export interface PerItemEnumsConfig {
@@ -323,6 +371,12 @@ export interface PerItemEnumsConfig {
   characterPaths?: string[];
   /** Document paths whose ids must NOT be `character`-typed references. */
   sceneryPaths?: string[];
+  /**
+   * Ids at these paths must also appear at `declaredPath`. Catches an id that
+   * is licensed and correctly slotted but never declared in the document's own
+   * reference list — legal by every other check, fatal to the consumer.
+   */
+  requireDeclared?: { paths: string[]; declaredPath: string };
 }
 
 export interface NormalizedIdPath {
@@ -370,6 +424,11 @@ export function checkAuthoredIds(
         : undefined,
     );
     if (violations.length) problems.push(violationHint(violations, allowlist));
+  }
+  const declaredCfg = cfg.requireDeclared;
+  if (declaredCfg?.paths?.length && declaredCfg.declaredPath) {
+    const undeclared = findUndeclaredIds(doc, declaredCfg.paths, declaredCfg.declaredPath);
+    if (undeclared.length) problems.push(undeclaredHint(undeclared, declaredCfg.declaredPath));
   }
   const misslotted = findMisslottedIds(doc, {
     characterPaths: cfg.characterPaths ?? [],
