@@ -167,3 +167,40 @@ describe('llm.generate — a cached artifact must still satisfy the id contract'
     expect(calls.n).toBe(0);
   });
 });
+
+describe('a section that licenses nothing must not block the film', () => {
+  it('authors unconstrained instead of failing the node', async () => {
+    // A 39-section film died on scene_21 — an establishing beat of sunlight on a
+    // milestone, with entities: []. Absence of a list means "cannot constrain",
+    // not "must fail"; hard-failing is the getting-stuck this exists to prevent.
+    const calls = { n: 0 };
+    const ctx = makeCtx();
+    (ctx as { inputs: Record<string, unknown> }).inputs = {
+      scenes_plan: { sections: [{ id: 'scene_7', entities: [] }] },
+    };
+    const runner = createLlmGenerateRunner({
+      clientFactory: () => stubClient(JSON.stringify(CLEAN), calls) as never,
+    });
+
+    const result = await runner.run(ctx);
+
+    expect(result.ok).toBe(true);
+    expect(calls.n).toBe(1);
+  });
+
+  it('also survives a section that is missing from the plan entirely', async () => {
+    const calls = { n: 0 };
+    const ctx = makeCtx();
+    (ctx as { inputs: Record<string, unknown> }).inputs = {
+      scenes_plan: { sections: [{ id: 'scene_99', entities: ['sereth_vale'] }] },
+    };
+    const runner = createLlmGenerateRunner({
+      clientFactory: () => stubClient(JSON.stringify(CLEAN), calls) as never,
+    });
+
+    const result = await runner.run(ctx);
+
+    expect(result.ok).toBe(true);
+    expect(calls.n).toBe(1);
+  });
+});

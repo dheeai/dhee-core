@@ -1027,8 +1027,19 @@ export function createLlmGenerateRunner(opts?: {
         itemId: ctx.itemId,
       });
       if (!licensed.ok) {
-        return { ok: false, error: `llm.generate: ${ctx.itemId}: ${licensed.error}` };
-      }
+        // A section CAN legitimately license nothing — an establishing beat of
+        // sunlight on a milestone has no character, prop or location entity to
+        // name. Absence of a list means "cannot constrain", NOT "must fail":
+        // hard-failing here blocked a 39-section film on one such scene, which
+        // is exactly the getting-stuck this machinery exists to prevent. Author
+        // it unconstrained and say so, loudly enough that a section which
+        // SHOULD have had entities gets noticed.
+        ctx.log(
+          `llm.generate: ${ctx.itemId}: no per-item allowlist (${licensed.error}) — authoring UNCONSTRAINED. ` +
+            `If this section should have entities, the gap is upstream in the plan.`,
+        );
+        itemAllowlist = undefined;
+      } else {
       itemAllowlist = licensed.ids;
       const pointers = pie.enumSchemaPaths ?? [];
       if (pointers.length) {
@@ -1042,6 +1053,7 @@ export function createLlmGenerateRunner(opts?: {
         `llm.generate: ${ctx.itemId}: ${itemAllowlist.length} licensed id(s) — ${itemAllowlist.join(', ')}` +
           (pointers.length ? ` (enum-bound at ${pointers.length} schema path(s))` : ' (checked only — no enumSchemaPaths)'),
       );
+      }
     }
 
     // Layer 1 — structured (json_schema) response_format. 'auto'/'schema'
