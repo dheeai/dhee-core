@@ -164,3 +164,26 @@ describe('path walking', () => {
     expect(collectIds(null, 'references[].id')).toEqual([]);
   });
 });
+
+describe('an id can be licensed, slotted, declared — and still have no plate', () => {
+  it('is exactly the case the other three checks cannot see', () => {
+    // desktop_h3_g4b scene_7: the plan licensed the_lower_gallery__gold_vein,
+    // only the_deep_quarries.png was ever rendered, and the film reported
+    // 49/49 complete while citing a reference that did not exist on disk.
+    const doc = {
+      references: [{ id: 'the_lower_gallery__gold_vein', type: 'location' }],
+      shots: [{ acting: [], sceneryIds: ['the_lower_gallery__gold_vein'] }],
+    };
+    const cfg = {
+      from: 'scenes_plan',
+      idPaths: ['references[].id', 'shots[].sceneryIds[]'],
+      characterPaths: ['shots[].acting[].subjectId'],
+      sceneryPaths: ['shots[].sceneryIds[]'],
+      requireDeclared: { paths: ['shots[].sceneryIds[]'], declaredPath: 'references[].id' },
+    };
+    // Licensed, slotted, declared: every check passes.
+    expect(checkAuthoredIds(doc, cfg, ['the_lower_gallery__gold_vein'])).toBeUndefined();
+    // Narrowing the allowlist to what has a plate is the only thing that stops it.
+    expect(checkAuthoredIds(doc, cfg, ['the_deep_quarries'])).toContain('the_lower_gallery__gold_vein');
+  });
+});

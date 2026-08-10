@@ -372,6 +372,21 @@ export interface PerItemEnumsConfig {
   /** Document paths whose ids must NOT be `character`-typed references. */
   sceneryPaths?: string[];
   /**
+   * Narrow the allowlist to entities that have a PLATE on disk.
+   *
+   * `dirs` are project-relative folders searched for `<id>.<ext>`; an id the
+   * plan licensed but whose asset was never produced is dropped from the enum,
+   * so the author cannot cite it at all. Without this an id can be licensed,
+   * correctly slotted, declared — every check green — and still have no image
+   * for the consumer to attach.
+   *
+   * Measured 2026-08-09 on a film that reported 49/49 complete: the plan
+   * licensed `the_lower_gallery__gold_vein`, only `the_deep_quarries.png` was
+   * ever generated, and the scene rendered with a reference the runner could not
+   * resolve. Nothing failed; the film was just quietly missing a plate.
+   */
+  requireAssetIn?: { dirs: string[]; extensions?: string[] };
+  /**
    * Ids at these paths must also appear at `declaredPath`. Catches an id that
    * is licensed and correctly slotted but never declared in the document's own
    * reference list — legal by every other check, fatal to the consumer.

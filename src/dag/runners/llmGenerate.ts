@@ -27,7 +27,7 @@
  * with a tier→purpose mapping (because the router's public API takes
  * purposes, not raw tiers).
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
 import { allowlistForItem, checkAuthoredIds, injectEnums, type PerItemEnumsConfig } from './perItemEnums.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
@@ -656,6 +656,45 @@ export function normalizeVisualScreenplayBeats(value: unknown): void {
  * failing one is treated as a cache MISS and regenerated, rather than trusted
  * because it happens to be on disk.
  */
+
+/**
+ * Drop licensed ids that have no ASSET on disk.
+ *
+ * An id can be licensed by the plan, correctly slotted and properly declared —
+ * every id check green — and still have no plate for the consumer to attach,
+ * because the node that was supposed to render it never did. Narrowing the
+ * allowlist makes such an id undecodable, so the author writes the beat without
+ * it instead of citing a reference that does not exist.
+ *
+ * Returns the surviving ids plus whatever was dropped, so the caller can log it:
+ * a silently shortened allowlist is its own kind of mystery.
+ */
+function narrowToExistingAssets(
+  projectDir: string,
+  allowlist: string[],
+  cfg: NonNullable<PerItemEnumsConfig['requireAssetIn']>,
+): { kept: string[]; dropped: string[] } {
+  const exts = (cfg.extensions ?? ['png', 'jpg', 'jpeg', 'webp']).map((e) => e.replace(/^\./, '').toLowerCase());
+  const present = new Set<string>();
+  for (const dir of cfg.dirs) {
+    const abs = resolve(projectDir, dir);
+    if (!existsSync(abs)) continue;
+    let entries: string[];
+    try {
+      entries = readdirSync(abs);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const m = /^(.*)\.([^.]+)$/.exec(entry);
+      if (m && m[1] && m[2] && exts.includes(m[2].toLowerCase())) present.add(m[1].trim().toLowerCase());
+    }
+  }
+  const kept = allowlist.filter((id) => present.has(id.trim().toLowerCase()));
+  const dropped = allowlist.filter((id) => !present.has(id.trim().toLowerCase()));
+  return { kept, dropped };
+}
+
 function cachedArtifactPasses(
   ctx: RunnerContext,
   cfg: LlmGenerateConfig,
@@ -761,6 +800,28 @@ export function createLlmGenerateRunner(opts?: {
           itemId: ctx.itemId,
         });
         if (licensed.ok) itemAllowlist = licensed.ids;
+      }
+      // Narrow to ids that actually have a plate. Done here, before the cache
+      // checks, so a cached artifact is judged against the same allowlist a
+      // fresh generation would be held to.
+      if (itemAllowlist && pie.requireAssetIn?.dirs?.length) {
+        const narrowed = narrowToExistingAssets(ctx.projectDir, itemAllowlist, pie.requireAssetIn);
+        if (narrowed.dropped.length && narrowed.kept.length) {
+          itemAllowlist = narrowed.kept;
+          ctx.log(
+            `llm.generate: ${ctx.itemId}: ${narrowed.dropped.length} licensed id(s) have no asset on disk and were ` +
+              `dropped from the allowlist — ${narrowed.dropped.join(', ')}`,
+          );
+        } else if (narrowed.dropped.length && !narrowed.kept.length) {
+          // Every id is plateless: almost certainly the asset stage has not run
+          // yet rather than a genuine authoring constraint. Leave the allowlist
+          // alone and let the render gate speak, rather than authoring against
+          // nothing.
+          ctx.log(
+            `llm.generate: ${ctx.itemId}: NO licensed id has an asset on disk yet — leaving the allowlist unnarrowed ` +
+              `(is the anchor stage complete?)`,
+          );
+        }
       }
     }
     const critiqueKeyForCache = ctx.itemId
