@@ -30,6 +30,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
 import { allowlistForItem, checkAuthoredIds, injectEnums, type PerItemEnumsConfig } from './perItemEnums.js';
+import { loadValidator, runValidator, type ValidatorFn } from './externalValidator.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
 import { getProjectCacheScope } from '../projectIdentity.js';
@@ -85,6 +86,18 @@ export interface LlmGenerateConfig {
    * Ignored on non-collection nodes, which have no item to scope to.
    */
   perItemEnums?: PerItemEnumsConfig;
+  /**
+   * Module specifier of an external validator run on the parsed output, after
+   * the schema and the id check. Either a path relative to the bundle dir
+   * (`"./validators/scene.mjs"`) or a package (`"dhee-runner-minimax-h3"`) — the
+   * package form lets a runner ship the SAME function it enforces at render
+   * time, so the author's contract and the renderer's cannot drift apart.
+   * A complaint is fed back to the model and repaired by the retry loop, which
+   * is the point: cross-field rules a JSON Schema cannot state stop being fatal
+   * at render time and become repairable at authoring time.
+   * See `externalValidator.ts` for the module contract.
+   */
+  validateWith?: string;
   /** Max retry attempts on transient failure. Default 2 (i.e. 3 total attempts). */
   maxRetries?: number;
   /** Re-render even if outputPath exists. Default false. */
@@ -740,6 +753,7 @@ export function createLlmGenerateRunner(opts?: {
         outputFormat:   { type: 'string', enum: ['markdown', 'json'] },
         outputSchema:   { type: 'string' },
         perItemEnums:   { type: 'object' },
+        validateWith:   { type: 'string' },
         maxRetries:     { type: 'integer', minimum: 0 },
         forceRerun:     { type: 'boolean' },
         maxTokens:      { type: 'integer', minimum: 1 },
@@ -904,6 +918,14 @@ export function createLlmGenerateRunner(opts?: {
         ...(cfg.outputSchema
           ? { schemaFile: { kind: 'file' as const, path: resolve(ctx.bundleDir, cfg.outputSchema) } }
           : {}),
+        // A changed validator changes what counts as acceptable output, so it
+        // must invalidate the cache the same way a changed schema does. Only
+        // the PATH form can be hashed as a file; the package form contributes
+        // its specifier via `config` below, which catches a re-point but not an
+        // in-place edit of an installed runner — rebuild or `forceRerun` there.
+        ...(cfg.validateWith && (cfg.validateWith.startsWith('.') || cfg.validateWith.startsWith('/'))
+          ? { validatorFile: { kind: 'file' as const, path: resolve(ctx.bundleDir, cfg.validateWith) } }
+          : {}),
       },
       config: {
         projectScope: getProjectCacheScope(ctx.projectDir),
@@ -913,6 +935,7 @@ export function createLlmGenerateRunner(opts?: {
         ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
         ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
         outputFormat: cfg.outputFormat ?? 'markdown',
+        ...(cfg.validateWith ? { validateWith: cfg.validateWith } : {}),
       },
     };
     // CAS kill-switch for tests + opt-out scenarios. Production calls
@@ -1112,6 +1135,20 @@ export function createLlmGenerateRunner(opts?: {
       messages.push({ role: 'user', content: sub.rendered });
     }
 
+    // Load the external validator BEFORE spending a generation on output it
+    // would have judged. A bad specifier is a bundle bug: fail on it loudly and
+    // immediately rather than after three attempts, and never silently skip —
+    // a validator that fails to load would leave the node looking protected
+    // while accepting anything.
+    let externalValidator: ValidatorFn | undefined;
+    if (cfg.validateWith) {
+      try {
+        externalValidator = await loadValidator(cfg.validateWith, ctx.bundleDir);
+      } catch (err) {
+        return { ok: false, error: `llm.generate: ${(err as Error).message}` };
+      }
+    }
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (ctx.signal?.aborted) {
         return { ok: false, error: 'llm.generate: aborted before LLM call' };
@@ -1209,6 +1246,30 @@ export function createLlmGenerateRunner(opts?: {
                 messages.push({ role: 'assistant', content: got });
                 messages.push({ role: 'user', content: `Your previous response was rejected. ${idProblem} Return the corrected JSON object only, no preamble.` });
                 ctx.log(`llm.generate: ${ctx.itemId ?? ''} attempt ${attempt + 1} used bad ids (${idProblem.slice(0, 160)}); retrying with feedback`);
+                continue;
+              }
+              break;
+            }
+          }
+          // Layer 3: the bundle's own validator. Runs LAST, after the document
+          // is known to be structurally sound and to use licensed ids, because
+          // a cross-field complaint ("shot 1 starts before shot 0 ends") only
+          // makes sense once the fields it compares are known to exist. Fed
+          // back exactly like the two checks above — the loop already
+          // demonstrably self-corrects on this shape of hint.
+          if (externalValidator) {
+            const problem = await runValidator(externalValidator, parsed.value, {
+              ...(ctx.itemId ? { itemId: ctx.itemId } : {}),
+              nodeId: ctx.node.id,
+              bundleDir: ctx.bundleDir,
+              projectDir: ctx.projectDir,
+            });
+            if (problem) {
+              lastErr = problem;
+              if (attempt < maxRetries) {
+                messages.push({ role: 'assistant', content: got });
+                messages.push({ role: 'user', content: `Your previous response was rejected. ${problem} Return the corrected JSON object only, no preamble.` });
+                ctx.log(`llm.generate: ${ctx.itemId ?? ''} attempt ${attempt + 1} failed validation (${problem.slice(0, 160)}); retrying with feedback`);
                 continue;
               }
               break;
