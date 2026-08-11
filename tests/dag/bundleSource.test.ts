@@ -92,13 +92,11 @@ describe('resolveBundleDir', () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('resolves built-in:<id> to <REPO_ROOT>/src/dag/bundles/<id>/ when present', () => {
-    // We use ltx_prompt_relay because it's the only built-in bundle today
-    // that exists on disk as a single JSON file. The resolver should accept
-    // both single-file (legacy) and directory (new) layouts.
-    const dir = resolveBundleDir({ scheme: 'built-in', id: 'ltx_prompt_relay' });
-    expect(dir.endsWith('src/dag/bundles/ltx_prompt_relay') || dir.endsWith('src/dag/bundles/ltx_prompt_relay.json')).toBe(true);
-  });
+  // REMOVED: 'resolves built-in:<id> to <REPO_ROOT>/src/dag/bundles/<id>/'.
+  // That search root is gone (#200) — no bundle lives in the engine any more, so
+  // there is nothing for it to resolve. The root-chain behaviour that remains is
+  // covered by the DHEE_USER_BUNDLES_DIR / DHEE_APP_BUNDLES_DIR / ~/.kshana
+  // precedence tests above.
 
   it('throws when built-in:<id> bundle is missing on disk', () => {
     expect(() => resolveBundleDir({ scheme: 'built-in', id: 'totally_not_a_bundle' }))

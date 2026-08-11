@@ -27,8 +27,10 @@
  * with a tier→purpose mapping (because the router's public API takes
  * purposes, not raw tiers).
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
+import { allowlistForItem, checkAuthoredIds, injectEnums, type PerItemEnumsConfig } from './perItemEnums.js';
+import { loadValidator, runValidator, type ValidatorFn } from './externalValidator.js';
 import { openGenerationCache } from '../cas/GenerationCache.js';
 import type { InputsHashKey } from '../cas/inputsHash.js';
 import { getProjectCacheScope } from '../projectIdentity.js';
@@ -76,6 +78,26 @@ export interface LlmGenerateConfig {
   outputFormat?: 'markdown' | 'json';
   /** Path to a JSON Schema (relative to bundle dir) for json output. */
   outputSchema?: string;
+  /**
+   * Bind id-valued fields of the output to the ids THIS collection item is
+   * licensed to use, read from a sibling plan artifact. Injected into the
+   * schema as an `enum` (so a GBNF-compiling gateway makes a stray id
+   * undecodable), re-checked after the call, and repaired by the retry loop.
+   * Ignored on non-collection nodes, which have no item to scope to.
+   */
+  perItemEnums?: PerItemEnumsConfig;
+  /**
+   * Module specifier of an external validator run on the parsed output, after
+   * the schema and the id check. Either a path relative to the bundle dir
+   * (`"./validators/scene.mjs"`) or a package (`"dhee-runner-minimax-h3"`) — the
+   * package form lets a runner ship the SAME function it enforces at render
+   * time, so the author's contract and the renderer's cannot drift apart.
+   * A complaint is fed back to the model and repaired by the retry loop, which
+   * is the point: cross-field rules a JSON Schema cannot state stop being fatal
+   * at render time and become repairable at authoring time.
+   * See `externalValidator.ts` for the module contract.
+   */
+  validateWith?: string;
   /** Max retry attempts on transient failure. Default 2 (i.e. 3 total attempts). */
   maxRetries?: number;
   /** Re-render even if outputPath exists. Default false. */
@@ -488,6 +510,8 @@ function tryParseJson(raw: string): { ok: true; value: unknown } | { ok: false; 
  * were previously divergent reads of the same file (ajv re-read it on
  * every retry attempt).
  */
+// Per-item enum binding lives in its own module because it is pure and the
+// interesting parts deserve to be unit-tested without an LLM in the loop.
 function validateAgainstSchema(value: unknown, schema: Record<string, unknown>): { ok: true } | { ok: false; error: string } {
   const ajv = new Ajv({ allErrors: true });
   addFormats(ajv);
@@ -625,6 +649,88 @@ export function normalizeVisualScreenplayBeats(value: unknown): void {
 
 // ── The runner factory ─────────────────────────────────────────────────
 
+
+/**
+ * Re-validate an artifact restored from a cache instead of generated.
+ *
+ * Both cache paths — the path-based skip and the CAS hit — return an artifact
+ * WITHOUT running any of the per-item checks, because those live in the
+ * generation loop. That makes a validation fix unreachable: the run that would
+ * have caught the defect never calls the model, so the same bad document comes
+ * back forever, and an end user re-running gets a byte-identical failure with
+ * no way to break the cycle.
+ *
+ * Measured 2026-08-09: a scene document staged an id its own `references[]`
+ * never declared, `requireDeclared` was added to catch exactly that, the node
+ * was reset and re-run — and `CAS hit 4e68104d` replayed the identical file.
+ * The fix could not take effect on the project that motivated it.
+ *
+ * So a cached artifact is now held to the SAME contract as a fresh one. A
+ * failing one is treated as a cache MISS and regenerated, rather than trusted
+ * because it happens to be on disk.
+ */
+
+/**
+ * Drop licensed ids that have no ASSET on disk.
+ *
+ * An id can be licensed by the plan, correctly slotted and properly declared —
+ * every id check green — and still have no plate for the consumer to attach,
+ * because the node that was supposed to render it never did. Narrowing the
+ * allowlist makes such an id undecodable, so the author writes the beat without
+ * it instead of citing a reference that does not exist.
+ *
+ * Returns the surviving ids plus whatever was dropped, so the caller can log it:
+ * a silently shortened allowlist is its own kind of mystery.
+ */
+function narrowToExistingAssets(
+  projectDir: string,
+  allowlist: string[],
+  cfg: NonNullable<PerItemEnumsConfig['requireAssetIn']>,
+): { kept: string[]; dropped: string[] } {
+  const exts = (cfg.extensions ?? ['png', 'jpg', 'jpeg', 'webp']).map((e) => e.replace(/^\./, '').toLowerCase());
+  const present = new Set<string>();
+  for (const dir of cfg.dirs) {
+    const abs = resolve(projectDir, dir);
+    if (!existsSync(abs)) continue;
+    let entries: string[];
+    try {
+      entries = readdirSync(abs);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const m = /^(.*)\.([^.]+)$/.exec(entry);
+      if (m && m[1] && m[2] && exts.includes(m[2].toLowerCase())) present.add(m[1].trim().toLowerCase());
+    }
+  }
+  const kept = allowlist.filter((id) => present.has(id.trim().toLowerCase()));
+  const dropped = allowlist.filter((id) => !present.has(id.trim().toLowerCase()));
+  return { kept, dropped };
+}
+
+function cachedArtifactPasses(
+  ctx: RunnerContext,
+  cfg: LlmGenerateConfig,
+  outAbs: string,
+  allowlist: string[] | undefined,
+  origin: string,
+): boolean {
+  if (!cfg.perItemEnums || !allowlist?.length) return true;
+  try {
+    const parsed = tryParseJson(readFileSync(outAbs, 'utf-8'));
+    if (!parsed.ok) return true; // not our contract to police here
+    const problem = checkAuthoredIds(parsed.value, cfg.perItemEnums, allowlist);
+    if (!problem) return true;
+    ctx.log(
+      `llm.generate: ${ctx.itemId ?? ctx.node.id}: ${origin} artifact FAILS the id contract ` +
+        `(${problem.slice(0, 160)}) — regenerating instead of trusting it`,
+    );
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export function createLlmGenerateRunner(opts?: {
   clientFactory?: LlmClientFactory;
 }): Runner {
@@ -646,6 +752,8 @@ export function createLlmGenerateRunner(opts?: {
         purpose:        { type: 'string' },
         outputFormat:   { type: 'string', enum: ['markdown', 'json'] },
         outputSchema:   { type: 'string' },
+        perItemEnums:   { type: 'object' },
+        validateWith:   { type: 'string' },
         maxRetries:     { type: 'integer', minimum: 0 },
         forceRerun:     { type: 'boolean' },
         maxTokens:      { type: 'integer', minimum: 1 },
@@ -691,6 +799,45 @@ export function createLlmGenerateRunner(opts?: {
     //    bypass the cache. Critique check is deferred to step 3b but
     //    we need its key here to gate cache reads.
     const outAbs = resolve(ctx.projectDir, cfg.outputPath);
+    // Resolved here rather than at first use: the cache paths below return
+    // early, and a cached artifact must be held to the same contract as a
+    // generated one.
+    let itemAllowlist: string[] | undefined;
+    if (cfg.perItemEnums && ctx.itemId !== undefined) {
+      const pie = cfg.perItemEnums;
+      const planInput = ctx.inputs[pie.from];
+      if (planInput !== undefined) {
+        const licensed = allowlistForItem(planInput, {
+          itemsKey: pie.itemsKey ?? 'sections',
+          matchField: pie.matchField ?? 'id',
+          valuesField: pie.valuesField ?? 'entities',
+          itemId: ctx.itemId,
+        });
+        if (licensed.ok) itemAllowlist = licensed.ids;
+      }
+      // Narrow to ids that actually have a plate. Done here, before the cache
+      // checks, so a cached artifact is judged against the same allowlist a
+      // fresh generation would be held to.
+      if (itemAllowlist && pie.requireAssetIn?.dirs?.length) {
+        const narrowed = narrowToExistingAssets(ctx.projectDir, itemAllowlist, pie.requireAssetIn);
+        if (narrowed.dropped.length && narrowed.kept.length) {
+          itemAllowlist = narrowed.kept;
+          ctx.log(
+            `llm.generate: ${ctx.itemId}: ${narrowed.dropped.length} licensed id(s) have no asset on disk and were ` +
+              `dropped from the allowlist — ${narrowed.dropped.join(', ')}`,
+          );
+        } else if (narrowed.dropped.length && !narrowed.kept.length) {
+          // Every id is plateless: almost certainly the asset stage has not run
+          // yet rather than a genuine authoring constraint. Leave the allowlist
+          // alone and let the render gate speak, rather than authoring against
+          // nothing.
+          ctx.log(
+            `llm.generate: ${ctx.itemId}: NO licensed id has an asset on disk yet — leaving the allowlist unnarrowed ` +
+              `(is the anchor stage complete?)`,
+          );
+        }
+      }
+    }
     const critiqueKeyForCache = ctx.itemId
       ? `${ctx.node.id}:${ctx.itemId}`
       : ctx.node.id;
@@ -716,15 +863,17 @@ export function createLlmGenerateRunner(opts?: {
       try {
         const st = statSync(outAbs);
         if (st.isFile() && st.size > 0) {
-          ctx.log(`llm.generate: cached → ${cfg.outputPath}`);
-          return {
-            ok: true,
-            outputPath: cfg.outputPath,
-            metadata: {
-              cached: true,
-              ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
-            },
-          };
+          if (cachedArtifactPasses(ctx, cfg, outAbs, itemAllowlist, 'on-disk')) {
+            ctx.log(`llm.generate: cached → ${cfg.outputPath}`);
+            return {
+              ok: true,
+              outputPath: cfg.outputPath,
+              metadata: {
+                cached: true,
+                ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
+              },
+            };
+          }
         }
       } catch {
         // Fall through to re-render.
@@ -769,6 +918,14 @@ export function createLlmGenerateRunner(opts?: {
         ...(cfg.outputSchema
           ? { schemaFile: { kind: 'file' as const, path: resolve(ctx.bundleDir, cfg.outputSchema) } }
           : {}),
+        // A changed validator changes what counts as acceptable output, so it
+        // must invalidate the cache the same way a changed schema does. Only
+        // the PATH form can be hashed as a file; the package form contributes
+        // its specifier via `config` below, which catches a re-point but not an
+        // in-place edit of an installed runner — rebuild or `forceRerun` there.
+        ...(cfg.validateWith && (cfg.validateWith.startsWith('.') || cfg.validateWith.startsWith('/'))
+          ? { validatorFile: { kind: 'file' as const, path: resolve(ctx.bundleDir, cfg.validateWith) } }
+          : {}),
       },
       config: {
         projectScope: getProjectCacheScope(ctx.projectDir),
@@ -778,6 +935,7 @@ export function createLlmGenerateRunner(opts?: {
         ...(cfg.temperature !== undefined ? { temperature: cfg.temperature } : {}),
         ...(cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
         outputFormat: cfg.outputFormat ?? 'markdown',
+        ...(cfg.validateWith ? { validateWith: cfg.validateWith } : {}),
       },
     };
     // CAS kill-switch for tests + opt-out scenarios. Production calls
@@ -794,6 +952,8 @@ export function createLlmGenerateRunner(opts?: {
       if (hit) {
         mkdirSync(dirname(outAbs), { recursive: true });
         copyFileSync(hit.storePath, outAbs);
+        const casUsable = cachedArtifactPasses(ctx, cfg, outAbs, itemAllowlist, `CAS ${hit.hash.slice(0, 8)}`);
+        if (casUsable) {
         ctx.log(`llm.generate: CAS hit ${hit.hash.slice(0, 8)} → ${cfg.outputPath}`);
         const inputsHashCS = hit.hash;
         return {
@@ -807,6 +967,7 @@ export function createLlmGenerateRunner(opts?: {
             ...(additionalDependencies.length > 0 ? { additionalDependencies } : {}),
           },
         };
+        }
       }
     }
 
@@ -869,6 +1030,55 @@ export function createLlmGenerateRunner(opts?: {
       }
     }
 
+    // (allowlist resolved earlier, before the cache checks — see itemAllowlist)
+    // Per-item enum binding. Resolved BEFORE the response_format is built, so
+    // the schema that travels to the provider is the item-scoped one. The
+    // allowlist comes from the SAME artifact the downstream consumer reads its
+    // expected ids from, which is what makes authoring and consumption agree by
+    // construction rather than by luck.
+    let schemaForCall = parsedSchema;
+    if (cfg.perItemEnums && ctx.itemId !== undefined && parsedSchema) {
+      const pie = cfg.perItemEnums;
+      const planInput = ctx.inputs[pie.from];
+      if (planInput === undefined) {
+        return { ok: false, error: `llm.generate: perItemEnums.from='${pie.from}' is not among this node's declared inputs` };
+      }
+      const licensed = allowlistForItem(planInput, {
+        itemsKey: pie.itemsKey ?? 'sections',
+        matchField: pie.matchField ?? 'id',
+        valuesField: pie.valuesField ?? 'entities',
+        itemId: ctx.itemId,
+      });
+      if (!licensed.ok) {
+        // A section CAN legitimately license nothing — an establishing beat of
+        // sunlight on a milestone has no character, prop or location entity to
+        // name. Absence of a list means "cannot constrain", NOT "must fail":
+        // hard-failing here blocked a 39-section film on one such scene, which
+        // is exactly the getting-stuck this machinery exists to prevent. Author
+        // it unconstrained and say so, loudly enough that a section which
+        // SHOULD have had entities gets noticed.
+        ctx.log(
+          `llm.generate: ${ctx.itemId}: no per-item allowlist (${licensed.error}) — authoring UNCONSTRAINED. ` +
+            `If this section should have entities, the gap is upstream in the plan.`,
+        );
+        itemAllowlist = undefined;
+      } else {
+      itemAllowlist = licensed.ids;
+      const pointers = pie.enumSchemaPaths ?? [];
+      if (pointers.length) {
+        const injected = injectEnums(parsedSchema, pointers, itemAllowlist);
+        if (!injected.ok) {
+          return { ok: false, error: `llm.generate: ${ctx.itemId}: ${injected.error}` };
+        }
+        schemaForCall = injected.schema;
+      }
+      ctx.log(
+        `llm.generate: ${ctx.itemId}: ${itemAllowlist.length} licensed id(s) — ${itemAllowlist.join(', ')}` +
+          (pointers.length ? ` (enum-bound at ${pointers.length} schema path(s))` : ' (checked only — no enumSchemaPaths)'),
+      );
+      }
+    }
+
     // Layer 1 — structured (json_schema) response_format. 'auto'/'schema'
     // (explicit opt-in) send the schema whenever one is declared;
     // 'object' — the default when a node doesn't set structuredMode —
@@ -887,7 +1097,7 @@ export function createLlmGenerateRunner(opts?: {
             json_schema: {
               name: deriveSchemaName(ctx.node.id, cfg.outputPath),
               strict: cfg.structuredStrict ?? false,
-              schema: parsedSchema!,
+              schema: schemaForCall!,
             },
           }
         : { type: 'json_object' };
@@ -923,6 +1133,20 @@ export function createLlmGenerateRunner(opts?: {
     } else {
       if (critiqueMessage) messages.push({ role: 'user', content: critiqueMessage });
       messages.push({ role: 'user', content: sub.rendered });
+    }
+
+    // Load the external validator BEFORE spending a generation on output it
+    // would have judged. A bad specifier is a bundle bug: fail on it loudly and
+    // immediately rather than after three attempts, and never silently skip —
+    // a validator that fails to load would leave the node looking protected
+    // while accepting anything.
+    let externalValidator: ValidatorFn | undefined;
+    if (cfg.validateWith) {
+      try {
+        externalValidator = await loadValidator(cfg.validateWith, ctx.bundleDir);
+      } catch (err) {
+        return { ok: false, error: `llm.generate: ${(err as Error).message}` };
+      }
     }
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -998,13 +1222,54 @@ export function createLlmGenerateRunner(opts?: {
           if (cfg.normalizeShotIds) normalizeSceneShotIds(parsed.value);
           if (cfg.normalizeVisualScreenplayBeats) normalizeVisualScreenplayBeats(parsed.value);
           if (parsedSchema) {
-            const v = validateAgainstSchema(parsed.value, parsedSchema);
+            const v = validateAgainstSchema(parsed.value, schemaForCall ?? parsedSchema);
             if (!v.ok) {
               lastErr = v.error;
               if (attempt < maxRetries) {
                 messages.push({ role: 'assistant', content: got });
                 messages.push({ role: 'user', content: `Your previous response failed schema validation: ${v.error}. Please re-emit the JSON object using ONLY values from the declared enums. Return the JSON object only, no preamble.` });
                 ctx.log(`llm.generate: attempt ${attempt + 1} schema validation failed (${v.error.slice(0, 160)}); retrying with feedback`);
+                continue;
+              }
+              break;
+            }
+          }
+          // Per-item id check. Runs AFTER the schema passes, because a
+          // document that is structurally wrong should say so first. A
+          // violation is fed back the same way a schema failure is — that loop
+          // already demonstrably self-corrects on this shape of hint.
+          if (cfg.perItemEnums && itemAllowlist) {
+            const idProblem = checkAuthoredIds(parsed.value, cfg.perItemEnums, itemAllowlist);
+            if (idProblem) {
+              lastErr = idProblem;
+              if (attempt < maxRetries) {
+                messages.push({ role: 'assistant', content: got });
+                messages.push({ role: 'user', content: `Your previous response was rejected. ${idProblem} Return the corrected JSON object only, no preamble.` });
+                ctx.log(`llm.generate: ${ctx.itemId ?? ''} attempt ${attempt + 1} used bad ids (${idProblem.slice(0, 160)}); retrying with feedback`);
+                continue;
+              }
+              break;
+            }
+          }
+          // Layer 3: the bundle's own validator. Runs LAST, after the document
+          // is known to be structurally sound and to use licensed ids, because
+          // a cross-field complaint ("shot 1 starts before shot 0 ends") only
+          // makes sense once the fields it compares are known to exist. Fed
+          // back exactly like the two checks above — the loop already
+          // demonstrably self-corrects on this shape of hint.
+          if (externalValidator) {
+            const problem = await runValidator(externalValidator, parsed.value, {
+              ...(ctx.itemId ? { itemId: ctx.itemId } : {}),
+              nodeId: ctx.node.id,
+              bundleDir: ctx.bundleDir,
+              projectDir: ctx.projectDir,
+            });
+            if (problem) {
+              lastErr = problem;
+              if (attempt < maxRetries) {
+                messages.push({ role: 'assistant', content: got });
+                messages.push({ role: 'user', content: `Your previous response was rejected. ${problem} Return the corrected JSON object only, no preamble.` });
+                ctx.log(`llm.generate: ${ctx.itemId ?? ''} attempt ${attempt + 1} failed validation (${problem.slice(0, 160)}); retrying with feedback`);
                 continue;
               }
               break;

@@ -18,7 +18,10 @@ import { join } from 'node:path';
 
 import { makeCritiqueNodeTool } from '../../src/agent/pi/tools/dheeCritiqueNode.js';
 
-const BUNDLE = 'built-in:narrative_qwen_chain_relay';
+// narrative_qwen_chain_relay was archived (#200); narrative_prompt_relay is the
+// surviving bundle and has the same shape this needs: llm nodes, a non-llm node,
+// and a downstream cascade.
+const BUNDLE = 'built-in:narrative_prompt_relay';
 const LLM_NODE = 'story'; // runner: llm.generate
 const NON_LLM_NODE = 'shot_image'; // runner: comfy.qwen_edit_chain
 

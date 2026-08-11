@@ -15,7 +15,8 @@
  * are trivial in-memory stubs; they aren't what's under test here.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 
@@ -23,10 +24,24 @@ import { walkBundle } from '../../src/dag/walker.js';
 import { __resetGlobalRegistryForTesting, getGlobalRegistry } from '../../src/dag/runners/registry.js';
 import '../../src/dag/runners/index.js'; // side-effect: bootstraps real 'plan.assemble' etc. (re-registered fresh below anyway)
 import { createLlmGenerateRunner } from '../../src/dag/runners/llmGenerate.js';
-import { planAssembleRunner } from '../../src/dag/runners/planAssemble.js';
+// NOTE: `plan.assemble_keyframes` (the runner the bundle's scenes_plan node now
+// uses) lives in the EXTERNAL dhee-runner-plan-keyframes package, which is only
+// present via a local symlink. It is loaded dynamically in beforeEach so this file
+// still parses where the package is absent, and the suite skips instead of erroring.
 import type { DagBundle, NodeDef, Runner, RunnerContext } from '../../src/dag/schema.js';
 
-const BUNDLE_DIR = '/Users/ganaraj/.kshana/bundles/illustrated_story_animated';
+const BUNDLE_DIR =
+  process.env['DHEE_ILLUSTRATED_STORY_BUNDLE_DIR'] ??
+  join(homedir(), '.kshana', 'bundles', 'illustrated_story_animated');
+
+/**
+ * This file drives the REAL external bundle plus the REAL external
+ * `plan.assemble_keyframes` runner, so it can only run where both are
+ * installed. On CI (and any clone without them) it SKIPS rather than fails —
+ * a machine-specific integration test must not be reported as a broken engine.
+ * Properly, it belongs in the bundle's own repo; see dheeai/dhee-core#192.
+ */
+const CAN_RUN = existsSync(join(BUNDLE_DIR, 'bundle.json'));
 
 function loadRealBundleJson(): { nodes: NodeDef[]; inputs: Array<Record<string, unknown>> } {
   return JSON.parse(readFileSync(join(BUNDLE_DIR, 'bundle.json'), 'utf-8'));
@@ -43,6 +58,18 @@ function realNarrationInput(): Record<string, unknown> {
   const real = loadRealBundleJson();
   const input = real.inputs.find((i) => i['id'] === 'narration');
   if (!input) throw new Error("bundle.json has no top-level 'narration' input declared anymore");
+  return input;
+}
+
+/**
+ * A real top-level bundle input, by id. `scene_outline` reads `target_duration`
+ * as context, and unlike `director_screenplay` it is a bundle INPUT rather than
+ * a node — so it has to be declared here, not stubbed as a producer stage.
+ */
+function realBundleInput(id: string): Record<string, unknown> {
+  const real = loadRealBundleJson();
+  const input = real.inputs.find((i) => i['id'] === id);
+  if (!input) throw new Error(`bundle.json no longer declares a top-level '${id}' input`);
   return input;
 }
 
@@ -75,6 +102,7 @@ const OUTLINE = {
       heading: 'A Silent Workshop',
       mode: 'narration',
       brief: 'A candle gutters over the great silent clock as midnight approaches.',
+      emotion: 'quiet dread',
       entities: ['workshop', 'great_clock'],
     },
     {
@@ -82,6 +110,7 @@ const OUTLINE = {
       heading: 'The Unexpected Arrival',
       mode: 'dialogue',
       brief: 'The old clockmaker turns as the door creaks open on a bitter night.',
+      emotion: 'unease',
       entities: ['old_clockmaker', 'daughter'],
     },
     {
@@ -89,6 +118,7 @@ const OUTLINE = {
       heading: 'Winding the Time',
       mode: 'narration',
       brief: 'Two sets of hands turn the great brass key together as dawn breaks.',
+      emotion: 'acceptance',
       entities: ['old_clockmaker', 'daughter', 'great_clock'],
     },
   ],
@@ -107,6 +137,7 @@ const FRAGMENTS: Record<string, unknown> = {
       sceneBrief:
         'A thick pillar candle flame flickers and gutters on a scarred workbench, casting long shadows over the silent face of the great clock.',
       mode: 'narration',
+      emotion: 'quiet dread',
       entities: ['workshop', 'great_clock'],
     },
     shots: [
@@ -134,6 +165,7 @@ const FRAGMENTS: Record<string, unknown> = {
       sceneBrief:
         'The workshop door heaves open against the wind, and the old clockmaker turns his head toward the entrance with wide, watery eyes.',
       mode: 'dialogue',
+      emotion: 'unease',
       entities: ['old_clockmaker', 'daughter'],
     },
     shots: [
@@ -164,6 +196,7 @@ const FRAGMENTS: Record<string, unknown> = {
       sceneBrief:
         'Two sets of hands grasp the large, ornate brass winding key and turn it with a heavy click, waking the massive internal gears of the great clock.',
       mode: 'narration',
+      emotion: 'acceptance',
       entities: ['old_clockmaker', 'daughter', 'great_clock'],
     },
     shots: [
@@ -185,6 +218,12 @@ const MOCK_SHOT_IMAGE_PROMPT = {
   imagePrompt:
     'A cinematic photoreal film still: a weathered hand grips an ornate brass key, twisting it deep into a ' +
     'massive clock mechanism, warm amber light spilling across scattered gears and springs, shallow depth of field.',
+  // shot_image_prompt.schema.json requires `references` (1-2 entries, PRIMARY
+  // first) — references[0] is the grounded-edit base, references[1] the second
+  // image slot. Each entry needs id + type ('character' | 'keyframe') + appearsAs.
+  references: [
+    { id: 'old_clockmaker', type: 'character', appearsAs: 'weathered elderly clockmaker, apron' },
+  ],
   aspectRatio: '3:2',
   generationMode: 'text_to_image',
 };
@@ -205,7 +244,7 @@ function makeMockLlmClient() {
       capturedRequests.push({ messages: opts.messages });
       const joined = opts.messages.map((m) => m.content).join('\n');
 
-      if (joined.includes('SKELETON of a narrated')) {
+      if (joined.includes('SKELETON of an')) {
         return { content: JSON.stringify(OUTLINE) };
       }
 
@@ -223,7 +262,7 @@ function makeMockLlmClient() {
         return { content: JSON.stringify(fragment) };
       }
 
-      if (joined.includes('writing the text-to-image prompt for ONE SHOT')) {
+      if (joined.includes('the EDIT instruction for ONE SHOT')) {
         return { content: JSON.stringify(MOCK_SHOT_IMAGE_PROMPT) };
       }
 
@@ -241,7 +280,10 @@ function makeTestBundle(goal: string): DagBundle {
     version: '0.1.0',
     engineCompat: '>=0.1.0',
     goal,
-    inputs: [realNarrationInput()] as unknown as DagBundle['inputs'],
+    inputs: [
+      realNarrationInput(),
+      realBundleInput('target_duration'),
+    ] as unknown as DagBundle['inputs'],
     nodes: [
       {
         id: 'story',
@@ -249,6 +291,16 @@ function makeTestBundle(goal: string): DagBundle {
         inputs: [],
         outputs: { format: 'md', pattern: 'plans/story.md' },
         runner: { tool: 'stub.story', config: {} },
+      },
+      {
+        // `scene_outline` gained a `director_screenplay` context input in the
+        // bundle; stubbed here like story/story_bible/art_style so this test
+        // stays about the scenes_plan SPLIT topology, not screenplay authoring.
+        id: 'director_screenplay',
+        kind: 'stage',
+        inputs: [],
+        outputs: { format: 'md', pattern: 'plans/director_screenplay.md' },
+        runner: { tool: 'stub.director_screenplay', config: {} },
       },
       {
         id: 'story_bible',
@@ -267,6 +319,25 @@ function makeTestBundle(goal: string): DagBundle {
       realNode('scene_outline'),
       realNode('scene_detail'),
       realNode('scenes_plan'),
+      {
+        // `shot_image_prompt` also reads `character_state` (a stage) and
+        // `shot_motion_directive_draft` (a collection over scenes_plan.shots).
+        // Both stubbed — this test is about the scenes_plan split, not them.
+        id: 'character_state',
+        kind: 'stage',
+        inputs: [],
+        outputs: { format: 'json', pattern: 'plans/character_state.json' },
+        runner: { tool: 'stub.character_state', config: {} },
+      },
+      {
+        id: 'shot_motion_directive_draft',
+        kind: 'collection',
+        itemSource: 'scenes_plan',
+        itemKey: 'shots',
+        inputs: [],
+        outputs: { format: 'json', pattern: 'prompts/motion/{{item_id}}.json' },
+        runner: { tool: 'stub.motion_draft', config: {} },
+      } as unknown as NodeDef,
       realNode('shot_image_prompt'),
     ],
   };
@@ -276,7 +347,7 @@ function writeProjectJson(narration: boolean): void {
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify({ id: 'p1', name: 'Test', narration }));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   projectDir = mkdtempSync(join(tmpdir(), 'istory-anim-split-'));
   capturedRequests = [];
   sceneDetailStartOrder = [];
@@ -298,13 +369,27 @@ beforeEach(() => {
     makeStubProducer('Cinematic photoreal, filmic lighting, shallow depth of field.'),
   );
   reg.register(
+    { tool: 'stub.director_screenplay', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+    makeStubProducer('INT. CLOCKMAKER’S WORKSHOP — NIGHT. He winds the last gear.'),
+  );
+  reg.register(
     { tool: 'llm.generate', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
     createLlmGenerateRunner({ clientFactory: () => makeMockLlmClient() }),
   );
   reg.register(
-    { tool: 'plan.assemble', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
-    planAssembleRunner,
+    { tool: 'stub.character_state', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+    makeStubProducer(JSON.stringify({ old_clockmaker: { mood: 'weary' }, daughter: { mood: 'hopeful' } })),
   );
+  reg.register(
+    { tool: 'stub.motion_draft', version: '0.1.0', engineCompat: '>=0.1.0', credentials: [] },
+    makeStubProducer(JSON.stringify({ motion: 'slow push-in', intensity: 'subtle' })),
+  );
+  const planKeyframes = (await import('dhee-runner-plan-keyframes')) as {
+    runners: Array<{ manifest: Parameters<typeof reg.register>[0]; runner: Parameters<typeof reg.register>[1] }>;
+  };
+  for (const { manifest, runner } of planKeyframes.runners) {
+    reg.register(manifest, runner);
+  }
 });
 
 afterEach(() => {
@@ -312,7 +397,7 @@ afterEach(() => {
   __resetGlobalRegistryForTesting();
 });
 
-describe('illustrated_story_animated — scenes_plan split (scene_outline → scene_detail → plan.assemble)', () => {
+describe.skipIf(!CAN_RUN)('illustrated_story_animated — scenes_plan split (scene_outline → scene_detail → plan.assemble)', () => {
   it('fans scene_detail out to one instance per outline scene, runs them in parallel (concurrency:4), and assembles a schema-valid scenes_plan.json', async () => {
     writeProjectJson(true);
 
@@ -387,7 +472,7 @@ describe('illustrated_story_animated — scenes_plan split (scene_outline → sc
     // sections/shots content (not stale or empty) — confirmed via the
     // captured request text carrying the assembled shot descriptions.
     const shotPromptRequests = capturedRequests.filter((r) =>
-      r.messages.some((m) => m.content.includes('writing the text-to-image prompt for ONE SHOT')),
+      r.messages.some((m) => m.content.includes('the EDIT instruction for ONE SHOT')),
     );
     expect(shotPromptRequests.length).toBe(3);
     const allText = shotPromptRequests.map((r) => r.messages.map((m) => m.content).join('\n')).join('\n---\n');

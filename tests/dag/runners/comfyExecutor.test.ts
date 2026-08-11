@@ -94,6 +94,7 @@ describe('executeComfyWorkflow — required inputs (manifest-driven)', () => {
   let projectDir: string;
   let savedMode: string | undefined;
   let savedCas: string | undefined;
+  let savedSingleGpu: string | undefined;
 
   beforeEach(() => {
     bundleDir = mkdtempSync(join(tmpdir(), 'exec-bundle-'));
@@ -122,8 +123,16 @@ describe('executeComfyWorkflow — required inputs (manifest-driven)', () => {
     );
     savedMode = process.env['COMFY_MODE'];
     savedCas = process.env['DHEE_DISABLE_CAS'];
+    savedSingleGpu = process.env['DHEE_SINGLE_GPU'];
     process.env['COMFY_MODE'] = 'cloud';
     process.env['DHEE_DISABLE_CAS'] = '1';
+    // Isolate from ambient env: `.env` sets DHEE_SINGLE_GPU=1, which makes the
+    // executor probe a local LLM server before every queue. Left on, a unit test
+    // reaches the real GPU box and UNLOADS the operator's loaded model (and, when
+    // the derived URL is dead, burns the 8s AbortSignal.timeout — the cause of the
+    // 5s vitest failures in dheeai/dhee-core#203). These tests stub the Comfy
+    // client; they must not touch a network at all.
+    delete process.env['DHEE_SINGLE_GPU'];
     process.env['ENDPOINT_test_endpoint'] = 'http://stub.local:8188';
   });
   afterEach(() => {
@@ -134,6 +143,8 @@ describe('executeComfyWorkflow — required inputs (manifest-driven)', () => {
     else process.env['COMFY_MODE'] = savedMode;
     if (savedCas === undefined) delete process.env['DHEE_DISABLE_CAS'];
     else process.env['DHEE_DISABLE_CAS'] = savedCas;
+    if (savedSingleGpu === undefined) delete process.env['DHEE_SINGLE_GPU'];
+    else process.env['DHEE_SINGLE_GPU'] = savedSingleGpu;
   });
 
   function makeCtx(): RunnerContext {

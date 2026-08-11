@@ -22,20 +22,27 @@ afterEach(() => {
 });
 
 describe('seedBundleAssets', () => {
-  it('copies the bundle inputs/ files into the project (binary-safe)', () => {
+  it('copies binary talent assets into the project (byte-for-byte) but NOT .md/.txt briefs', () => {
     const bundleDir = join(tmp, 'bundle');
     mkdirSync(join(bundleDir, 'inputs'), { recursive: true });
     writeFileSync(join(bundleDir, 'inputs', 'character.png'), PNG_BYTES);
     writeFileSync(join(bundleDir, 'inputs', 'voice_ref.wav'), Buffer.from([0x52, 0x49, 0x46, 0x46]));
     writeFileSync(join(bundleDir, 'inputs', 'story.md'), 'default brief', 'utf8');
+    writeFileSync(join(bundleDir, 'inputs', 'notes.txt'), 'default notes', 'utf8');
     const projectDir = join(tmp, 'proj');
     mkdirSync(projectDir, { recursive: true });
 
     const seeded = seedBundleAssets(bundleDir, projectDir).sort();
-    expect(seeded).toEqual(['character.png', 'story.md', 'voice_ref.wav']);
+    expect(seeded).toEqual(['character.png', 'voice_ref.wav']);
     // binary intact (byte-for-byte)
     expect(readFileSync(join(projectDir, 'inputs', 'character.png'))).toEqual(PNG_BYTES);
-    expect(readFileSync(join(projectDir, 'inputs', 'story.md'), 'utf8')).toBe('default brief');
+
+    // `.md`/`.txt` are the generative BRIEFS, never talent, so seeding them
+    // would silently substitute the bundle's SAMPLE brief for a missing user
+    // one — the "Helm AI support agent" leak documented on seedBundleAssets.
+    // A missing brief must surface as a required-input error instead.
+    expect(existsSync(join(projectDir, 'inputs', 'story.md'))).toBe(false);
+    expect(existsSync(join(projectDir, 'inputs', 'notes.txt'))).toBe(false);
   });
 
   it('is a no-op when the bundle has no inputs/ dir', () => {

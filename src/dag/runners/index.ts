@@ -8,18 +8,13 @@
  * come in through `discoverRunners` at engine startup. See discovery.ts.
  */
 import type { Runner } from '../schema.js';
-import { comfyKleinRunner } from './comfyKlein.js';
-import { comfyTtiRunner } from './comfyTti.js';
-import { comfyFl2vRunner } from './comfyFl2v.js';
-import { comfyQwenEditChainRunner } from './comfyQwenEditChain.js';
 import { ffmpegConcatRunner } from './ffmpegConcat.js';
-import { ffmpegShotClipRunner } from './ffmpegShotClip.js';
-import { ffmpegKenBurnsRunner } from './ffmpegKenBurns.js';
-import { ffmpegOverlayRunner } from './ffmpegOverlay.js';
-import { ffmpegDemoOverlayRunner } from './ffmpegDemoOverlay.js';
-import { cvCaptionsRunner } from './cvCaptions.js';
+// `cv.captions` REMOVED — it is superseded by the external `video.captions`
+// (dhee-runner-presenter), and its source was never committed here, so this
+// import broke the build on every clone but this one (#202). The legacy source
+// is preserved at dhee-runner-presenter `reference/cv-captions-legacy.ts` as
+// the input for porting its `asrEngine:'llm'` + `translateTo` paths (#196).
 import { llmGenerateRunner } from './llmGenerate.js';
-import { planAssembleRunner } from './planAssemble.js';
 import { vlmJudgeRunner } from './vlmJudge.js';
 // Dhee Cloud media runners — first-party runners for the Dhee Cloud media
 // proxy lane (image/video generation via /api/cloud/media/*). Implemented
@@ -46,6 +41,11 @@ export {
 // compatibility. They're paired with the runner instances and
 // registered together.
 
+// ffmpeg.kenburns / ffmpeg.overlay / ffmpeg.demo_overlay moved OUT to
+// dhee-runner-ffmpeg-composite (#195, and #187 for overlay) — one package, since
+// demoOverlay imports kenBurns. They must NOT be registered here: ecosystem.ts
+// skips a tool already in the registry, so a leftover built-in silently SHADOWS
+// the external package (the 4e7bf411 bug).
 const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
   {
     manifest: {
@@ -66,61 +66,28 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: llmGenerateRunner,
   },
-  {
-    // Bound to the Flux 2 Klein edit workflow. Endpoint URL resolved at
-    // runner.run() time from ENDPOINT_<name> env (same as the other comfy
-    // runners), validated with an actionable error pointing at Settings.
-    manifest: {
-      tool: 'comfy.klein',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy Klein (Flux 2 reference edit)',
-      description:
-        'Drives the Flux 2 Klein edit workflow: a base reference image plus up to 3 optional references threaded through a ReferenceLatent chain. Absent optional references are pruned from the graph; uploads + parameter injection + output download handled by the shared executor.',
-    },
-    runner: comfyKleinRunner,
-  },
-  {
-    manifest: {
-      tool: 'comfy.tti',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy text-to-image',
-      description:
-        'Generates an image from a text prompt via a ComfyUI text-to-image workflow (no reference images). Used for character / setting reference renders.',
-    },
-    runner: comfyTtiRunner,
-  },
-  {
-    manifest: {
-      tool: 'comfy.fl2v',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy first/last-frame to video',
-      description:
-        'Renders a short video from a required first frame, an optional last frame, and a motion prompt via a ComfyUI FL2V workflow.',
-    },
-    runner: comfyFl2vRunner,
-  },
+  // comfy.klein RETIRED — not externalized. Its only real code was a node-id
+  // prune table, which is now DATA in each bundle's klein.manifest.json
+  // editConfig, driven by the external comfy.image_edit. Verified: identical
+  // pruned graphs for 0-3 present references, including the transitive 2-hop
+  // and 3-hop redirect cases and non-contiguous holes. Same play as comfy.boogu.
+  // comfy.tti RETIRED — not externalized into its own package. A text-to-image
+  // workflow is just an image workflow with ZERO input images, so the external
+  // comfy.image_edit serves it from the same manifest-driven engine (v0.7.0),
+  // with editConfig.imageSlots: []. Verified: identical submitted graphs on both
+  // tti workflow variants. Registering it here would SHADOW that package.
+  // comfy.fl2v DELETED — zero usage anywhere. No external bundle node referenced
+  // it, and its only consumer was the built-in narrative_shot_by_shot, which had
+  // 0 of 91 projects and is archived. Nothing to externalize.
   // comfy.ltx_director moved OUT of core into its own external runner package
   // (dhee-runner-ltx-director) — discovered at startup like the other
   // dhee-runner-* packages. Bundles declaring `comfy.ltx_director` resolve it
   // from there. See the open-runner-ecosystem convention.
-  {
-    manifest: {
-      tool: 'comfy.qwen_edit_chain',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Comfy Qwen Edit chain',
-      description:
-        'Qwen Image Edit 2511 + Multi-Angle LoRA + Lightning 4-step LoRA. Iteratively edits a prior shot (LLM-picked from previousN candidates) into the next shot via camera-rotation guidance. Enables consistent character/setting continuity across a scene at low cost.',
-    },
-    runner: comfyQwenEditChainRunner,
-  },
+  // comfy.qwen_edit_chain moved OUT of core into its own external package
+  // (dhee-runner-qwen-edit-chain) — discovered at startup like the other
+  // dhee-runner-* packages. It must NOT be registered here: ecosystem.ts skips a
+  // tool already in the registry, so a leftover built-in silently SHADOWS the
+  // external runner (the bug 4e7bf411 fixed for comfy.ltx_director).
   {
     manifest: {
       tool: 'ffmpeg.concat',
@@ -133,80 +100,16 @@ const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
     },
     runner: ffmpegConcatRunner,
   },
-  {
-    manifest: {
-      tool: 'ffmpeg.shot_clip',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'ffmpeg shot clip (stub)',
-      description:
-        'Synthesizes a 10s MP4 clip for one shot from a shot_breakdown entry. Stand-in for the real LTX video runner — produces real binary artifacts (animated colored boxes; no text overlay) so end-to-end tests flow real videos through events + CAS + branches without needing GPU.',
-    },
-    runner: ffmpegShotClipRunner,
-  },
-  {
-    manifest: {
-      tool: 'ffmpeg.kenburns',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'ffmpeg Ken Burns',
-      description:
-        'Animates one still image with a subtle Ken Burns zoom/pan and muxes narration audio, sized to that audio. Keeps text-heavy stills (infographics, slides) pixel-sharp — unlike generative video.',
-    },
-    runner: ffmpegKenBurnsRunner,
-  },
-  {
-    // Legacy built-in (peer of ffmpeg.concat/kenburns) — local whisper + ffmpeg +
-    // a bundle-shipped python renderer. Restored to the registry; was orphaned.
-    manifest: {
-      tool: 'cv.captions',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Karaoke Captions',
-      description:
-        'Burns karaoke / Instagram-style animated captions onto a video. Local faster-whisper word timestamps → a bundle-shipped python (Pillow) renderer; no API key for transcription.',
-    },
-    runner: cvCaptionsRunner,
-  },
-  {
-    manifest: {
-      tool: 'ffmpeg.overlay',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'ffmpeg Overlay',
-      description:
-        'Composites an overlay image onto a base video (PiP / screen inset) deterministically — overlaid pixels are byte-exact after a clean resize, never regenerated by a model.',
-    },
-    runner: ffmpegOverlayRunner,
-  },
-  {
-    manifest: {
-      tool: 'ffmpeg.demo_overlay',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'ffmpeg Demo Overlay',
-      description:
-        'Talking-head clip with a pixel-exact screenshot that pops in as a top-right inset, expands to fullscreen, holds, then collapses back — deterministic, lip-sync preserved.',
-    },
-    runner: ffmpegDemoOverlayRunner,
-  },
-  {
-    manifest: {
-      tool: 'plan.assemble',
-      version: '0.1.0',
-      engineCompat: '>=0.1.0',
-      credentials: [],
-      displayName: 'Plan Assemble',
-      description:
-        'Deterministic (no LLM calls) assembly of the canonical scenes_plan.json from per-scene fragments (a scope:all collection) plus the outline stage title.',
-    },
-    runner: planAssembleRunner,
-  },
+  // ffmpeg.shot_clip DELETED — a TEST stub, never a product runner. Zero external
+  // bundle nodes; its only consumer was the archived narrative_text_video. The
+  // GPU-free "real video bytes" role belongs in tests/fixtures (#192), not in the
+  // shipped registry.
+  // plan.assemble DELETED — dead code, not externalized. Zero bundles dispatch
+  // it: every consumer moved to the EXTERNAL plan.assemble_keyframes
+  // (dhee-runner-plan-keyframes), which documents itself as "a STRICT SUPERSET
+  // of dhee-core's built-in plan.assemble" and ships a parity suite asserting
+  // byte-identical output at keyframe ceiling 1. So the behaviour is still
+  // guarded — just not here. (#197's "one consumer" premise was stale.)
   {
     manifest: {
       tool: 'vlm.judge',
