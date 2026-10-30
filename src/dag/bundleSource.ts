@@ -137,6 +137,8 @@ export function getBundleSearchRoots(): string[] {
   // Dev / source fallback — the in-repo source tree. Keeps vitest +
   // headless scripts working without setting env vars.
   roots.push(resolve(REPO_ROOT, 'src/dag/bundles'));
+  // Published Core ships curated bundles under dist, without the source tree.
+  roots.push(resolve(REPO_ROOT, 'dist/bundles'));
   return roots;
 }
 

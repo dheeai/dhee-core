@@ -3,6 +3,8 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
+    'control/index': 'src/control/productionControl.ts',
+    'control/cli': 'src/control/cli.ts',
     'server/runners/index': 'src/server/runners/index.ts',
     // Phase 6.4: `./manager` entry deleted along with the no-op
     // ConversationManager stub. Embed hosts import the surviving
