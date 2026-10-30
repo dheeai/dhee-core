@@ -2326,3 +2326,5 @@ export {
 export type { ApiWorkflowValidation, ParameterMapping } from './importWorkflow.js';
 
 export { readProjectProductionReview, recordProjectProductionReview } from './projectProductionReviews.js';
+export { GpuQueueClient } from './gpuQueue.js';
+export type { GpuWorkflow, GpuJob } from './gpuQueue.js';
