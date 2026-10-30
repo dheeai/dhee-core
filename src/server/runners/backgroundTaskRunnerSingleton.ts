@@ -1,3 +1,4 @@
+import { creativeReviewPauseMessage } from '../../dag/productionReviewGates.js';
 /**
  * Process-wide singleton for the BackgroundTaskRunner. Every project
  * runs through the bundle architecture via runProjectViaBundle.
@@ -76,9 +77,9 @@ async function executeRunTo(
   if (result.gatedAfter) {
     ctx.hooks.onNotification({
       level: 'info',
-      message:
+      message: creativeReviewPauseMessage(result.gatedAfter) ?? (
         `⏸ Paused after collection node '${result.gatedAfter}' — ` +
-        `stop-after-each-collection is on. Resume to continue.`,
+        `stop-after-each-collection is on. Resume to continue.`),
     });
     // Return the gate reason as a structured outcome so the runner stamps
     // it onto the terminal `completed` event — the side-channel

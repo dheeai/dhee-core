@@ -177,3 +177,11 @@ describe('dhee_get_status — budget-cap pause on the PULL path', () => {
     expect(r.content[0]!.text).not.toMatch(/paused at the budget cap/i);
   });
 });
+
+it('reports a required review without telling the agent to disable the collection gate', async () => {
+ const dir=projectWithGate({final_video:{status:'completed'}},{gatedAfter:'review:rough-cut'});
+ const result=await tool(async()=>({known:true})).execute('review',{projectDir:dir});
+ expect(result.content[0]!.text).toMatch(/record approval/);
+ expect(result.content[0]!.text).toMatch(/cannot bypass/);
+ expect(result.content[0]!.text).not.toMatch(/gate off/);
+});

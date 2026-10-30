@@ -1,3 +1,4 @@
+import { creativeReviewPauseMessage } from '../../dag/productionReviewGates.js';
 /**
  * runProjectViaBundle — the bundle-architecture entry point for
  * project execution. Replaces runProjectInProcess for projects that
@@ -316,8 +317,8 @@ export async function runProjectViaBundle(
   }
   if (walkResult.gatedAfter) {
     log(
-      `runProjectViaBundle: paused after collection '${walkResult.gatedAfter}' ` +
-        `(stop-after-each-collection is on). Resume to continue.`,
+      creativeReviewPauseMessage(walkResult.gatedAfter) ?? (`runProjectViaBundle: paused after collection '${walkResult.gatedAfter}' ` +
+        `(stop-after-each-collection is on). Resume to continue.`),
     );
     // Durable marker for the pull path (dhee_get_status). See persistGateMarker.
     persistGateMarker(opts.projectDir, {

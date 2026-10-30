@@ -237,9 +237,10 @@ export async function readProductionReview(scope: ReviewScope): Promise<Producti
 }
 
 export async function recordProductionReview(
-  input: RecordProductionReviewInput
+  input: RecordProductionReviewInput,
+  resolveCurrentScope?: () => Promise<ReviewScope>
 ): Promise<ProductionReview> {
-  const scope = normalize(input);
+  let scope = normalize(input);
   if (!['approved', 'changes-requested'].includes(input.decision))
     throw new Error('Invalid review decision.');
   if (
@@ -253,6 +254,7 @@ export async function recordProductionReview(
   if (isWalkLockResult(lock))
     throw new Error('A run or review save is in progress. Wait for it to finish.');
   try {
+    if (resolveCurrentScope) scope = normalize(await resolveCurrentScope());
     const current = await readNormalized(scope);
     if (!current.fingerprint || current.fingerprint !== input.expectedFingerprint)
       throw new Error(

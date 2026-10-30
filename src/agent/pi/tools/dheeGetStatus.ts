@@ -1,3 +1,4 @@
+import { creativeReviewPauseMessage } from '../../../dag/productionReviewGates.js';
 /**
  * dhee_get_status — read walkState for a project and summarize as
  * status counts + per-failed-node detail + per-in-progress elapsed
@@ -312,14 +313,14 @@ export function makeGetStatusTool(deps: GetStatusDeps = {}) {
         const pending = gate.pendingAfterGate ?? [];
         const pendingLine =
           pending.length > 0 ? ` Stages still pending behind the gate: ${pending.join(', ')}.` : '';
-        const banner =
+        const banner = creativeReviewPauseMessage(gate.gatedAfter) ?? (
           `⏸ PAUSED AT THE GATE — the run stopped after collection '${gate.gatedAfter}' because the ` +
           `"Stop after each collection" gate (gateAfterCollections) is ON. This is an INTENTIONAL pause, ` +
           `NOT a finish and NOT a failure or a missing endpoint.${pendingLine} ` +
           `Do NOT dispatch another run to "continue" and do NOT attribute the missing downstream output to ` +
           `a misconfig (e.g. ComfyUI) — the gate is the reason. Tell the user this batch is ready to review ` +
           `and WAIT for them to say go; resume (dhee_start_run) only when they ask, or they can turn the ` +
-          `gate off for an end-to-end run.\n\n`;
+          `gate off for an end-to-end run.\n\n`);
         summary.unshift(banner.trimEnd(), ``);
       }
 

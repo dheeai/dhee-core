@@ -24,7 +24,8 @@ export type EventKind =
   | 'runner.swapped'
   | 'critique.added'
   | 'budget.exceeded'
-  | 'review.decided';
+  | 'review.decided'
+  | 'review.policy-set';
 
 export interface NodeStartedPayload {
   nodeId: string;
@@ -199,6 +200,7 @@ export interface ReviewDecidedPayload {
 }
 
 export interface PayloadByKind {
+  'review.policy-set': { enabled: boolean };
   'review.decided': ReviewDecidedPayload;
   'project.created': ProjectCreatedPayload;
   'bundle.bound': BundleBoundPayload;

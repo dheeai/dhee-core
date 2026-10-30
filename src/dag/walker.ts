@@ -12,8 +12,11 @@
  * frames) on disk — it produces only the new ones declared by the
  * bundle. See docs/dag-bundles-sketch.md "Backward walker" section.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
+import { productionReviewsRequired, isNarrativeReviewBundle, requiredGateBeforeNode, checkProductionReviewGate, resolveProductionReviewGate } from './productionReviewGates.js';
+import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
+import { projectWalkState } from './eventLog/projectWalkState.js';
 import { openEventLog } from './eventLog/EventLog.js';
 import { computeCostLedger } from './eventLog/projectCost.js';
 import { preserveAsVersion } from './preserveAsVersion.js';
@@ -127,6 +130,7 @@ export type { CostLedger, CostLedgerOpts } from './eventLog/projectCost.js';
 export { readProductionReview, recordProductionReview } from './productionReviews.js';
 export type { ReviewTarget, ReviewScope, ProductionReview, RecordProductionReviewInput } from './productionReviews.js';
 
+export { productionReviewsRequired, setProductionReviewsRequired } from './productionReviewGates.js';
 export interface WalkerCliParams {
   /** Which scene(s) to render. */
   sceneIds?: number[];
@@ -680,6 +684,45 @@ function materializeCollection(
   return [{ def: node, status: 'pending' }];
 }
 
+export async function resolveProjectProductionReviewScope(input: {projectDir:string;branchId?:string;gate:string}) {
+  if(!['storyboard','references','rough-cut'].includes(input.gate)) throw new Error('Unknown review gate.');
+  const project=JSON.parse(readFileSync(resolve(input.projectDir,'project.json'),'utf8'));
+  const location=resolveBundleDir(parseBundleSource(project.bundleSource));
+  const bundle=loadBundle(statSync(location).isDirectory()?resolve(location,'bundle.json'):location);
+  const gpuVramBytes=bundle.nodes.some(n=>typeof n.chunkBy?.maxFramePixels==='number')?await defaultProbeGpuVramBytes():null;
+  const instances=materializeProductionReviewInstances({...input,bundle,gpuVramBytes});
+  const result=await resolveProductionReviewGate({...input,bundle,gate:input.gate as 'storyboard'|'references'|'rough-cut',instances});
+  if(!result.targets.length) throw new Error(result.reason??'Review inputs are unavailable.');
+  return {...input,targets:result.targets};
+}
+
+/** Read-only membership from the full current plan, independent of a scoped run. */
+export function materializeProductionReviewInstances(opts: {
+  projectDir:string;bundle:DagBundle;branchId?:string;cli?:WalkerCliParams;gpuVramBytes?:number|null;
+}): Map<string,NodeInstance[]> {
+  const state=projectWalkState([...openEventLog(opts.projectDir).read()],{branchId:opts.branchId});
+  const inputs=resolveBundleInputs(opts.bundle.inputs,opts.projectDir);
+  const instances=new Map<string,NodeInstance[]>();
+  for(const node of topoFromGoal(opts.bundle)) {
+    let items:NodeInstance[]=[];
+    try {
+      items=node.kind==='collection' ? materializeCollection(node,opts.projectDir,opts.cli??{},instances,
+        typeof inputs['aspect']==='string'?inputs['aspect']:undefined,
+        typeof inputs['resolution']==='number'?inputs['resolution']:undefined,opts.gpuVramBytes)
+        : [{def:node,status:'pending'}];
+    } catch { /* Missing plan input remains incomplete, never invent membership. */ }
+    for(const item of items) {
+      const prior=state.nodes[item.itemId===undefined?node.id:`${node.id}:${item.itemId}`];
+      if(prior?.status==='completed' && prior.outputPath && existsSync(resolve(opts.projectDir,prior.outputPath))) {
+        item.status='completed';item.outputRel=prior.outputPath;item.outputAbs=resolve(opts.projectDir,prior.outputPath);
+        if(prior.metadata) item.metadata=prior.metadata;
+      }
+    }
+    instances.set(node.id,items);
+  }
+  return instances;
+}
+
 /**
  * Substitute {{key}} placeholders in a string using ctx values.
  * Supports {{scene_id}} (e.g. 'scene_1') and {{shot_id}}.
@@ -1108,6 +1151,8 @@ async function walkBundleWithReviewLoop(
 async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   const log = opts.log ?? ((m: string) => console.log(m));
   const cli = opts.cli ?? {};
+  const reviewsRequired = productionReviewsRequired(opts.projectDir);
+  if (reviewsRequired && !isNarrativeReviewBundle(opts.bundle)) return {ok:false,error:'Required creative reviews are not configured for this bundle.',instances:[]};
   // LLM capability handed to every runner via ctx.llm — built once per
   // walk. Runners (esp. SDK-only third-party ones) use this instead of
   // importing a provider directly.
@@ -1389,6 +1434,20 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     if (opts.signal?.aborted) {
       log('walker: abort signal received — halting before next node');
       break;
+    }
+
+    // This is the shared execution boundary: direct walks, regen, UI and
+    // agent runs all consult the same project policy and exact approval scope.
+    if (reviewsRequired) {
+      const gate = requiredGateBeforeNode(opts.bundle, node.id);
+      if (gate) {
+        const review = await checkProductionReviewGate({projectDir:opts.projectDir,bundle:opts.bundle,branchId:opts.branchId,gate,instances:materializeProductionReviewInstances({...opts,gpuVramBytes})});
+        if (!review.approved) {
+          log(`Creative review required: ${gate}. ${review.reason ?? ''}`);
+          opts.onNotification?.({level:'info',message:`Creative review required: ${gate}. ${review.reason ?? ''}`});
+          return {ok:true,gatedAfter:`review:${gate}`,pendingAfterGate:ordered.slice(ordered.indexOf(node)).map((n)=>n.id),instances:allInstances};
+        }
+      }
     }
 
     // Lazy materialization for upstream-driven collections. By topo
@@ -2093,7 +2152,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     // finishing, not a mid-graph pause. stopAtReached breaks the loop at
     // the top of the next iteration, exactly like stopAt.
     if (
-      opts.gateAfterCollections &&
+      opts.gateAfterCollections && !reviewsRequired &&
       node.kind === 'collection' &&
       node.id !== opts.bundle.goal &&
       nodeDidRealWork
@@ -2128,6 +2187,13 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   const goalInsts = instancesById.get(opts.bundle.goal) ?? [];
   const goalInst = goalInsts[0];
   if (goalInst && goalInst.status === 'completed' && goalInst.outputAbs) {
+    if (reviewsRequired) {
+      const review = await checkProductionReviewGate({projectDir:opts.projectDir,bundle:opts.bundle,branchId:opts.branchId,gate:'rough-cut',instances:materializeProductionReviewInstances({...opts,gpuVramBytes})});
+      if (!review.approved) {
+        opts.onNotification?.({level:'info',message:`Rough cut review required. ${review.reason ?? ''}`});
+        return {ok:true,gatedAfter:'review:rough-cut',pendingAfterGate:[],instances:allInstances};
+      }
+    }
     return {
       ok: true,
       goal: { outputRel: goalInst.outputRel!, outputAbs: goalInst.outputAbs },
@@ -2258,3 +2324,5 @@ export {
   suggestParameterMappings,
 } from './importWorkflow.js';
 export type { ApiWorkflowValidation, ParameterMapping } from './importWorkflow.js';
+
+export { readProjectProductionReview, recordProjectProductionReview } from './projectProductionReviews.js';
