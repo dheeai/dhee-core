@@ -86,6 +86,9 @@ export class GpuQueueClient {
   async submit(name: string, inputs: Record<string, unknown>, signal?: AbortSignal) {
     return acceptedSchema.parse(await this.invoke('run_workflow', { name, inputs, wait: false }, signal));
   }
+  async cancel(jobId: string, signal?: AbortSignal): Promise<unknown> {
+    return this.invoke('cancel_job', { job_id: jobId }, signal);
+  }
   async getJob(jobId: string, signal?: AbortSignal): Promise<GpuJob> {
     return jobSchema.parse(await this.invoke('get_job', { job_id: jobId }, signal));
   }
