@@ -1,3 +1,4 @@
+import { gpuQueueRunner } from './gpuQueue.js';
 /**
  * Runner registry bootstrap — registers all built-in runners into the
  * process-global RunnerRegistry at import time, and exposes the
@@ -25,20 +26,18 @@ import { vlmJudgeRunner } from './vlmJudge.js';
 // as committed dist modules under runners/dhee-cloud-* (same shape as the
 // @dhee_ai/openrouter-runners npm package, which remains the distributable
 // copy for external hosts).
-import { manifest as dheeCloudImageManifest, runner as dheeCloudImageRunner } from '../../../runners/dhee-cloud-image/dist/index.js';
-import { manifest as dheeCloudVideoManifest, runner as dheeCloudVideoRunner } from '../../../runners/dhee-cloud-video/dist/index.js';
 import {
-  RunnerRegistry,
-  getGlobalRegistry,
-  type RunnerManifest,
-} from './registry.js';
+  manifest as dheeCloudImageManifest,
+  runner as dheeCloudImageRunner,
+} from '../../../runners/dhee-cloud-image/dist/index.js';
+import {
+  manifest as dheeCloudVideoManifest,
+  runner as dheeCloudVideoRunner,
+} from '../../../runners/dhee-cloud-video/dist/index.js';
+import { RunnerRegistry, getGlobalRegistry, type RunnerManifest } from './registry.js';
 
 export type { RunnerManifest } from './registry.js';
-export {
-  RunnerRegistry,
-  getGlobalRegistry,
-  __resetGlobalRegistryForTesting,
-} from './registry.js';
+export { RunnerRegistry, getGlobalRegistry, __resetGlobalRegistryForTesting } from './registry.js';
 
 // ── Manifests for the built-in runners ────────────────────────────────
 // These describe the runners' versions, credential needs, and engine
@@ -46,6 +45,17 @@ export {
 // registered together.
 
 const BUILTIN_MANIFESTS: Array<{ manifest: RunnerManifest; runner: Runner }> = [
+  {
+    manifest: {
+      tool: 'gpu.queue',
+      version: '0.1.0',
+      engineCompat: '>=0.1.0',
+      credentials: [],
+      displayName: 'Shared GPU queue',
+      description: 'Catalog-driven generation through the shared GPU gateway.',
+    },
+    runner: gpuQueueRunner,
+  },
   {
     manifest: {
       tool: 'llm.generate',
@@ -233,5 +243,7 @@ export function getRunner(tool: string): Runner | undefined {
 
 /** Legacy listing API. */
 export function listRunners(): string[] {
-  return getGlobalRegistry().list().map((m) => m.tool);
+  return getGlobalRegistry()
+    .list()
+    .map(m => m.tool);
 }

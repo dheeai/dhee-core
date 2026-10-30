@@ -191,3 +191,21 @@ it('keeps healthy jobs visible alongside an unreadable record', async () => {
   expect(listed.some(record => record.jobId === 'job1')).toBe(true);
   expect(listed.some(record => record.error?.includes('Unreadable'))).toBe(true);
 });
+
+it('prepares uploads only for a new intent and compares stable source inputs on resume', async () => {
+  const { jobs, input, remote } = fixture();
+  const prepare = vi.fn(async () => ({ prompt: 'scene', refs: ['up_first'] }));
+  const first = await jobs.submit(
+    { ...input, inputs: { refs: [{ sha256: 'abc' }] } },
+    undefined,
+    prepare
+  );
+  await jobs.submit({ ...input, inputs: { refs: [{ sha256: 'abc' }] } }, undefined, prepare);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(remote.submit).toHaveBeenCalledWith(
+    'video',
+    { prompt: 'scene', refs: ['up_first'] },
+    undefined
+  );
+  expect(first.sourceInputs).toEqual({ refs: [{ sha256: 'abc' }] });
+});

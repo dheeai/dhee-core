@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 
-const workflowSchema = z.object({
+export const workflowSchema = z.object({
   name: z.string().min(1), description: z.string(), version: z.string().optional(),
   available: z.boolean(), status: z.string().default('unchecked'),
   reason: z.string().nullable().optional(), est_seconds: z.number().nonnegative().optional(),

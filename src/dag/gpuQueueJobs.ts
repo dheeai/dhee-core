@@ -18,7 +18,7 @@ import { join, relative, extname, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
-import { GpuQueueClient, type GpuJob } from './gpuQueue.js';
+import { GpuQueueClient, workflowSchema, type GpuWorkflow, type GpuJob } from './gpuQueue.js';
 import { lockSync } from 'proper-lockfile';
 
 export interface QueueSubmission {
@@ -27,6 +27,7 @@ export interface QueueSubmission {
   endpoint: string;
   workflow: string;
   version: string;
+  workflowSnapshot?: GpuWorkflow;
   inputs: Record<string, unknown>;
 }
 const recordSchema = z.object({
@@ -36,6 +37,8 @@ const recordSchema = z.object({
   workflow: z.string(),
   version: z.string(),
   inputs: z.record(z.unknown()),
+  sourceInputs: z.record(z.unknown()).optional(),
+  workflowSnapshot: workflowSchema.optional(),
   phase: z.enum(['submitting', 'unknown', 'tracked', 'downloaded']),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -116,6 +119,10 @@ export class QueueJobs {
     const record = recordSchema.parse(JSON.parse(readFileSync(this.path(id), 'utf8')));
     if (record.id !== id) throw new Error('Queue record identity does not match its file.');
     return record;
+  }
+  find(key: string): QueueJobRecord | undefined {
+    const id = hash(key);
+    return existsSync(this.path(id)) ? this.read(id) : undefined;
   }
   list(): QueueJobRecord[] {
     return readdirSync(this.storeDir)
@@ -198,7 +205,11 @@ export class QueueJobs {
     }
   }
 
-  async submit(input: QueueSubmission, signal?: AbortSignal): Promise<QueueJobRecord> {
+  async submit(
+    input: QueueSubmission,
+    signal?: AbortSignal,
+    prepareInputs?: () => Promise<Record<string, unknown>>
+  ): Promise<QueueJobRecord> {
     signal?.throwIfAborted();
     if (!input.key || !input.workflow || !input.version)
       throw new Error('A generation key, workflow and catalog version are required.');
@@ -227,13 +238,17 @@ export class QueueJobs {
         return existing;
       }
       signal?.throwIfAborted();
+      const wireInputs = prepareInputs ? await prepareInputs() : input.inputs;
+      signal?.throwIfAborted();
       const record: QueueJobRecord = {
         id,
         fingerprint,
         endpoint,
         workflow: input.workflow,
         version: input.version,
-        inputs: JSON.parse(canonical(input.inputs)) as Record<string, unknown>,
+        workflowSnapshot: input.workflowSnapshot,
+        inputs: JSON.parse(canonical(wireInputs)) as Record<string, unknown>,
+        sourceInputs: JSON.parse(canonical(input.inputs)) as Record<string, unknown>,
         phase: 'submitting',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
