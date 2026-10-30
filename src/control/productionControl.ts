@@ -1,3 +1,9 @@
+import {
+  gpuTargetsSchema,
+  gpuPreparationSchema,
+  listGpuTargets,
+  prepareGpuAttempt,
+} from './gpuPreparation.js';
 /** Shared structured operations for Desktop, CLI automation and future MCP adapters. */
 import { realpathSync, statSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -23,6 +29,8 @@ const branch = { branchId: z.string().min(1).default('main') };
 const gate = z.enum(['storyboard', 'references', 'rough-cut']);
 const id = z.string().regex(/^[a-f0-9]{64}$/);
 export const productionRequestSchema = z.discriminatedUnion('action', [
+  gpuTargetsSchema.extend({ action: z.literal('gpu.targets') }),
+  gpuPreparationSchema.extend({ action: z.literal('gpu.prepare') }),
   z.object({ action: z.literal('gpu.catalog'), endpoint: z.string().min(1).optional() }).strict(),
   z
     .object({
@@ -95,6 +103,22 @@ export function createProductionControl(deps: Dependencies = {}) {
       const projectDir = realpathSync(req.projectDir);
       if (!statSync(join(projectDir, 'project.json')).isFile())
         throw new Error('Project is unavailable.');
+      if (req.action === 'gpu.targets')
+        return { ok: true, result: listGpuTargets({ projectDir, branchId: req.branchId }) };
+      if (req.action === 'gpu.prepare') {
+        const { action, ...payload } = req;
+        if (action === 'gpu.prepare')
+          return {
+            ok: true,
+            result: await prepareGpuAttempt(
+              payload,
+              deps.catalog
+                ? (endpoint, signal) => deps.catalog!(endpoint).listWorkflows(signal)
+                : undefined,
+              options.signal
+            ),
+          };
+      }
       if (req.action === 'gpu.jobs') {
         if (req.operation !== 'list' && !req.id)
           throw new Error('A saved queue record id is required.');

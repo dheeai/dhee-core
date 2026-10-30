@@ -50,10 +50,32 @@ The other gates are `references` and `rough-cut`. Read returns authoritative ful
 
 Use `changes-requested` for requested revisions. `humanAcknowledged` is the caller's explicit assertion, not authentication of a human. Codex must never set it on its own behalf or infer creative approval from “continue.” Fingerprints are rechecked; stale or incomplete artifacts cannot be approved. Server scope resolution prevents approving a partial selection.
 
+## Prepare one scene or reference
+
+Desktop's Production view now includes **Prepare a GPU scene or reference**. Select a target, explicitly load the gateway catalog, choose a workflow and fill its declared inputs. Saving persists a branch-specific runner selection; it does not upload files or submit a job. Desktop and Codex use the same Core validation.
+
+```json
+{"action":"gpu.targets","projectDir":"/absolute/project","branchId":"main"}
+```
+
+Use the returned target's `selectionId` as `expectedSelectionId` (including `null` for an unmodified target). Copy the exact workflow version from `gpu.catalog`:
+
+```json
+{"action":"gpu.prepare","projectDir":"/absolute/project","branchId":"main","nodeId":"scene_clip","itemId":"scene_01","requestId":"scene-01-attempt-001","expectedSelectionId":null,"endpoint":"http://YOUR-GATEWAY:9000/mcp","workflow":"COPY_WORKFLOW_NAME","workflowVersion":"COPY_VERSION","inputs":{"prompt":"An approved scene description"},"primaryOutput":0}
+```
+
+`inputs` must match the chosen workflow's schema. File inputs may be project-confined local paths, existing upload handles or HTTP URLs. File lists preserve reference order; Desktop accepts one path per line. Required random-default seeds can be left blank and are materialized by Core. Inputs here are literal values, not upstream field mappings. The existing bundle still declares dependencies; preparation does not rewrite it.
+
+Retry the **identical request with the same requestId** after a lost response. A changed request needs a fresh requestId and current selectionId. A superseded retry returns `active:false` and does not restore the older selection. Completed/running targets, adaptive chunk targets, stale selections and unresolved prior queue attempts are rejected. Even an attempt declared directly in the bundle is protected. Files are checked at preparation and their bytes are snapshotted at dispatch.
+
+This panel intentionally has no Generate button yet. Exact single-instance execution is the next step: do not use a bare collection node id to claim that only one scene will run. The existing run interface can include sibling instances according to walker semantics. Creative approvals remain required before execution.
+
+Preparation uses the project walk lock. An empty/unreadable lock is conservatively treated as held because another process may be writing its owner record. If a crash leaves such a lock, investigate whether a walker is active before manual recovery; preparation never deletes that uncertain lock automatically.
+
 ## Existing and remaining controls
 
 Project creation, bundles, artifact inspection/edits, invalidation/regeneration and cross-process stop are already available through `pnpm dhee` in the source checkout. Those older commands retain their existing behavior; the new production command does not retroactively enforce review policy on every older entry point. Keep policy enabled for this production workflow. Run `pnpm dhee --help` for that interface.
 
-The new structured interface covers catalog/jobs/status/reviews/run. Desktop scene workflow/input selection and branch-specific attempt creation, guided unknown-job reconciliation, and final assembly/quality checks remain in the implementation plan. They must gain shared operations and command tests as they are built. Do not claim the complete video workflow or actual RTX 5090 rendering is verified from fixture tests.
+The new structured interface covers catalog/jobs/targets/preparation/status/reviews/run. Exact single-instance execution, guided unknown-job reconciliation, and final assembly/quality checks remain in the implementation plan. They must gain shared operations and command tests as they are built. Do not claim the complete video workflow or actual RTX 5090 rendering is verified from fixture tests.
 
 API declaration files are not emitted by the current Core build (`dts: false`); JavaScript/CLI consumers work, while published TypeScript declarations remain a follow-up.

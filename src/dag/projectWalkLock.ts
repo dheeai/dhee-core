@@ -105,7 +105,7 @@ function readLock(path: string): LockPayload | null {
  * Decide whether an existing lock file is STALE (safe to reclaim).
  *
  * Reclaim only when we're confident the holder is gone:
- *   - unreadable / corrupt lock → stale.
+ *   - unreadable / corrupt lock → held (owner may still be writing).
  *   - same host AND holder PID is dead → stale.
  *   - same host AND holder PID is OUR pid but not tracked in-process →
  *     a leftover from a crashed prior incarnation → stale.
@@ -113,7 +113,7 @@ function readLock(path: string): LockPayload | null {
  * verify) → NOT stale; treat as held.
  */
 function isStaleLock(payload: LockPayload | null): boolean {
-  if (payload === null) return true;
+  if (payload === null) return false;
   const sameHost = payload.host === '' || payload.host === hostname();
   if (!sameHost) return false; // can't verify a remote pid — be conservative
   if (payload.pid === process.pid) return true; // our own crashed leftover
