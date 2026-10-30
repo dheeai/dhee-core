@@ -124,6 +124,9 @@ export type { BranchTree, BranchEntry } from './eventLog/projectBranches.js';
 export { computeCostLedger } from './eventLog/projectCost.js';
 export type { CostLedger, CostLedgerOpts } from './eventLog/projectCost.js';
 
+export { readProductionReview, recordProductionReview } from './productionReviews.js';
+export type { ReviewTarget, ReviewScope, ProductionReview, RecordProductionReviewInput } from './productionReviews.js';
+
 export interface WalkerCliParams {
   /** Which scene(s) to render. */
   sceneIds?: number[];

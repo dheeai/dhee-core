@@ -35,6 +35,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
@@ -147,7 +148,7 @@ function writeLockFile(path: string): void {
  * invalidates nodes before walking).
  */
 export function isWalkLocked(projectDir: string): boolean {
-  const key = resolve(projectDir);
+  const key = existsSync(projectDir) ? realpathSync(projectDir) : resolve(projectDir);
   if (heldInProcess.has(key)) return true;
   const path = lockFilePath(key);
   if (!existsSync(path)) return false;
@@ -160,7 +161,7 @@ export function isWalkLocked(projectDir: string): boolean {
  * already in progress for this project. Never blocks.
  */
 export function acquireWalkLock(projectDir: string): WalkLock | WalkLockHeld {
-  const key = resolve(projectDir);
+  const key = existsSync(projectDir) ? realpathSync(projectDir) : resolve(projectDir);
 
   // Layer 1: same-process.
   if (heldInProcess.has(key)) {

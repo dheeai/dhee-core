@@ -23,7 +23,8 @@ export type EventKind =
   | 'runner.swap_suggested'
   | 'runner.swapped'
   | 'critique.added'
-  | 'budget.exceeded';
+  | 'budget.exceeded'
+  | 'review.decided';
 
 export interface NodeStartedPayload {
   nodeId: string;
@@ -188,7 +189,17 @@ export interface BudgetExceededPayload {
  * Union of payloads, indexed by kind. Each kind keeps its narrow payload
  * shape; consumers can switch over `event.kind` and the type is narrowed.
  */
+export interface ReviewDecidedPayload {
+  gate: string;
+  targets: Array<{ nodeId: string; itemId?: string }>;
+  fingerprint: string;
+  decision: 'approved' | 'changes-requested';
+  reviewer: 'local-user';
+  notes?: string;
+}
+
 export interface PayloadByKind {
+  'review.decided': ReviewDecidedPayload;
   'project.created': ProjectCreatedPayload;
   'bundle.bound': BundleBoundPayload;
   'inputs.provided': InputsProvidedPayload;
