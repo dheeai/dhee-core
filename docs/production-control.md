@@ -113,3 +113,15 @@ Project creation, bundles, artifact inspection/edits, invalidation/regeneration 
 The new structured interface covers catalog/jobs/targets/preparation/status/reviews/run. Final assembly/quality checks and the bounded live Brilliant Care baseline remain in the implementation plan. They must gain shared operations and command tests as they are built. Do not claim the complete video workflow or actual RTX 5090 rendering is verified from fixture tests.
 
 API declaration files are not emitted by the current Core build (`dts: false`); JavaScript/CLI consumers work, while published TypeScript declarations remain a follow-up.
+
+## Selected scene and voice technical checks
+
+`media.check` inspects the current completed video/audio selection from the authoritative branch plan. Desktop exposes the same operation in Production → Check scene and voice media. Use `gpu.targets` to enumerate targets first.
+
+```json
+{"action":"media.check","projectDir":"/absolute/project","branchId":"main","nodeId":"scene_clip","itemId":"scene_1","expectedAudio":true,"expectedDurationSec":5}
+```
+
+`expectedAudio` defaults false (audio targets always require audio); duration is optional. The response includes selected version/path, SHA-256/bytes, timestamp, stream information, complete decode result, duration tolerance (0.25 seconds or 3%, whichever is larger), first-audio-track peak/mean and timestamped silence intervals. `technicalStatus` is `passed`, `issues`, `unavailable`, or `review`. Silence below -50 dB for 0.5 seconds and peaks near 0 dBFS are review warnings, not proof of missing speech or clipping. No delivery loudness target is applied.
+
+Checks use a temporary byte snapshot, restrict media formats/protocols, hold the project operation lock, and recheck source hash and selected version before returning. Limit: 2 GiB, 60 seconds per subprocess, not a 60-second overall deadline. Unavailable binaries/timeouts never pass. Results are point-in-time, not persisted approvals; recheck after edits. No generation, export, repair, review decision or RTX queue operation occurs. Semantic scene correctness, words, speaker identity, pronunciation, naturalness and sync remain human checks. Desktop currently shows silence counts; interval timestamps remain available through the structured control response.

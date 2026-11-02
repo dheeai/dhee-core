@@ -1,3 +1,4 @@
+import { mediaCheckSchema, checkProjectMedia } from './mediaChecks.js';
 import {
   gpuTargetsSchema,
   gpuPreparationSchema,
@@ -30,6 +31,7 @@ const gate = z.enum(['storyboard', 'references', 'rough-cut']);
 const id = z.string().regex(/^[a-f0-9]{64}$/);
 const recovery = { ...project, id, jobId: z.string().trim().min(1).max(256) };
 export const productionRequestSchema = z.discriminatedUnion('action', [
+  mediaCheckSchema.extend({ action: z.literal('media.check') }),
   z.object({ action: z.literal('gpu.recovery.inspect'), ...recovery }).strict(),
   z
     .object({
@@ -120,6 +122,10 @@ export function createProductionControl(deps: Dependencies = {}) {
       const projectDir = realpathSync(req.projectDir);
       if (!statSync(join(projectDir, 'project.json')).isFile())
         throw new Error('Project is unavailable.');
+      if (req.action === 'media.check') {
+        const { action: _action, ...payload } = req;
+        return { ok: true, result: await checkProjectMedia(payload, options.signal) };
+      }
       if (req.action === 'gpu.recovery.inspect' || req.action === 'gpu.recovery.link') {
         const store = deps.jobs?.(projectDir) ?? new QueueJobs(projectDir);
         if (!store.inspectRecovery || !store.reconcile)
