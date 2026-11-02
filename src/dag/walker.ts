@@ -162,7 +162,7 @@ export interface WalkerOptions {
    */
   stopAt?: string;
   /** Dispatch only this instance; all ancestors must already be complete. */
-  targetInstance?: { nodeId: string; itemId?: string; selectionId?: string };
+  targetInstance?: { nodeId: string; itemId?: string; selectionId?: string | null; expectedTool?: string };
   requireProductionReviews?: boolean;
   /**
    * Stop-after-each-collection gate. When true, the walker halts as
@@ -1182,9 +1182,11 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   if (opts.targetInstance) {
     const target = opts.bundle.nodes.find(n => n.id === opts.targetInstance!.nodeId);
     if (!target || target.chunkBy) return { ok: false, error: 'Unknown or adaptive-chunk target.', instances: [] };
-    if (opts.targetInstance.selectionId !== undefined) {
+    if (opts.targetInstance.selectionId !== undefined || opts.targetInstance.expectedTool !== undefined) {
       const selected = resolveRunnerForInstance({projectDir:opts.projectDir,branchId:opts.branchId ?? 'main',nodeId:target.id,itemId:opts.targetInstance.itemId,fallbackTool:target.runner.tool});
-      if (selected.selectionId !== opts.targetInstance.selectionId)
+      if (opts.targetInstance.expectedTool !== undefined && selected.tool !== opts.targetInstance.expectedTool)
+        return {ok:false,error:'The assembly runner tool changed. Reload before running.',instances:[]};
+      if (opts.targetInstance.selectionId !== undefined && (selected.selectionId ?? null) !== opts.targetInstance.selectionId)
         return {ok:false,error:'The saved workflow selection changed. Reload before running.',instances:[]};
     }
   }
@@ -1649,6 +1651,10 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
         fallbackTool: node.runner.tool,
         branchId: opts.branchId ?? 'main',
       });
+      if (opts.targetInstance && (
+        (opts.targetInstance.expectedTool !== undefined && resolved.tool !== opts.targetInstance.expectedTool) ||
+        (opts.targetInstance.selectionId !== undefined && (resolved.selectionId ?? null) !== opts.targetInstance.selectionId)
+      )) return {kind:'fail',error:'The selected runner changed before dispatch. Reload before running.'};
       const effectiveTool = resolved.tool;
       const runner = getRunner(effectiveTool);
       if (!runner) {

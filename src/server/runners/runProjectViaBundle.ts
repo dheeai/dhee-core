@@ -35,7 +35,7 @@ export interface RunProjectViaBundleOpts {
    * Optional caller-supplied stage-gate / stop-at. Forwarded to the
    * walker's stopAt. Must be a node id present in the bundle.
    */
-  targetInstance?: { nodeId: string; itemId?: string; selectionId?: string };
+  targetInstance?: { nodeId: string; itemId?: string; selectionId?: string | null; expectedTool?: string };
   requireProductionReviews?: boolean;
   stopAt?: string;
   /**

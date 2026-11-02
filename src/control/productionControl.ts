@@ -32,6 +32,13 @@ const id = z.string().regex(/^[a-f0-9]{64}$/);
 const recovery = { ...project, id, jobId: z.string().trim().min(1).max(256) };
 export const productionRequestSchema = z.discriminatedUnion('action', [
   mediaCheckSchema.extend({ action: z.literal('media.check') }),
+  gpuTargetsSchema.extend({ action: z.literal('assembly.targets') }),
+  gpuPreparationSchema
+    .pick({ projectDir: true, branchId: true, nodeId: true, itemId: true })
+    .extend({
+      action: z.literal('assembly.run'),
+      expectedSelectionId: z.string().min(1).nullable(),
+    }),
   z.object({ action: z.literal('gpu.recovery.inspect'), ...recovery }).strict(),
   z
     .object({
@@ -147,6 +154,18 @@ export function createProductionControl(deps: Dependencies = {}) {
         );
         return { ok: true, result: { jobs: store.list().map(summarizeQueueJob) } };
       }
+      if (req.action === 'assembly.targets') {
+        const result = listGpuTargets({ projectDir, branchId: req.branchId });
+        return {
+          ok: true,
+          result: {
+            ...result,
+            targets: result.targets.filter(
+              t => t.format === 'video' && t.tool === 'ffmpeg.concat' && !t.unsupported
+            ),
+          },
+        };
+      }
       if (req.action === 'gpu.targets')
         return { ok: true, result: listGpuTargets({ projectDir, branchId: req.branchId }) };
       if (req.action === 'gpu.prepare') {
@@ -221,6 +240,37 @@ export function createProductionControl(deps: Dependencies = {}) {
         throw new Error(
           'Enable the three creative approval points before an automated production run.'
         );
+      if (req.action === 'assembly.run') {
+        const target = listGpuTargets({ projectDir, branchId: req.branchId }).targets.find(
+          t => t.nodeId === req.nodeId && t.itemId === req.itemId
+        );
+        if (
+          !target ||
+          target.unsupported ||
+          target.format !== 'video' ||
+          target.tool !== 'ffmpeg.concat' ||
+          target.selectionId !== req.expectedSelectionId
+        )
+          throw new Error(
+            'The local assembly selection changed or is unsupported. Reload assembly targets.'
+          );
+        const result = await (deps.run ?? runProjectViaBundle)({
+          requireProductionReviews: true,
+          projectDir,
+          branchId: req.branchId,
+          targetInstance: {
+            nodeId: req.nodeId,
+            itemId: req.itemId,
+            selectionId: req.expectedSelectionId,
+            expectedTool: 'ffmpeg.concat',
+          },
+          signal: options.signal,
+          log: options.log ?? (() => {}),
+        });
+        return result.ok
+          ? { ok: true, result }
+          : { ok: false, error: result.error ?? 'Assembly failed.' };
+      }
       if (req.action === 'gpu.run') {
         const target = listGpuTargets({ projectDir, branchId: req.branchId }).targets.find(
           t => t.nodeId === req.nodeId && t.itemId === req.itemId

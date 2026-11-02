@@ -193,3 +193,59 @@ it('blocks a previous-shot chain when its earlier shot has not completed', async
   ).toBe(false);
   expect(ran).toEqual([]);
 });
+it('pins the expected runner tool before dispatch', async () => {
+  await run({ stopAt: 'plan' });
+  ran = [];
+  const result = await run({
+    targetInstance: { nodeId: 'clip', itemId: 'one', expectedTool: 'ffmpeg.concat' },
+  });
+  expect(result.ok).toBe(false);
+  expect(result.error).toMatch(/runner|tool/i);
+  expect(ran).toEqual([]);
+});
+it('pins a null default selection and rejects a subsequent runner swap', async () => {
+  await run({ stopAt: 'plan' });
+  const { openEventLog } = await import('../../src/dag/eventLog/EventLog.js');
+  openEventLog(projectDir).append({
+    kind: 'runner.swapped',
+    actor: 'test',
+    branchId: 'main',
+    payload: {
+      nodeId: 'clip',
+      itemId: 'one',
+      fromTool: 'fixture.target',
+      toTool: 'fixture.target',
+      configOverride: {},
+    },
+  });
+  ran = [];
+  expect(
+    (
+      await run({
+        targetInstance: {
+          nodeId: 'clip',
+          itemId: 'one',
+          selectionId: null,
+          expectedTool: 'fixture.target',
+        },
+      })
+    ).ok
+  ).toBe(false);
+  expect(ran).toEqual([]);
+});
+
+it('accepts a pinned bundle-default runner without a swap', async () => {
+  await run({ stopAt: 'plan' });
+  expect(
+    (
+      await run({
+        targetInstance: {
+          nodeId: 'clip',
+          itemId: 'one',
+          selectionId: null,
+          expectedTool: 'fixture.target',
+        },
+      })
+    ).ok
+  ).toBe(true);
+});

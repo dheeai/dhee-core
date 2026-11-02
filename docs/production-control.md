@@ -125,3 +125,14 @@ API declaration files are not emitted by the current Core build (`dts: false`); 
 `expectedAudio` defaults false (audio targets always require audio); duration is optional. The response includes selected version/path, SHA-256/bytes, timestamp, stream information, complete decode result, duration tolerance (0.25 seconds or 3%, whichever is larger), first-audio-track peak/mean and timestamped silence intervals. `technicalStatus` is `passed`, `issues`, `unavailable`, or `review`. Silence below -50 dB for 0.5 seconds and peaks near 0 dBFS are review warnings, not proof of missing speech or clipping. No delivery loudness target is applied.
 
 Checks use a temporary byte snapshot, restrict media formats/protocols, hold the project operation lock, and recheck source hash and selected version before returning. Limit: 2 GiB, 60 seconds per subprocess, not a 60-second overall deadline. Unavailable binaries/timeouts never pass. Results are point-in-time, not persisted approvals; recheck after edits. No generation, export, repair, review decision or RTX queue operation occurs. Semantic scene correctness, words, speaker identity, pronunciation, naturalness and sync remain human checks. Desktop currently shows silence counts; interval timestamps remain available through the structured control response.
+
+## Assemble a completed local stage
+
+`assembly.targets` lists current branch video instances whose effective runner is `ffmpeg.concat`. `assembly.run` runs exactly one listed instance, preserving configured clip ordering/transitions and requiring all ancestors to be complete. It cannot generate missing prerequisites or dispatch a swapped GPU runner. Pass the listed `selectionId` as `expectedSelectionId`, including `null` for an unswapped bundle default.
+
+```json
+{"action":"assembly.targets","projectDir":"/absolute/project","branchId":"main"}
+{"action":"assembly.run","projectDir":"/absolute/project","branchId":"main","nodeId":"final_video","expectedSelectionId":null}
+```
+
+Required creative reviews remain enabled and enforced. Runner tool and selection are checked under the walker lock and again before dispatch. The result may pause at `gatedAfter` or budget, or return `selectedOutput`; completed output is reused, not regenerated. Desktop exposes the same operations in Production → Assemble completed clips. Afterwards reload media and run `media.check` on the assembled file. Neither successful assembly nor technical checks constitute final-delivery approval. Other assembly runners, persisted delivery QC, production-scale concat timeouts/cancellation and full brief-to-video live acceptance remain follow-up work. Existing project-wide pause hints can remain stale after successful exact runs; the explicit operation response is authoritative for that operation.
