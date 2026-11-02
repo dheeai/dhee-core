@@ -78,14 +78,38 @@ This operation requires review policy enabled and checks the saved selection aga
 
 Inspect `result.gatedAfter`, `result.budgetExceeded` and `result.selectedOutput`: a creative pause is not completion, and a selected output is not a finished video. Goal targets still require rough-cut review. Approval always covers the full authoritative review scope. Automated review-loop retries are disabled for exact runs. Existing `project.run`/`runOnly` semantics are unchanged and may execute siblings.
 
-After an interruption, retry the same saved selection to recover the durable attempt. Desktop allows this even if its stale status says `in_progress`; the project lock rejects a genuinely active walk. GPU Jobs provides refresh/cancellation; the CLI forwards Ctrl-C/SIGTERM. Unknown dispatch outcomes still fail closed pending guided reconciliation. Existing project-wide pause hints are retained on selected-output success because a single scene does not establish whole-project readiness.
+After an interruption, retry the same saved selection to recover the durable attempt. Desktop allows this even if its stale status says `in_progress`; the project lock rejects a genuinely active walk. GPU Jobs provides refresh/cancellation; the CLI forwards Ctrl-C/SIGTERM. Unknown dispatch outcomes still fail closed until an existing job is explicitly reconciled as described below. Existing project-wide pause hints are retained on selected-output success because a single scene does not establish whole-project readiness.
 
 Preparation uses the project walk lock. An empty/unreadable lock is conservatively treated as held because another process may be writing its owner record. If a crash leaves such a lock, investigate whether a walker is active before manual recovery; preparation never deletes that uncertain lock automatically.
+
+## Recover an uncertain submission
+
+If dispatch loses its response, Dhee retains an `unknown` (or interrupted `submitting`) attempt and never retries the submission automatically. Find the original job ID in your own gateway history. Desktop's **GPU queue** panel now offers **Inspect existing job**, followed by **Link existing job**. Inspection uses the original saved gateway, not current settings, and does not mutate the attempt or start a render.
+
+Codex uses the same controls:
+
+```json
+{"action":"gpu.recovery.inspect","projectDir":"/absolute/project","id":"COPY_SAVED_RECORD_SHA256_ID","jobId":"COPY_EXISTING_GATEWAY_JOB_ID"}
+```
+
+The response includes `result.recovery`, with the saved workflow/version/time/wire inputs, reported remote evidence, and an inspection fingerprint. `evidence: "matched"` means reported workflow and inputs match; identical inputs could still belong to a different render. `evidence: "incomplete"` means the gateway omitted workflow or input evidence, so Dhee cannot prove the association. Compare the actual original submission in gateway history. Any reported mismatch (including reference order) blocks linking.
+
+Only after the user explicitly verifies the association:
+
+```json
+{"action":"gpu.recovery.link","projectDir":"/absolute/project","id":"COPY_SAVED_RECORD_SHA256_ID","jobId":"COPY_EXISTING_GATEWAY_JOB_ID","expectedFingerprint":"COPY_INSPECTION_FINGERPRINT","humanAcknowledged":true}
+```
+
+Codex must not infer this acknowledgement from “continue,” matching inputs, or a likely time. The flag is a caller assertion, not authentication of a human. If evidence is insufficient to verify the same submission, leave the attempt unresolved; do not create another render automatically.
+
+Linking re-fetches evidence under the queue lock, rejects stale identity evidence or a job linked to another attempt in this project, and records the acknowledgement durably. Ordinary state progression does not invalidate inspection. The same confirmed request is safe to retry after a lost reply. No submit/cancel/download occurs during linking. The original attempt key, fingerprint, source references, uploaded inputs and catalog snapshot are retained. Afterward use **Run saved attempt** / `gpu.run` to resume normal processing under creative approvals. Recovery alone does not mark a scene complete or approve output.
+
+Current limit: no global cross-project ownership index; duplicate association checks cover this project's ledger. History discovery remains via the gateway's own tools; this UI takes an explicit job ID. The live gateway was unreachable during this implementation's read-only history check, so live reconciliation remains unverified.
 
 ## Existing and remaining controls
 
 Project creation, bundles, artifact inspection/edits, invalidation/regeneration and cross-process stop are already available through `pnpm dhee` in the source checkout. Those older commands retain their existing behavior; the new production command does not retroactively enforce review policy on every older entry point. Keep policy enabled for this production workflow. Run `pnpm dhee --help` for that interface.
 
-The new structured interface covers catalog/jobs/targets/preparation/status/reviews/run. Guided unknown-job reconciliation and final assembly/quality checks remain in the implementation plan. They must gain shared operations and command tests as they are built. Do not claim the complete video workflow or actual RTX 5090 rendering is verified from fixture tests.
+The new structured interface covers catalog/jobs/targets/preparation/status/reviews/run. Final assembly/quality checks and the bounded live Brilliant Care baseline remain in the implementation plan. They must gain shared operations and command tests as they are built. Do not claim the complete video workflow or actual RTX 5090 rendering is verified from fixture tests.
 
 API declaration files are not emitted by the current Core build (`dts: false`); JavaScript/CLI consumers work, while published TypeScript declarations remain a follow-up.

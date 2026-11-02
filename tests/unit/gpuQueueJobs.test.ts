@@ -209,3 +209,156 @@ it('prepares uploads only for a new intent and compares stable source inputs on 
   );
   expect(first.sourceInputs).toEqual({ refs: [{ sha256: 'abc' }] });
 });
+
+it('inspects and links an uncertain attempt without submitting again, retaining its identity', async () => {
+  const { jobs, remote, input, dir } = fixture();
+  remote.submit.mockRejectedValueOnce(new Error('reply lost'));
+  const saved = await jobs.submit(input);
+  remote.getJob.mockResolvedValue({
+    job_id: 'recovered',
+    state: 'running',
+    workflow: 'video',
+    inputs: input.inputs,
+  } as any);
+  const preview = await jobs.inspectRecovery(saved.id, 'recovered');
+  expect(preview).toMatchObject({
+    job: { jobId: 'recovered' },
+    evidence: 'matched',
+    local: { workflow: 'video' },
+  });
+  expect(jobs.read(saved.id).phase).toBe('unknown');
+  const recovered = await jobs.reconcile(saved.id, 'recovered', preview.fingerprint, true);
+  expect(recovered).toMatchObject({
+    phase: 'tracked',
+    jobId: 'recovered',
+    fingerprint: saved.fingerprint,
+    inputs: saved.inputs,
+  });
+  expect(recovered.error).toBeUndefined();
+  expect((await jobs.reconcile(saved.id, 'recovered', preview.fingerprint, true)).jobId).toBe(
+    'recovered'
+  );
+  expect((await new QueueJobs(dir, () => remote as any).submit(input)).jobId).toBe('recovered');
+  expect(remote.submit).toHaveBeenCalledTimes(1);
+});
+it('requires explicit acknowledgement even when gateway metadata is incomplete', async () => {
+  const { jobs, remote, input } = fixture();
+  remote.submit.mockRejectedValueOnce(new Error('lost'));
+  const saved = await jobs.submit(input);
+  const preview = await jobs.inspectRecovery(saved.id, 'job1');
+  expect(preview.evidence).toBe('incomplete');
+  await expect(jobs.reconcile(saved.id, 'job1', preview.fingerprint, false)).rejects.toThrow(
+    /acknowledge/i
+  );
+  expect(jobs.read(saved.id).phase).toBe('unknown');
+});
+it('rejects foreign IDs, mismatching workflow or ordered inputs, and stale recovery previews', async () => {
+  const { jobs, remote, input } = fixture();
+  remote.submit.mockRejectedValueOnce(new Error('lost'));
+  const saved = await jobs.submit(input);
+  await expect(jobs.inspectRecovery(saved.id, 'foreign')).rejects.toThrow(/different job/i);
+  remote.getJob.mockResolvedValue({ job_id: 'job1', state: 'queued', workflow: 'other' } as any);
+  await expect(jobs.inspectRecovery(saved.id, 'job1')).rejects.toThrow(/workflow/i);
+  remote.getJob.mockResolvedValue({
+    job_id: 'job1',
+    state: 'queued',
+    inputs: { ...input.inputs, refs: ['up_a', 'up_b'] },
+  } as any);
+  await expect(jobs.inspectRecovery(saved.id, 'job1')).rejects.toThrow(/inputs/i);
+  remote.getJob.mockResolvedValue({ job_id: 'job1', state: 'queued' } as any);
+  const preview = await jobs.inspectRecovery(saved.id, 'job1');
+  remote.getJob.mockResolvedValue({ job_id: 'job1', state: 'running', workflow: 'video' } as any);
+  await expect(jobs.reconcile(saved.id, 'job1', preview.fingerprint, true)).rejects.toThrow(
+    /changed/i
+  );
+  expect(jobs.read(saved.id).jobId).toBeUndefined();
+});
+it('does not attach a gateway job already tracked by another attempt in this project', async () => {
+  const { jobs, remote, input } = fixture();
+  await jobs.submit(input);
+  remote.submit.mockRejectedValueOnce(new Error('lost'));
+  const unknown = await jobs.submit({ ...input, key: 'second' });
+  await expect(jobs.inspectRecovery(unknown.id, 'job1')).rejects.toThrow(/another/i);
+});
+
+it('exposes inspection and acknowledged linking through the shared controller', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { createProductionControl } = await import('../../src/control/productionControl.js');
+  const { jobs, remote, input, dir } = fixture();
+  writeFileSync(join(dir, 'project.json'), '{}');
+  remote.submit.mockRejectedValueOnce(new Error('lost'));
+  const saved = await jobs.submit(input);
+  const control = createProductionControl({ jobs: () => jobs });
+  const response = await control({
+    action: 'gpu.recovery.inspect',
+    projectDir: dir,
+    id: saved.id,
+    jobId: 'job1',
+  });
+  expect(response).toMatchObject({ ok: true, result: { recovery: { evidence: 'incomplete' } } });
+  const fingerprint = (response as any).result.recovery.fingerprint;
+  expect(
+    await control({
+      action: 'gpu.recovery.link',
+      projectDir: dir,
+      id: saved.id,
+      jobId: 'job1',
+      expectedFingerprint: fingerprint,
+    })
+  ).toMatchObject({ ok: false });
+  expect(jobs.read(saved.id).phase).toBe('unknown');
+  expect(
+    await control({
+      action: 'gpu.recovery.link',
+      projectDir: dir,
+      id: saved.id,
+      jobId: 'job1',
+      expectedFingerprint: fingerprint,
+      humanAcknowledged: true,
+    })
+  ).toMatchObject({ ok: true, result: { jobs: [{ phase: 'tracked', jobId: 'job1' }] } });
+});
+
+it('keeps inspection failures and cancellation from changing an uncertain record', async () => {
+  const { jobs, remote, input } = fixture();
+  remote.submit.mockRejectedValueOnce(new Error('lost'));
+  const saved = await jobs.submit(input);
+  const controller = new AbortController();
+  controller.abort();
+  await expect(jobs.inspectRecovery(saved.id, 'job1', controller.signal)).rejects.toThrow();
+  remote.getJob.mockRejectedValueOnce(new Error('gateway offline'));
+  await expect(jobs.inspectRecovery(saved.id, 'job1')).rejects.toThrow(/offline/);
+  expect(jobs.read(saved.id)).toEqual(saved);
+});
+it('accepts normal state progression between inspection and confirmation', async () => {
+  const { jobs, remote, input } = fixture();
+  remote.submit.mockRejectedValueOnce(new Error('lost'));
+  const saved = await jobs.submit(input);
+  const preview = await jobs.inspectRecovery(saved.id, 'job1');
+  remote.getJob.mockResolvedValue({
+    job_id: 'job1',
+    state: 'done',
+    outputs: [{ url: 'http://gpu/files/clip.mp4' }],
+  } as any);
+  expect((await jobs.reconcile(saved.id, 'job1', preview.fingerprint, true)).job?.state).toBe(
+    'done'
+  );
+  expect((await jobs.download(saved.id)).phase).toBe('downloaded');
+  expect(remote.submit).toHaveBeenCalledTimes(1);
+});
+it('refuses inspection while the original submission is still in flight', async () => {
+  const { jobs, remote, input } = fixture();
+  let finish: (value: { job_id: string }) => void = () => {};
+  remote.submit.mockImplementationOnce(
+    () =>
+      new Promise(resolve => {
+        finish = resolve;
+      })
+  );
+  const pending = jobs.submit(input);
+  await vi.waitFor(() => expect(remote.submit).toHaveBeenCalled());
+  const saved = jobs.find(input.key)!;
+  await expect(jobs.inspectRecovery(saved.id, 'job1')).rejects.toThrow(/in progress/);
+  finish({ job_id: 'job1' });
+  await pending;
+});

@@ -50,6 +50,14 @@ const recordSchema = z.object({
     })
     .passthrough()
     .optional(),
+  recovery: z
+    .object({
+      fingerprint: z.string(),
+      jobId: z.string(),
+      confirmedAt: z.string(),
+      humanAcknowledged: z.literal(true),
+    })
+    .optional(),
   cancelRequested: z.boolean().optional(),
   error: z.string().optional(),
   files: z
@@ -262,6 +270,107 @@ export class QueueJobs {
         record.phase = 'unknown';
         record.error = `Submission outcome unknown; do not resubmit automatically. ${error instanceof Error ? error.message : String(error)}`;
       }
+      return this.save(record);
+    });
+  }
+  private async recoveryPreview(record: QueueJobRecord, jobId: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    if (!jobId.trim() || jobId.length > 256) throw new Error('Enter a valid gateway job id.');
+    if (record.jobId || !['unknown', 'submitting'].includes(record.phase))
+      throw new Error('Only an unresolved submission can be linked.');
+    if (
+      this.list().some(
+        other =>
+          other.id !== record.id && other.endpoint === record.endpoint && other.jobId === jobId
+      )
+    )
+      throw new Error('This gateway job belongs to another saved attempt in this project.');
+    const remote = await this.client(record.endpoint).getJob(jobId, signal);
+    if (remote.job_id !== jobId) throw new Error('Gateway returned a different job id.');
+    // Optional evidence only: the gateway contract guarantees status, not inputs.
+    // Never infer a match from a similar prompt, timing, or workflow alone.
+    const workflow = typeof remote['workflow'] === 'string' ? remote['workflow'] : undefined;
+    const inputs = remote['inputs'];
+    if (workflow !== undefined && workflow !== record.workflow)
+      throw new Error('Gateway workflow does not match this saved attempt.');
+    if (inputs !== undefined && canonical(inputs) !== canonical(record.inputs))
+      throw new Error('Gateway inputs do not match this saved attempt (reference order matters).');
+    const identity = {
+      jobId,
+      workflow: workflow ?? null,
+      inputs: inputs ?? null,
+      createdAt: remote['created_at'] ?? null,
+    };
+    const fingerprint = hash(
+      canonical({
+        id: record.id,
+        request: record.fingerprint,
+        updatedAt: record.updatedAt,
+        identity,
+      })
+    );
+    return {
+      remote,
+      preview: {
+        id: record.id,
+        fingerprint,
+        local: {
+          workflow: record.workflow,
+          version: record.version,
+          createdAt: record.createdAt,
+          inputs: record.inputs,
+        },
+        job: {
+          jobId,
+          state: remote.state,
+          ...(workflow !== undefined ? { workflow } : {}),
+          ...(inputs !== undefined ? { inputs } : {}),
+        },
+        evidence:
+          workflow !== undefined && inputs !== undefined
+            ? ('matched' as const)
+            : ('incomplete' as const),
+      },
+    };
+  }
+  async inspectRecovery(id: string, jobId: string, signal?: AbortSignal) {
+    return this.locked(
+      async () => (await this.recoveryPreview(this.read(id), jobId, signal)).preview
+    );
+  }
+  async reconcile(
+    id: string,
+    jobId: string,
+    expectedFingerprint: string,
+    humanAcknowledged: boolean,
+    signal?: AbortSignal
+  ): Promise<QueueJobRecord> {
+    if (humanAcknowledged !== true)
+      throw new Error('Explicitly acknowledge that this is the same submission before linking.');
+    return this.locked(async () => {
+      signal?.throwIfAborted();
+      const record = this.read(id);
+      // A lost success response can be retried without reattaching or dispatching.
+      if (
+        record.recovery?.jobId === jobId &&
+        record.jobId === jobId &&
+        record.recovery.fingerprint === expectedFingerprint
+      )
+        return record;
+      const checked = await this.recoveryPreview(record, jobId, signal);
+      if (checked.preview.fingerprint !== expectedFingerprint)
+        throw new Error('Recovery evidence changed. Inspect this job again before linking.');
+      signal?.throwIfAborted();
+      record.jobId = jobId;
+      record.job = checked.remote;
+      record.phase = 'tracked';
+      record.recovery = {
+        jobId,
+        fingerprint: expectedFingerprint,
+        confirmedAt: new Date().toISOString(),
+        humanAcknowledged: true,
+      };
+      delete record.error;
       return this.save(record);
     });
   }

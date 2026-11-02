@@ -18,7 +18,7 @@ export async function runControlCli(
 ): Promise<number> {
   if (args.length === 1 && args[0] === '--help') {
     io.write(
-      'dhee-control [--request request.json]\nReads one JSON request (stdin by default); emits one JSON response. Operations: gpu.catalog, gpu.jobs, gpu.targets, gpu.prepare, gpu.run, project.status, review.enable, review.read, review.decide, project.run.\n'
+      'dhee-control [--request request.json]\nReads one JSON request (stdin by default); emits one JSON response. Operations: gpu.catalog, gpu.jobs, gpu.targets, gpu.prepare, gpu.run, gpu.recovery.inspect, gpu.recovery.link, project.status, review.enable, review.read, review.decide, project.run.\n'
     );
     return 0;
   }

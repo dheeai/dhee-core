@@ -28,7 +28,17 @@ const project = {
 const branch = { branchId: z.string().min(1).default('main') };
 const gate = z.enum(['storyboard', 'references', 'rough-cut']);
 const id = z.string().regex(/^[a-f0-9]{64}$/);
+const recovery = { ...project, id, jobId: z.string().trim().min(1).max(256) };
 export const productionRequestSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('gpu.recovery.inspect'), ...recovery }).strict(),
+  z
+    .object({
+      action: z.literal('gpu.recovery.link'),
+      ...recovery,
+      expectedFingerprint: id,
+      humanAcknowledged: z.literal(true),
+    })
+    .strict(),
   gpuTargetsSchema.extend({ action: z.literal('gpu.targets') }),
   gpuPreparationSchema.extend({ action: z.literal('gpu.prepare') }),
   gpuPreparationSchema
@@ -77,7 +87,8 @@ export interface ProductionOptions {
   signal?: AbortSignal;
   log?: (message: string) => void;
 }
-type JobStore = Pick<QueueJobs, 'list' | 'refresh' | 'cancel' | 'download'>;
+type JobStore = Pick<QueueJobs, 'list' | 'refresh' | 'cancel' | 'download'> &
+  Partial<Pick<QueueJobs, 'inspectRecovery' | 'reconcile'>>;
 interface Dependencies {
   catalog?: (endpoint: string) => Pick<GpuQueueClient, 'listWorkflows'>;
   jobs?: (projectDir: string) => JobStore;
@@ -109,6 +120,27 @@ export function createProductionControl(deps: Dependencies = {}) {
       const projectDir = realpathSync(req.projectDir);
       if (!statSync(join(projectDir, 'project.json')).isFile())
         throw new Error('Project is unavailable.');
+      if (req.action === 'gpu.recovery.inspect' || req.action === 'gpu.recovery.link') {
+        const store = deps.jobs?.(projectDir) ?? new QueueJobs(projectDir);
+        if (!store.inspectRecovery || !store.reconcile)
+          throw new Error('Queue recovery is unavailable in this build.');
+        if (req.action === 'gpu.recovery.inspect')
+          return {
+            ok: true,
+            result: {
+              jobs: store.list().map(summarizeQueueJob),
+              recovery: await store.inspectRecovery(req.id, req.jobId, options.signal),
+            },
+          };
+        await store.reconcile(
+          req.id,
+          req.jobId,
+          req.expectedFingerprint,
+          req.humanAcknowledged,
+          options.signal
+        );
+        return { ok: true, result: { jobs: store.list().map(summarizeQueueJob) } };
+      }
       if (req.action === 'gpu.targets')
         return { ok: true, result: listGpuTargets({ projectDir, branchId: req.branchId }) };
       if (req.action === 'gpu.prepare') {
