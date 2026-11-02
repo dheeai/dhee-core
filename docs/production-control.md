@@ -128,7 +128,7 @@ Checks use a temporary byte snapshot, restrict media formats/protocols, hold the
 
 ## Assemble a completed local stage
 
-`assembly.targets` lists current branch video instances whose effective runner is `ffmpeg.concat`. `assembly.run` runs exactly one listed instance, preserving configured clip ordering/transitions and requiring all ancestors to be complete. It cannot generate missing prerequisites or dispatch a swapped GPU runner. Pass the listed `selectionId` as `expectedSelectionId`, including `null` for an unswapped bundle default.
+`assembly.targets` lists current branch video instances whose effective runner is `ffmpeg.concat`, `ffmpeg.replace_audio` or `ffmpeg.normalize`. `assembly.run` runs exactly one listed instance, preserving configured clip ordering/transitions and requiring all ancestors to be complete. It cannot generate missing prerequisites or dispatch a swapped GPU runner. Pass the listed `selectionId` as `expectedSelectionId`, including `null` for an unswapped bundle default.
 
 ```json
 {"action":"assembly.targets","projectDir":"/absolute/project","branchId":"main"}
@@ -136,3 +136,62 @@ Checks use a temporary byte snapshot, restrict media formats/protocols, hold the
 ```
 
 Required creative reviews remain enabled and enforced. Runner tool and selection are checked under the walker lock and again before dispatch. The result may pause at `gatedAfter` or budget, or return `selectedOutput`; completed output is reused, not regenerated. Desktop exposes the same operations in Production → Assemble completed clips. Afterwards reload media and run `media.check` on the assembled file. Neither successful assembly nor technical checks constitute final-delivery approval. Other assembly runners, persisted delivery QC, production-scale concat timeouts/cancellation and full brief-to-video live acceptance remain follow-up work. Existing project-wide pause hints can remain stale after successful exact runs; the explicit operation response is authoritative for that operation.
+
+
+### Preserve selected narration
+
+A bundle can declare a local `ffmpeg.replace_audio` stage with picture and approved narration as explicit upstream dependencies:
+
+```json
+{
+  "id": "narrated_clip",
+  "kind": "stage",
+  "inputs": [{"from":"scene_clip","usage":"input"},{"from":"voice_reference","usage":"input"}],
+  "outputs": {"format":"video","pattern":"narrated_clip.mp4"},
+  "runner": {"tool":"ffmpeg.replace_audio","config":{
+    "videoInput":"scene_clip","audioInput":"voice_reference",
+    "outputPath":"narrated_clip.mp4","offsetSec":0
+  }}
+}
+```
+
+Include this stage in the final video's dependency chain and declare the runner in the bundle's dependencies. `videoInput` and `audioInput` are resolved upstream keys, not arbitrary file paths. Run with `assembly.run` and the current listed selection ID. The standard walker records dependencies and a versioned completion with input SHA-256 hashes, placement, sample rate and output encoding.
+
+This first implementation accepts a single video stream and a single PCM 16-bit narration stream. It removes **all** generated video audio, including background effects. No mixing, gain changes, narration generation or silent narration truncation occurs. An explicit nonnegative offset is rounded to the nearest sample. Silence pads the rest of the video; narration that does not fit is rejected. MOV uses PCM 16-bit audio, preserving samples; MP4 encodes AAC at 192 kbps and is not byte/sample-identical. Video packets are copied. Nonzero or unavailable video start timestamps are rejected; normalize them explicitly first. The output parent must already exist within the project; inputs must be regular project files no larger than 512 MiB each. Commands have a 120-second timeout and accept cancellation.
+
+Audio similarity verification is currently regression/live acceptance evidence, not a persisted automatic delivery gate. Check exported media and listen before approving. The runner does not establish that the selected recording was creatively approved; production review gates remain authoritative. Native Desktop end-to-end acceptance and a narration/timing editor remain follow-up work.
+
+### Scene intent checks before GPU submission
+
+`scene.check` compares explicit requirements against **recorded observations**. It does not inspect an image or interpret free-form motion text itself. Codex or a reviewer supplies the observations and supporting evidence. Missing facts and mismatches return `status: blocked`; consistent facts never grant creative approval.
+
+```json
+{"action":"scene.check","sceneIntent":{
+  "requirements":[{"id":"doctor-posture","description":"Doctor stays seated","expected":"seated","sources":["motion"]}],
+  "sources":[{"id":"motion","inputKey":"prompt","sha256":"<sha256-of-JSON-stringified-prompt>","evidence":"Read the exact motion prompt","facts":{"doctor-posture":"seated"}}]
+}}
+```
+
+Supply the same optional `sceneIntent` in `gpu.prepare`. It is saved in the selected runner configuration, included in its preparation fingerprint, and checked against inputs at preparation and immediately before upload/submission. A changed prompt/reference requires fresh observations. Local media use byte SHA-256; file-list inputs use SHA-256 of their JSON array of `{localPath,sha256,bytes}` identities in order. Other values use SHA-256 of their JSON representation. Use exported `sceneInputDigest` internally to avoid divergent serialization. Checked attempts reject remote URLs/upload handles, whose current bytes cannot be verified locally.
+
+This is currently opt-in per attempt. Legacy attempts remain unchecked and Desktop says so. Desktop displays saved requirements and observation evidence; saving workflow edits retains the contract, so changed inputs are rejected as stale. Contract authoring currently uses the shared control request; an editor, automatic visual/transcript assessment, and a project-wide mandatory policy remain follow-up work. Only requirements and sources actually listed are covered; do not describe a sparse contract as a full scene review.
+
+### Explicit clip normalization
+
+`ffmpeg.normalize` is available through `assembly.targets` and the pinned `assembly.run` operation. Declare it as a video stage with an upstream video input and include `ffmpeg.normalize` in bundle runner dependencies. Its required configuration is:
+
+```json
+{"videoInput":"scene_clip","outputPath":"normalized_clip.mp4","durationSec":4,"width":1280,"height":720,"fps":24,"durationPolicy":"trim","framing":"crop","audio":"drop"}
+```
+
+`trim` permits removing the tail, `pad` permits extending with a frozen final frame, and `reject` refuses a duration mismatch. The requested duration must be a whole number of frames. `crop` scales to cover then crops centrally; `fit` adds black bars. These are explicit choices, not automatic judgments about story-critical pixels or timing. `drop` removes all source audio, appropriate before narration replacement; `preserve` requires one audio stream aligned to the video start, re-encodes AAC and trims/pads it to the chosen duration. Video timestamps are reset to zero and output is H.264/yuv420p MP4.
+
+The runner records the source SHA-256, source duration and exact configuration with completion metadata. Input is copied to a temporary snapshot; changed source bytes abort publication. Output stays inside the project, cannot replace its source, and its parent directory must exist. Limits: 512 MiB source, 300 seconds, even dimensions up to4096, integer frame rate up to60, 120-second cancellable subprocesses. Native policy-editing/preview controls remain follow-up work; Desktop currently executes the configured stage and explains its policies. A normalized output still needs media checks and creative review.
+
+Normalization currently rejects declared non-square pixel aspect ratios rather than risking distortion. Both normalization and narration composition publish with atomic no-clobber semantics: an existing destination is never overwritten (including case-only source aliases). Use a new path or normal version/invalidation flow. Known deferred edge: padding a single-frame high-fps source while downsampling extremely far may fail explicitly; ordinary generated clip paths are covered.
+
+## Desktop ownership update — 2 November 2026
+
+The Desktop repository now owns `dhee-runner-production`: normalization and narration replacement are npm-discovered extensions, not Core built-ins. Desktop IPC and its headless CLI call the extension's production adapter, which delegates shared execution/review/queue operations to this Core service. Core does not import Desktop source. Standalone Core consumers must install/configure the extension to execute its two tools. Desktop supplies runner roots as a JSON array in `DHEE_NODE_MODULES_DIRS`; Core also retains legacy delimited inputs.
+
+Required Core execution/review safeguards remain here by explicit user direction; this is not a claim of compatibility with unchanged upstream75ec0b0. The Desktop adapter is not yet an installed MCP server.

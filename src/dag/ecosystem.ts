@@ -46,14 +46,20 @@ export interface EcoPkg {
 }
 
 /**
- * node_modules directories to scan. `DHEE_NODE_MODULES_DIRS` (colon- or
- * comma-separated) overrides — used by tests and non-standard layouts.
+ * node_modules directories to scan. `DHEE_NODE_MODULES_DIRS` (JSON array preferred; legacy colon- or
+ * comma-separated paths supported) overrides — used by tests and non-standard layouts.
  * Default: every `node_modules` from cwd up to the filesystem root
  * (covers workspaces / hoisted installs).
  */
 export function getNodeModulesRoots(): string[] {
   const env = process.env['DHEE_NODE_MODULES_DIRS']?.trim();
-  if (env) return env.split(/[:,]/).map((s) => s.trim()).filter(Boolean);
+  if (env?.startsWith('[')) {
+    const parsed: unknown = JSON.parse(env);
+    if (!Array.isArray(parsed) || parsed.some(value => typeof value !== 'string' || !value.trim()))
+      throw new Error('DHEE_NODE_MODULES_DIRS must be a JSON array of nonempty paths.');
+    return parsed;
+  }
+  if (env) return env.split(',').flatMap(part => /^[A-Za-z]:[\\/]/.test(part.trim()) ? [part.trim()] : part.split(':').map(value => value.trim())).filter(Boolean);
   const roots: string[] = [];
   let dir = process.cwd();
   for (;;) {

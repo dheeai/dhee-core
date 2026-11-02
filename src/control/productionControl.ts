@@ -1,3 +1,4 @@
+import { sceneIntentSchema, checkSceneIntent } from './sceneIntent.js';
 import { mediaCheckSchema, checkProjectMedia } from './mediaChecks.js';
 import {
   gpuTargetsSchema,
@@ -31,6 +32,7 @@ const gate = z.enum(['storyboard', 'references', 'rough-cut']);
 const id = z.string().regex(/^[a-f0-9]{64}$/);
 const recovery = { ...project, id, jobId: z.string().trim().min(1).max(256) };
 export const productionRequestSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('scene.check'), sceneIntent: sceneIntentSchema }).strict(),
   mediaCheckSchema.extend({ action: z.literal('media.check') }),
   gpuTargetsSchema.extend({ action: z.literal('assembly.targets') }),
   gpuPreparationSchema
@@ -126,6 +128,8 @@ export function createProductionControl(deps: Dependencies = {}) {
         const client = deps.catalog?.(endpoint) ?? new GpuQueueClient(endpoint);
         return { ok: true, result: { workflows: await client.listWorkflows(options.signal) } };
       }
+      if (req.action === 'scene.check')
+        return { ok: true, result: checkSceneIntent(req.sceneIntent) };
       const projectDir = realpathSync(req.projectDir);
       if (!statSync(join(projectDir, 'project.json')).isFile())
         throw new Error('Project is unavailable.');
@@ -161,7 +165,10 @@ export function createProductionControl(deps: Dependencies = {}) {
           result: {
             ...result,
             targets: result.targets.filter(
-              t => t.format === 'video' && t.tool === 'ffmpeg.concat' && !t.unsupported
+              t =>
+                t.format === 'video' &&
+                ['ffmpeg.concat', 'ffmpeg.replace_audio', 'ffmpeg.normalize'].includes(t.tool) &&
+                !t.unsupported
             ),
           },
         };
@@ -248,7 +255,7 @@ export function createProductionControl(deps: Dependencies = {}) {
           !target ||
           target.unsupported ||
           target.format !== 'video' ||
-          target.tool !== 'ffmpeg.concat' ||
+          !['ffmpeg.concat', 'ffmpeg.replace_audio', 'ffmpeg.normalize'].includes(target.tool) ||
           target.selectionId !== req.expectedSelectionId
         )
           throw new Error(
@@ -262,7 +269,7 @@ export function createProductionControl(deps: Dependencies = {}) {
             nodeId: req.nodeId,
             itemId: req.itemId,
             selectionId: req.expectedSelectionId,
-            expectedTool: 'ffmpeg.concat',
+            expectedTool: target.tool,
           },
           signal: options.signal,
           log: options.log ?? (() => {}),

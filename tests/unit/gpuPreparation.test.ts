@@ -276,3 +276,58 @@ it('exposes an approval-gated exact run of a saved selection through the control
     expect.objectContaining({ targetInstance: { nodeId: 'clip', selectionId: saved.selectionId } })
   );
 });
+it('blocks contradictory scene evidence before saving an attempt', async () => {
+  const { req, catalog } = setup();
+  const { sceneInputDigest } = await import('../../src/control/sceneIntent.js');
+  const sceneIntent = {
+    requirements: [
+      {
+        id: 'doctor',
+        description: 'Doctor remains seated',
+        expected: 'seated',
+        sources: ['motion'],
+      },
+    ],
+    sources: [
+      {
+        id: 'motion',
+        inputKey: 'prompt',
+        sha256: sceneInputDigest('scene'),
+        evidence: 'Read prompt',
+        facts: { doctor: 'exiting' },
+      },
+    ],
+  };
+  await expect(prepareGpuAttempt({ ...req, sceneIntent } as any, catalog)).rejects.toThrow(
+    /Scene intent blocked/
+  );
+});
+it('pins checked scene evidence and rejects changed text', async () => {
+  const { req, catalog } = setup();
+  const { sceneInputDigest } = await import('../../src/control/sceneIntent.js');
+  const sceneIntent = {
+    requirements: [
+      {
+        id: 'doctor',
+        description: 'Doctor remains seated',
+        expected: 'seated',
+        sources: ['motion'],
+      },
+    ],
+    sources: [
+      {
+        id: 'motion',
+        inputKey: 'prompt',
+        sha256: sceneInputDigest('scene'),
+        evidence: 'Read prompt',
+        facts: { doctor: 'seated' },
+      },
+    ],
+  };
+  await expect(
+    prepareGpuAttempt({ ...req, inputs: { prompt: 'changed' }, sceneIntent } as any, catalog)
+  ).rejects.toThrow(/stale/);
+  const result = await prepareGpuAttempt({ ...req, sceneIntent } as any, catalog);
+  const saved = [...openEventLog(req.projectDir).read()].find(e => e.id === result.selectionId);
+  expect(saved?.payload).toMatchObject({ configOverride: { sceneIntent } });
+});

@@ -242,3 +242,45 @@ it('assembles two real clips only, pauses for rough-cut approval and checks the 
   expect(completed.filter(e => e.payload.nodeId === 'final_video')).toHaveLength(1);
   expect(completed.filter(e => e.payload.nodeId !== 'final_video')).toHaveLength(6);
 });
+it.each(['ffmpeg.replace_audio', 'ffmpeg.normalize'])(
+  'lists and pins %s as a local assembly operation',
+  async tool => {
+    const projectDir = fixture();
+    openEventLog(projectDir).append({
+      kind: 'runner.swapped',
+      actor: 'test',
+      branchId: 'main',
+      payload: {
+        nodeId: 'final',
+        fromTool: 'ffmpeg.concat',
+        toTool: tool,
+        configOverride: {},
+      },
+    });
+    const run = vi.fn(async () => ({ ok: true }));
+    const control = createProductionControl({ run });
+    const listed = await control({ action: 'assembly.targets', projectDir });
+    expect(listed).toMatchObject({
+      ok: true,
+      result: { targets: [{ nodeId: 'final', tool: tool }] },
+    });
+    const selectionId = (listed as any).result.targets[0].selectionId;
+    await control({ action: 'review.enable', projectDir });
+    expect(
+      await control({
+        action: 'assembly.run',
+        projectDir,
+        nodeId: 'final',
+        expectedSelectionId: selectionId,
+      })
+    ).toMatchObject({ ok: true });
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetInstance: expect.objectContaining({
+          expectedTool: tool,
+          selectionId,
+        }),
+      })
+    );
+  }
+);

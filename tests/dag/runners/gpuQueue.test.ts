@@ -240,3 +240,48 @@ it('resumes against the saved gateway after Desktop changes or clears its endpoi
   expect((await runner.run(ctx)).ok).toBe(true);
   expect(client.submit).toHaveBeenCalledTimes(1);
 });
+it('blocks stale scene observations at dispatch before any upload or submission', async () => {
+  const { runner, ctx, client, fetcher } = fixture();
+  const { sceneInputDigest } = await import('../../../src/control/sceneIntent.js');
+  ctx.node.runner.config.sceneIntent = {
+    requirements: [
+      { id: 'doctor', description: 'Doctor seated', expected: 'seated', sources: ['motion'] },
+    ],
+    sources: [
+      {
+        id: 'motion',
+        inputKey: 'prompt',
+        sha256: sceneInputDigest('prior prompt'),
+        evidence: 'Reviewed prior prompt',
+        facts: { doctor: 'seated' },
+      },
+    ],
+  };
+  expect(await runner.run(ctx)).toMatchObject({ ok: false, error: expect.stringMatching(/stale/) });
+  expect(client.submit).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it('detects changed reference bytes after a scene was inspected', async () => {
+  const { runner, ctx, projectDir, client, fetcher } = fixture();
+  const { sceneInputDigest } = await import('../../../src/control/sceneIntent.js');
+  const { createHash } = await import('node:crypto');
+  const refHash = createHash('sha256').update('reference').digest('hex');
+  ctx.node.runner.config.sceneIntent = {
+    requirements: [
+      { id: 'doctor', description: 'Doctor seated', expected: 'seated', sources: ['frame'] },
+    ],
+    sources: [
+      {
+        id: 'frame',
+        inputKey: 'refs',
+        sha256: sceneInputDigest([{ localPath: 'ref.png', sha256: refHash, bytes: 9 }]),
+        evidence: 'Viewed original frame',
+        facts: { doctor: 'seated' },
+      },
+    ],
+  };
+  writeFileSync(join(projectDir, 'ref.png'), 'changed reference');
+  expect(await runner.run(ctx)).toMatchObject({ ok: false, error: expect.stringMatching(/stale/) });
+  expect(client.submit).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+});

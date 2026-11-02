@@ -1,3 +1,4 @@
+import { sceneIntentSchema, assertSceneIntent } from './sceneIntent.js';
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync, realpathSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
@@ -31,6 +32,7 @@ export const gpuPreparationSchema = z
     workflow: z.string().min(1),
     workflowVersion: z.string().min(1),
     inputs: z.record(z.unknown()),
+    sceneIntent: sceneIntentSchema.optional(),
     primaryOutput: z.number().int().nonnegative().default(0),
   })
   .strict();
@@ -141,15 +143,29 @@ export async function prepareGpuAttempt(
   if (!workflow || workflow.version !== req.workflowVersion)
     throw new Error('Workflow version changed. Refresh the catalog and select it again.');
   const inputs = validateQueueInputs(workflow, req.inputs, parseInt(digest(key).slice(0, 8), 16));
+  const sourceInputs = { ...inputs };
   let total = 0;
   for (const [name, schema] of Object.entries(workflow.inputs)) {
     if (inputs[name] === undefined || !['file', 'file_list'].includes(String(schema.type)))
       continue;
+    const identities: unknown[] = [];
     for (const file of schema.type === 'file_list'
       ? (inputs[name] as string[])
       : [inputs[name] as string]) {
-      if (/^up_[A-Za-z0-9_-]+$/.test(file)) continue;
+      if (/^up_[A-Za-z0-9_-]+$/.test(file)) {
+        if (req.sceneIntent)
+          throw new Error(
+            'Checked scene references must be local files so their bytes can be verified'
+          );
+        identities.push(file);
+        continue;
+      }
       if (/^https?:\/\//.test(file)) {
+        if (req.sceneIntent)
+          throw new Error(
+            'Checked scene references must be local files so their bytes can be verified'
+          );
+        identities.push(file);
         const url = new URL(file);
         if (url.username || url.password)
           throw new Error('Reference URLs cannot embed credentials.');
@@ -169,8 +185,16 @@ export async function prepareGpuAttempt(
       total += info.size;
       if (info.size > 64 * 1024 ** 2 || total > 128 * 1024 ** 2)
         throw new Error('References exceed the upload snapshot limits.');
+      if (req.sceneIntent)
+        identities.push({
+          localPath: rel,
+          sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+          bytes: info.size,
+        });
     }
+    sourceInputs[name] = schema.type === 'file_list' ? identities : identities[0];
   }
+  if (req.sceneIntent) assertSceneIntent(req.sceneIntent, sourceInputs);
   signal?.throwIfAborted();
   const lock = acquireWalkLock(initial.projectDir);
   if (isWalkLockResult(lock)) throw new Error('Stop the active run before preparing an attempt.');
@@ -230,6 +254,7 @@ export async function prepareGpuAttempt(
           primaryOutput: req.primaryOutput,
           timeoutSeconds: 1800,
           preparationFingerprint: fingerprint,
+          ...(req.sceneIntent ? { sceneIntent: req.sceneIntent } : {}),
         },
       },
     });

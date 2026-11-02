@@ -1,3 +1,4 @@
+import { sceneIntentSchema, assertSceneIntent } from '../../control/sceneIntent.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { readFile, stat, copyFile, rename, rm } from 'node:fs/promises';
@@ -10,6 +11,7 @@ import { validateQueueInputs, uploadQueueFile } from '../gpuQueueInputs.js';
 import type { Runner, RunnerContext } from '../schema.js';
 
 const configSchema = z.object({
+  sceneIntent: sceneIntentSchema.optional(),
   endpoint: z.string().optional(),
   workflow: z.string().min(1),
   workflowVersion: z.string().min(1),
@@ -126,10 +128,12 @@ export function createGpuQueueRunner(
           for (const [index, file] of files.entries()) {
             ctx.signal?.throwIfAborted();
             if (/^up_[A-Za-z0-9_-]+$/.test(file)) {
+              if (cfg.sceneIntent) throw new Error('Checked scene references must be local files');
               identities.push(file);
               continue;
             }
             if (/^https?:\/\//.test(file)) {
+              if (cfg.sceneIntent) throw new Error('Checked scene references must be local files');
               const url = new URL(file);
               if (url.username || url.password)
                 throw new Error('Reference URLs cannot embed credentials.');
@@ -161,6 +165,7 @@ export function createGpuQueueRunner(
           }
           sourceInputs[name] = schema.type === 'file_list' ? identities : identities[0];
         }
+        if (cfg.sceneIntent) assertSceneIntent(cfg.sceneIntent, sourceInputs);
         record = await store.submit(
           {
             key,
