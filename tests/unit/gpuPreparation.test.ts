@@ -245,3 +245,34 @@ it('routes preparation and target inspection through the shared production contr
   });
   expect(catalog).toHaveBeenCalledTimes(1);
 });
+
+it('exposes an approval-gated exact run of a saved selection through the controller', async () => {
+  const { req, catalog } = setup();
+  const saved = await prepareGpuAttempt(req, catalog);
+  const run = vi.fn(async () => ({
+    ok: true,
+    selectedOutput: { nodeId: 'clip', outputAbs: '/fixture/clip.mp4', outputRel: 'clip.mp4' },
+  }));
+  const control = createProductionControl({ run });
+  const request = {
+    action: 'gpu.run',
+    projectDir: req.projectDir,
+    nodeId: 'clip',
+    expectedSelectionId: saved.selectionId,
+  };
+  expect(await control(request)).toMatchObject({
+    ok: false,
+    error: expect.stringMatching(/approval/i),
+  });
+  expect(run).not.toHaveBeenCalled();
+  await control({ action: 'review.enable', projectDir: req.projectDir });
+  expect(await control({ ...request, expectedSelectionId: 'stale' })).toMatchObject({ ok: false });
+  expect(run).not.toHaveBeenCalled();
+  expect(await control(request)).toMatchObject({
+    ok: true,
+    result: { selectedOutput: { nodeId: 'clip' } },
+  });
+  expect(run).toHaveBeenCalledWith(
+    expect.objectContaining({ targetInstance: { nodeId: 'clip', selectionId: saved.selectionId } })
+  );
+});

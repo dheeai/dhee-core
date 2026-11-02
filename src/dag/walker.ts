@@ -161,6 +161,9 @@ export interface WalkerOptions {
    * goal node is equivalent to no stopAt (run to completion).
    */
   stopAt?: string;
+  /** Dispatch only this instance; all ancestors must already be complete. */
+  targetInstance?: { nodeId: string; itemId?: string; selectionId?: string };
+  requireProductionReviews?: boolean;
   /**
    * Stop-after-each-collection gate. When true, the walker halts as
    * soon as a `collection` node (other than the bundle goal) finishes
@@ -993,6 +996,7 @@ async function runWithConcurrencyPool<T>(
 
 /** Walk the bundle and run every reachable node to completion. */
 interface WalkResult {
+  selectedOutput?: { nodeId: string; itemId?: string; outputRel: string; outputAbs: string };
   ok: boolean;
   goal?: { outputRel: string; outputAbs: string };
   error?: string;
@@ -1052,6 +1056,8 @@ export async function walkBundle(opts: WalkerOptions): Promise<WalkResult> {
     return { ok: false, error: msg, instances: [] };
   }
   try {
+    if (opts.requireProductionReviews && !productionReviewsRequired(opts.projectDir))
+      return {ok:false,error:'Enable the three creative approval points before an automated production run.',instances:[]};
     // Pre-walk: re-run nodes whose DEFINITION changed since they last
     // completed (edited prompt template / workflow / schema / config).
     // The walker is otherwise state-as-truth and would cache-skip them,
@@ -1090,7 +1096,7 @@ async function walkBundleWithReviewLoop(
   // re-walk it through the review loop (the graph hasn't reached the
   // judge nodes that would seed critiques, and re-walking would defeat
   // the gate). Resume drives the next pass.
-  if (result.gatedAfter) return result;
+  if (result.gatedAfter || opts.targetInstance) return result;
 
   // A budget-cap halt is likewise an intentional pause — re-walking
   // would only trip the same cap again (and burn a review iteration).
@@ -1171,6 +1177,18 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     }
   }
 
+  if (opts.targetInstance && (opts.stopAt !== undefined || opts.runOnly !== undefined))
+    return { ok: false, error: 'An exact instance cannot be combined with stopAt or runOnly.', instances: [] };
+  if (opts.targetInstance) {
+    const target = opts.bundle.nodes.find(n => n.id === opts.targetInstance!.nodeId);
+    if (!target || target.chunkBy) return { ok: false, error: 'Unknown or adaptive-chunk target.', instances: [] };
+    if (opts.targetInstance.selectionId !== undefined) {
+      const selected = resolveRunnerForInstance({projectDir:opts.projectDir,branchId:opts.branchId ?? 'main',nodeId:target.id,itemId:opts.targetInstance.itemId,fallbackTool:target.runner.tool});
+      if (selected.selectionId !== opts.targetInstance.selectionId)
+        return {ok:false,error:'The saved workflow selection changed. Reload before running.',instances:[]};
+    }
+  }
+
   // Topo validation up front — surfaces invalid stopAt / runOnly with
   // the bundle's actual node list before doing any work.
   const bundleNodeIds = new Set(opts.bundle.nodes.map((n) => n.id));
@@ -1207,7 +1225,8 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   // node before stopAt in the linear topo, including independent
   // branches that the user isn't asking for.
   let ordered: NodeDef[];
-  if (opts.stopAt) {
+  const scopeNodeId = opts.targetInstance?.nodeId ?? opts.stopAt;
+  if (scopeNodeId) {
     const byId = new Map(opts.bundle.nodes.map((n) => [n.id, n]));
     const ancestors = new Set<string>();
     const visit = (id: string): void => {
@@ -1217,7 +1236,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       if (!n) return;
       for (const i of n.inputs) visit(i.from);
     };
-    visit(opts.stopAt);
+    visit(scopeNodeId);
     ordered = fullOrder.filter((n) => ancestors.has(n.id));
   } else {
     ordered = fullOrder;
@@ -1382,6 +1401,34 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     }
   }
 
+  if (opts.targetInstance) {
+    // Hydrate the full authoritative membership without generating prerequisites.
+    const hydrated = materializeProductionReviewInstances({...opts,gpuVramBytes});
+    const target = (hydrated.get(opts.targetInstance.nodeId) ?? []).find(i => i.itemId === opts.targetInstance!.itemId);
+    if (!target) return {ok:false,error:'Selected instance is not in the current plan. Complete its prerequisites first.',instances:[]};
+    for (const node of ordered) {
+      const items = hydrated.get(node.id) ?? [];
+      if (node.id !== opts.targetInstance.nodeId && (!items.length || items.some(i => i.status !== 'completed')))
+        return {ok:false,error:`Prerequisite '${node.id}' is incomplete. Exact runs never generate prerequisites.`,instances:[]};
+      instancesById.set(node.id,items);
+    }
+    ordered = ordered.filter(n => n.id === opts.targetInstance!.nodeId);
+    const selfInputs = target.def.inputs.filter(input => input.from === target.def.id);
+    for (const input of selfInputs) {
+      const shotNumber = target.itemId?.match(/(?:^|_)shot_(\d+)$/)?.[1];
+      if (input.scope !== 'previousN' || shotNumber === undefined)
+        return {ok:false,error:'Exact execution cannot resolve this same-node dependency.',instances:[]};
+      // Conservative: earlier planned shots must exist; never silently omit a
+      // missing edit base or generate it as a side effect of this request.
+      const earlier = (hydrated.get(target.def.id) ?? []).filter(item => {
+        const number = item.itemId?.match(/(?:^|_)shot_(\d+)$/)?.[1];
+        return number !== undefined && Number(number) < Number(shotNumber);
+      });
+      if (earlier.some(item => item.status !== 'completed'))
+        return {ok:false,error:'An earlier shot is incomplete. Complete it before this exact run.',instances:[]};
+    }
+  }
+
   const allInstances: NodeInstance[] = [];
   for (const node of ordered) {
     allInstances.push(...(instancesById.get(node.id) ?? []));
@@ -1473,7 +1520,10 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
       }
     }
 
-    const insts = instancesById.get(node.id) ?? [];
+    const hydratedInstances = instancesById.get(node.id) ?? [];
+    const insts = opts.targetInstance
+      ? hydratedInstances.filter(item => item.itemId === opts.targetInstance!.itemId)
+      : hydratedInstances;
 
     // gateAfterCollections: did any instance of THIS node actually run
     // its runner this pass (vs. a cache-skip)? Only a node that did
@@ -2181,6 +2231,17 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
   // means the goal can't be complete; raise/clear the cap and resume.
   if (budgetExceeded) {
     return { ok: true, budgetExceeded, instances: allInstances };
+  }
+
+  if (opts.targetInstance) {
+    const target = (instancesById.get(opts.targetInstance.nodeId) ?? []).find(item => item.itemId === opts.targetInstance!.itemId);
+    if (target?.status === 'completed' && target.def.id === opts.bundle.goal && reviewsRequired) {
+      const review = await checkProductionReviewGate({projectDir:opts.projectDir,bundle:opts.bundle,branchId:opts.branchId,gate:'rough-cut',instances:materializeProductionReviewInstances({...opts,gpuVramBytes})});
+      if (!review.approved) return {ok:true,gatedAfter:'review:rough-cut',pendingAfterGate:[],instances:allInstances};
+    }
+    if (target?.status === 'completed' && target.outputRel && target.outputAbs)
+      return {ok:true,selectedOutput:{nodeId:target.def.id,itemId:target.itemId,outputRel:target.outputRel,outputAbs:target.outputAbs},instances:allInstances};
+    return {ok:false,error:'Selected instance did not complete.',instances:allInstances};
   }
 
   // Goal output (only meaningful when the goal node ran).

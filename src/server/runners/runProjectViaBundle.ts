@@ -35,6 +35,8 @@ export interface RunProjectViaBundleOpts {
    * Optional caller-supplied stage-gate / stop-at. Forwarded to the
    * walker's stopAt. Must be a node id present in the bundle.
    */
+  targetInstance?: { nodeId: string; itemId?: string; selectionId?: string };
+  requireProductionReviews?: boolean;
   stopAt?: string;
   /**
    * Optional runOnly cascade. Forwarded to the walker. Empty array =
@@ -74,6 +76,7 @@ export interface RunProjectViaBundleOpts {
 }
 
 export interface RunProjectViaBundleResult {
+  selectedOutput?: { nodeId: string; itemId?: string; outputRel: string; outputAbs: string };
   ok: boolean;
   /** Absolute path to the final video produced by the bundle's goal node. */
   finalVideoAbs?: string;
@@ -276,6 +279,8 @@ export async function runProjectViaBundle(
     engine,
     branchId: opts.branchId ?? 'main',
     ...(bundleDir ? { bundleDir } : {}),
+    requireProductionReviews: opts.requireProductionReviews,
+    ...(opts.targetInstance ? { targetInstance: opts.targetInstance } : {}),
     ...(opts.stopAt ? { stopAt: opts.stopAt } : {}),
     ...(opts.runOnly !== undefined ? { runOnly: opts.runOnly } : {}),
     ...(opts.signal ? { signal: opts.signal } : {}),
@@ -333,6 +338,7 @@ export async function runProjectViaBundle(
       ...(walkResult.pendingAfterGate ? { pendingAfterGate: walkResult.pendingAfterGate } : {}),
     };
   }
+  if (walkResult.selectedOutput) return {ok:true,selectedOutput:walkResult.selectedOutput};
   // Any non-gated outcome (goal reached / stopAt / runOnly) means there is
   // no pending gate or budget pause — clear stale markers so the pull path
   // doesn't report a pause that no longer holds.

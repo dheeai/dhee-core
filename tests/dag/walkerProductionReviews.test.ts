@@ -208,9 +208,8 @@ it('rejects completed artifacts whose dependency lineage is missing', async () =
 
 it('builds Desktop review targets from the current collection membership', async () => {
   const { mkdirSync, readFileSync } = await import('node:fs');
-  const { readProjectProductionReview, recordProjectProductionReview } = await import(
-    '../../src/dag/projectProductionReviews.js'
-  );
+  const { readProjectProductionReview, recordProjectProductionReview } =
+    await import('../../src/dag/projectProductionReviews.js');
   const { openEventLog } = await import('../../src/dag/eventLog/EventLog.js');
   await run();
   const collection = {
@@ -284,4 +283,30 @@ it('builds Desktop review targets from the current collection membership', async
     if (oldRoot === undefined) delete process.env.DHEE_USER_BUNDLES_DIR;
     else process.env.DHEE_USER_BUNDLES_DIR = oldRoot;
   }
+});
+
+it('exact reference runs preserve the full storyboard gate and never run other references', async () => {
+  setProductionReviewsRequired({ projectDir, enabled: true });
+  await run();
+  ran = [];
+  expect((await run({ targetInstance: { nodeId: 'character_image' } })).gatedAfter).toBe(
+    'review:storyboard'
+  );
+  expect(ran).toEqual([]);
+  await approve('storyboard');
+  expect(
+    (await run({ targetInstance: { nodeId: 'character_image' } })).selectedOutput?.nodeId
+  ).toBe('character_image');
+  expect(ran).toEqual(['character_image']);
+});
+it('exact goal execution still requires rough-cut review', async () => {
+  await run();
+  setProductionReviewsRequired({ projectDir, enabled: true });
+  await approve('storyboard');
+  await approve('references');
+  ran = [];
+  const result = await run({ targetInstance: { nodeId: 'final_video' } });
+  expect(result.gatedAfter).toBe('review:rough-cut');
+  expect(result.selectedOutput).toBeUndefined();
+  expect(ran).toEqual([]);
 });

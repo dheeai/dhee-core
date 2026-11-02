@@ -31,6 +31,12 @@ const id = z.string().regex(/^[a-f0-9]{64}$/);
 export const productionRequestSchema = z.discriminatedUnion('action', [
   gpuTargetsSchema.extend({ action: z.literal('gpu.targets') }),
   gpuPreparationSchema.extend({ action: z.literal('gpu.prepare') }),
+  gpuPreparationSchema
+    .pick({ projectDir: true, branchId: true, nodeId: true, itemId: true })
+    .extend({
+      action: z.literal('gpu.run'),
+      expectedSelectionId: z.string().min(1),
+    }),
   z.object({ action: z.literal('gpu.catalog'), endpoint: z.string().min(1).optional() }).strict(),
   z
     .object({
@@ -177,7 +183,38 @@ export function createProductionControl(deps: Dependencies = {}) {
         throw new Error(
           'Enable the three creative approval points before an automated production run.'
         );
+      if (req.action === 'gpu.run') {
+        const target = listGpuTargets({ projectDir, branchId: req.branchId }).targets.find(
+          t => t.nodeId === req.nodeId && t.itemId === req.itemId
+        );
+        if (
+          !target ||
+          target.unsupported ||
+          target.tool !== 'gpu.queue' ||
+          !target.selection?.preparationFingerprint ||
+          target.selectionId !== req.expectedSelectionId
+        )
+          throw new Error(
+            'The prepared GPU selection is unavailable or changed. Reload and prepare the target first.'
+          );
+        const result = await (deps.run ?? runProjectViaBundle)({
+          requireProductionReviews: true,
+          projectDir,
+          branchId: req.branchId,
+          targetInstance: {
+            nodeId: req.nodeId,
+            itemId: req.itemId,
+            selectionId: req.expectedSelectionId,
+          },
+          signal: options.signal,
+          log: options.log ?? (() => {}),
+        });
+        return result.ok
+          ? { ok: true, result }
+          : { ok: false, error: result.error ?? 'Selected generation failed.' };
+      }
       const result = await (deps.run ?? runProjectViaBundle)({
+        requireProductionReviews: true,
         projectDir,
         branchId: req.branchId,
         stopAt: req.stopAt,

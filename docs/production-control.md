@@ -68,7 +68,17 @@ Use the returned target's `selectionId` as `expectedSelectionId` (including `nul
 
 Retry the **identical request with the same requestId** after a lost response. A changed request needs a fresh requestId and current selectionId. A superseded retry returns `active:false` and does not restore the older selection. Completed/running targets, adaptive chunk targets, stale selections and unresolved prior queue attempts are rejected. Even an attempt declared directly in the bundle is protected. Files are checked at preparation and their bytes are snapshotted at dispatch.
 
-This panel intentionally has no Generate button yet. Exact single-instance execution is the next step: do not use a bare collection node id to claim that only one scene will run. The existing run interface can include sibling instances according to walker semantics. Creative approvals remain required before execution.
+After saving, **Run saved attempt** runs exactly the selected scene or reference. Unsaved form edits must be saved first. Codex uses the same operation:
+
+```json
+{"action":"gpu.run","projectDir":"/absolute/project","branchId":"main","nodeId":"scene_clip","itemId":"scene_01","expectedSelectionId":"COPY_CURRENT_SELECTION_ID"}
+```
+
+This operation requires review policy enabled and checks the saved selection again inside the project walk lock. It never creates a new attempt or generates missing prerequisites. All ancestor instances must be complete; previous-shot self chains also require earlier planned shots complete. These checks are deliberately conservative. Completed earlier shots remain available as runner inputs, while dispatch is filtered to one instance. Adaptive chunk targets are still unsupported.
+
+Inspect `result.gatedAfter`, `result.budgetExceeded` and `result.selectedOutput`: a creative pause is not completion, and a selected output is not a finished video. Goal targets still require rough-cut review. Approval always covers the full authoritative review scope. Automated review-loop retries are disabled for exact runs. Existing `project.run`/`runOnly` semantics are unchanged and may execute siblings.
+
+After an interruption, retry the same saved selection to recover the durable attempt. Desktop allows this even if its stale status says `in_progress`; the project lock rejects a genuinely active walk. GPU Jobs provides refresh/cancellation; the CLI forwards Ctrl-C/SIGTERM. Unknown dispatch outcomes still fail closed pending guided reconciliation. Existing project-wide pause hints are retained on selected-output success because a single scene does not establish whole-project readiness.
 
 Preparation uses the project walk lock. An empty/unreadable lock is conservatively treated as held because another process may be writing its owner record. If a crash leaves such a lock, investigate whether a walker is active before manual recovery; preparation never deletes that uncertain lock automatically.
 
@@ -76,6 +86,6 @@ Preparation uses the project walk lock. An empty/unreadable lock is conservative
 
 Project creation, bundles, artifact inspection/edits, invalidation/regeneration and cross-process stop are already available through `pnpm dhee` in the source checkout. Those older commands retain their existing behavior; the new production command does not retroactively enforce review policy on every older entry point. Keep policy enabled for this production workflow. Run `pnpm dhee --help` for that interface.
 
-The new structured interface covers catalog/jobs/targets/preparation/status/reviews/run. Exact single-instance execution, guided unknown-job reconciliation, and final assembly/quality checks remain in the implementation plan. They must gain shared operations and command tests as they are built. Do not claim the complete video workflow or actual RTX 5090 rendering is verified from fixture tests.
+The new structured interface covers catalog/jobs/targets/preparation/status/reviews/run. Guided unknown-job reconciliation and final assembly/quality checks remain in the implementation plan. They must gain shared operations and command tests as they are built. Do not claim the complete video workflow or actual RTX 5090 rendering is verified from fixture tests.
 
 API declaration files are not emitted by the current Core build (`dts: false`); JavaScript/CLI consumers work, while published TypeScript declarations remain a follow-up.

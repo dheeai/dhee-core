@@ -36,6 +36,7 @@ export interface ResolveRunnerForInstanceOpts {
 }
 
 export interface ResolvedRunner {
+  selectionId?: string;
   /** Tool the walker should dispatch. */
   tool: string;
   /** Optional config to merge on top of `node.runner.config`. */
@@ -58,7 +59,7 @@ export function resolveRunnerForInstance(
     if (!chosen || ev.seq > chosen.seq) chosen = ev;
   }
   if (!chosen) return { tool: opts.fallbackTool };
-  const out: ResolvedRunner = { tool: chosen.payload.toTool };
+  const out: ResolvedRunner = { tool: chosen.payload.toTool, selectionId: chosen.id };
   if (chosen.payload.configOverride) {
     out.configOverride = chosen.payload.configOverride;
   }
