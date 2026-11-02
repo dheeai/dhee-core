@@ -3,6 +3,9 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
+    'mcp/index': 'src/mcp/index.ts',
+    'mcp/stdio': 'src/mcp/stdio.ts',
+    'mcp/cli': 'src/mcp/cli.ts',
     'control/index': 'src/control/productionControl.ts',
     'control/cli': 'src/control/cli.ts',
     'server/runners/index': 'src/server/runners/index.ts',

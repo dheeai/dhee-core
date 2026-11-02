@@ -195,3 +195,11 @@ Normalization currently rejects declared non-square pixel aspect ratios rather t
 The Desktop repository now owns `dhee-runner-production`: normalization and narration replacement are npm-discovered extensions, not Core built-ins. Desktop IPC and its headless CLI call the extension's production adapter, which delegates shared execution/review/queue operations to this Core service. Core does not import Desktop source. Standalone Core consumers must install/configure the extension to execute its two tools. Desktop supplies runner roots as a JSON array in `DHEE_NODE_MODULES_DIRS`; Core also retains legacy delimited inputs.
 
 Required Core execution/review safeguards remain here by explicit user direction; this is not a claim of compatibility with unchanged upstream75ec0b0. The Desktop adapter is not yet an installed MCP server.
+
+## Core-owned MCP
+
+Core owns the MCP protocol adapter and shared controller. Build Core and launch `dhee-core-mcp`, or `node /absolute/dhee-core/dist/mcp/cli.js`. Public library exports are `dhee-core/mcp` and `dhee-core/mcp/stdio`; the latter is a dedicated-process stdio entry that redirects console output and terminates the process on shutdown. Tool: `dhee_production_control`, arguments `{ "request": { "action": "project.status", "projectDir": "/absolute/project" } }`. Discover action schemas with `tools/list`.
+
+Desktop supplies the UI and optional production runner extension. Set `DHEE_NODE_MODULES_DIRS` to a JSON array of installation roots (for a checkout, the Desktop `packages` directory) and `DHEE_USER_BUNDLES_DIR` to your bundles directory. Core does not import Desktop. Desktop's old MCP binary only configures runner discovery and forwards to this server. All Desktop control actions delegate to Core.
+
+Requests are bounded to 1 MiB and transport buffering to 2 MiB. Cancellation/disconnect aborts active controller signals and drains cleanup for a bounded period. Use adequate client timeouts for media/GPU operations; inspect durable jobs before retrying interrupted work. A successful tool call can pause at a review gate and never implies creative approval. The three human approval points remain script/storyboard, character/voice references, and rough cut.

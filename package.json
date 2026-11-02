@@ -24,7 +24,9 @@
       "types": "./dist/dag/index.d.ts",
       "default": "./dist/dag/index.js"
     },
-    "./control": "./dist/control/index.js"
+    "./control": "./dist/control/index.js",
+    "./mcp": "./dist/mcp/index.js",
+    "./mcp/stdio": "./dist/mcp/stdio.js"
   },
   "files": [
     "dist",
@@ -36,7 +38,8 @@
   "bin": {
     "dhee-core": "./dist/index.js",
     "dhee-core-server": "./dist/server/cli.cjs",
-    "dhee-control": "./dist/control/cli.js"
+    "dhee-control": "./dist/control/cli.js",
+    "dhee-core-mcp": "./dist/mcp/cli.js"
   },
   "scripts": {
     "cli": "NODE_OPTIONS='--max-old-space-size=8192' tsx src/index.ts",
@@ -60,7 +63,8 @@
     "dhee": "NODE_OPTIONS='--max-old-space-size=8192' tsx scripts/dhee-cli.ts",
     "llm-usage": "tsx scripts/llm-usage-report.ts",
     "gen-bundle-requirements": "tsx scripts/gen-bundle-requirements.ts",
-    "control": "tsx src/control/cli.ts"
+    "control": "tsx src/control/cli.ts",
+    "test:mcp": "node --test tests/mcp/production.test.cjs"
   },
   "keywords": [
     "cli",
