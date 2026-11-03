@@ -1220,7 +1220,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
     }
   }
 
-  const fullOrder = topoFromGoal(opts.bundle);
+  const fullOrder = topoFromGoal(opts.targetInstance ? { ...opts.bundle, goal: opts.targetInstance.nodeId } : opts.bundle);
   // When stopAt is set, narrow the topo to ANCESTORS of stopAt (plus
   // stopAt itself) — nodes that aren't on the path back from stopAt
   // shouldn't run. Without this filter, the walker processes every
@@ -1405,7 +1405,7 @@ async function walkBundleOnce(opts: WalkerOptions): Promise<WalkResult> {
 
   if (opts.targetInstance) {
     // Hydrate the full authoritative membership without generating prerequisites.
-    const hydrated = materializeProductionReviewInstances({...opts,gpuVramBytes});
+    const hydrated = materializeProductionReviewInstances({...opts,bundle:{...opts.bundle,goal:opts.targetInstance.nodeId},gpuVramBytes});
     const target = (hydrated.get(opts.targetInstance.nodeId) ?? []).find(i => i.itemId === opts.targetInstance!.itemId);
     if (!target) return {ok:false,error:'Selected instance is not in the current plan. Complete its prerequisites first.',instances:[]};
     for (const node of ordered) {

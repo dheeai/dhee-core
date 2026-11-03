@@ -79,3 +79,9 @@ ltx-compare-out/
 
 # also ignore a bare node_modules symlink (worktree dev convenience)
 node_modules
+
+# Types for the committed first-party cloud runners.
+!runners/dhee-cloud-image/dist/
+!runners/dhee-cloud-image/dist/index.d.ts
+!runners/dhee-cloud-video/dist/
+!runners/dhee-cloud-video/dist/index.d.ts

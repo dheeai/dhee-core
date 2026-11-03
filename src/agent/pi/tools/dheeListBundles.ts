@@ -89,49 +89,55 @@ export function makeListBundlesTool(deps: ListBundlesDeps = {}) {
     name: 'dhee_list_bundles',
     label: 'List bundles',
     description:
-      'List every available bundle (pipeline) — first-party defaults shipped with the app PLUS any forks / community bundles the user has dropped into their bundles dir. Each entry has { id, version, description }. Use this BEFORE picking a bundleId for dhee_create_project — read the descriptions and pick the one whose strengths match the user\'s story (e.g. action/motion → relay, dialogue/precise composition → shot-by-shot).',
+      "List every available bundle (pipeline) — first-party defaults shipped with the app PLUS any forks / community bundles the user has dropped into their bundles dir. Each entry has { id, version, description }. Use this BEFORE picking a bundleId for dhee_create_project — read the descriptions and pick the one whose strengths match the user's story (e.g. action/motion → relay, dialogue/precise composition → shot-by-shot).",
     parameters: Type.Object({}),
-    async execute() {
-      const dirResult = dirFn();
-      const roots = Array.isArray(dirResult) ? dirResult : [dirResult];
-      const entries: BundleEntry[] = [];
-      const seen = new Set<string>();
-      for (const root of roots) {
-        if (!root || !existsSync(root)) continue;
-        let names: string[];
-        try {
-          names = readdirSync(root);
-        } catch {
-          continue;
-        }
-        for (const name of names) {
-          const full = join(root, name);
-          let st: ReturnType<typeof statSync>;
-          try {
-            st = statSync(full);
-          } catch {
-            continue;
-          }
-          let entry: BundleEntry | null = null;
-          if (st.isDirectory()) {
-            const manifestPath = join(full, 'bundle.json');
-            if (!existsSync(manifestPath)) continue;
-            entry = readBundleJson(manifestPath);
-          } else if (st.isFile() && name.endsWith('.json')) {
-            entry = readBundleJson(full);
-          }
-          if (!entry) continue;
-          // First root wins — matches resolveBundleDir precedence so
-          // a user's fork shadows the shipped default in the listing.
-          if (seen.has(entry.id)) continue;
-          seen.add(entry.id);
-          entries.push(entry);
-        }
-      }
-      entries.sort((a, b) => a.id.localeCompare(b.id));
-      return textResult(JSON.stringify(entries));
+    execute() {
+      return Promise.resolve(textResult(JSON.stringify(listAvailableBundles(dirFn()))));
     },
   });
 }
 
 export const dheeListBundlesTool = makeListBundlesTool();
+
+/** Shared catalog for embedded tools and production control. */
+export function listAvailableBundles(
+  dirResult: string | string[] = getBundleSearchRoots()
+): BundleEntry[] {
+  const roots = Array.isArray(dirResult) ? dirResult : [dirResult];
+  const entries: BundleEntry[] = [];
+  const seen = new Set<string>();
+  for (const root of roots) {
+    if (!root || !existsSync(root)) continue;
+    let names: string[];
+    try {
+      names = readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const full = join(root, name);
+      let st: ReturnType<typeof statSync>;
+      try {
+        st = statSync(full);
+      } catch {
+        continue;
+      }
+      let entry: BundleEntry | null = null;
+      if (st.isDirectory()) {
+        const manifestPath = join(full, 'bundle.json');
+        if (!existsSync(manifestPath)) continue;
+        entry = readBundleJson(manifestPath);
+      } else if (st.isFile() && name.endsWith('.json')) {
+        entry = readBundleJson(full);
+      }
+      if (!entry) continue;
+      // First root wins — matches resolveBundleDir precedence so
+      // a user's fork shadows the shipped default in the listing.
+      if (seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      entries.push(entry);
+    }
+  }
+  entries.sort((a, b) => a.id.localeCompare(b.id));
+  return entries;
+}

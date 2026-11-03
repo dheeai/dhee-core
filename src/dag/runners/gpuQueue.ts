@@ -121,9 +121,9 @@ export function createGpuQueueRunner(
         const snapshots: { name: string; index?: number; bytes: Buffer; filename: string }[] = [];
         let totalBytes = 0;
         for (const [name, schema] of Object.entries(workflow.inputs)) {
-          if (!(name in values) || !['file', 'file_list'].includes(String(schema.type))) continue;
+          if (!(name in values) || !['file', 'file_list'].includes(String(schema['type']))) continue;
           const files =
-            schema.type === 'file_list' ? (values[name] as string[]) : [values[name] as string];
+            schema['type'] === 'file_list' ? (values[name] as string[]) : [values[name] as string];
           const identities: unknown[] = [];
           for (const [index, file] of files.entries()) {
             ctx.signal?.throwIfAborted();
@@ -158,12 +158,12 @@ export function createGpuQueueRunner(
             identities.push({ localPath, sha256: digest(bytes), bytes: bytes.length });
             snapshots.push({
               name,
-              ...(schema.type === 'file_list' ? { index } : {}),
+              ...(schema['type'] === 'file_list' ? { index } : {}),
               bytes,
               filename: basename(path),
             });
           }
-          sourceInputs[name] = schema.type === 'file_list' ? identities : identities[0];
+          sourceInputs[name] = schema['type'] === 'file_list' ? identities : identities[0];
         }
         if (cfg.sceneIntent) assertSceneIntent(cfg.sceneIntent, sourceInputs);
         record = await store.submit(

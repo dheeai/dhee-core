@@ -284,3 +284,200 @@ it.each(['ffmpeg.replace_audio', 'ffmpeg.normalize'])(
     );
   }
 );
+it('explicitly reports an unconfigured automatic check instead of delivery readiness', async () => {
+  const projectDir = fixture();
+  const control = createProductionControl({
+    run: async () => ({
+      ok: true,
+      selectedOutput: {
+        nodeId: 'final',
+        outputRel: 'final.mp4',
+        outputAbs: join(projectDir, 'final.mp4'),
+      },
+    }),
+  });
+  await control({ action: 'review.enable', projectDir });
+  expect(
+    await control({
+      action: 'assembly.run',
+      projectDir,
+      nodeId: 'final',
+      expectedSelectionId: null,
+    })
+  ).toMatchObject({
+    ok: true,
+    result: {
+      deliveryReady: false,
+      verification: { status: 'not-configured', deliveryReady: false },
+    },
+  });
+});
+
+async function checkedFixture(checkStatus: 'pass' | 'fail' = 'pass') {
+  const { readFileSync, existsSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const projectDir = fixture();
+  const bp = join(projectDir, 'bundles/test/bundle.json');
+  const bundle = JSON.parse(readFileSync(bp, 'utf8'));
+  bundle.nodes[1].runner.config.verificationNode = 'audit';
+  const criteria = {
+    videoInput: 'final',
+    outputPath: 'audit.json',
+    segments: [{ videoInput: 'clip', durationSec: 1, audioOffsetSec: 0 }],
+  };
+  bundle.nodes.push({
+    id: 'audit',
+    kind: 'stage',
+    inputs: [
+      { from: 'final', usage: 'input' },
+      { from: 'clip', usage: 'input' },
+    ],
+    outputs: { format: 'json', pattern: 'audit.json' },
+    runner: { tool: 'media.verify_assembly', config: criteria },
+  });
+  writeFileSync(bp, JSON.stringify(bundle));
+  const complete = (nodeId: string, outputPath: string, format: 'video' | 'json') =>
+    openEventLog(projectDir).append({
+      kind: 'node.completed',
+      actor: 'test',
+      branchId: 'main',
+      payload: {
+        nodeId,
+        versionId: 'v-' + nodeId,
+        outputPath,
+        artifact: { format },
+        generation: {
+          tool: nodeId === 'audit' ? 'media.verify_assembly' : 'fixture',
+          toolVersion: '1',
+          cached: false,
+        },
+      },
+    });
+  for (const id of ['clip', 'final']) {
+    writeFileSync(join(projectDir, id + '.mp4'), 'source-' + id);
+    complete(id, id + '.mp4', 'video');
+  }
+  const run = vi.fn(async (opts: any) => {
+    const id = opts.targetInstance.nodeId;
+    if (id === 'audit' && !existsSync(join(projectDir, 'audit.json'))) {
+      const inputs = Object.fromEntries(
+        ['final', 'clip'].map(key => [
+          key,
+          {
+            path: key + '.mp4',
+            sha256: createHash('sha256')
+              .update(readFileSync(join(projectDir, key + '.mp4')))
+              .digest('hex'),
+          },
+        ])
+      );
+      writeFileSync(
+        join(projectDir, 'audit.json'),
+        JSON.stringify({
+          analyzerVersion: 2,
+          status: checkStatus === 'fail' ? 'fail' : 'review',
+          deliveryReady: false,
+          inputs,
+          criteria,
+          checks: [
+            { id: 'duration', status: checkStatus, detail: 'duration' },
+            { id: 'decode', status: 'pass', detail: 'decode' },
+            { id: 'picture:0', status: 'pass', detail: 'picture' },
+            { id: 'voice:0', status: 'unchecked', detail: 'no narration' },
+            { id: 'transcript', status: 'unchecked', detail: 'not integrated' },
+            { id: 'scene-meaning', status: 'unchecked', detail: 'not integrated' },
+            { id: 'creative-approval', status: 'unchecked', detail: 'separate' },
+          ],
+        })
+      );
+      complete('audit', 'audit.json', 'json');
+    }
+    return id === 'final'
+      ? { ok: true, gatedAfter: 'review:rough-cut' }
+      : {
+          ok: true,
+          selectedOutput: {
+            nodeId: 'audit',
+            outputRel: 'audit.json',
+            outputAbs: join(projectDir, 'audit.json'),
+          },
+        };
+  });
+  const control = createProductionControl({ run });
+  await control({ action: 'review.enable', projectDir });
+  return {
+    projectDir,
+    control,
+    run,
+    request: { action: 'assembly.run', projectDir, nodeId: 'final', expectedSelectionId: null },
+  };
+}
+it('automatically runs a declared check while retaining the rough-cut pause', async () => {
+  const f = await checkedFixture();
+  expect(await f.control(f.request)).toMatchObject({
+    ok: true,
+    result: {
+      gatedAfter: 'review:rough-cut',
+      deliveryReady: false,
+      verification: {
+        status: 'review',
+        nodeId: 'audit',
+        deliveryReady: false,
+        reportPath: 'audit.json',
+      },
+    },
+  });
+  expect(
+    [...openEventLog(f.projectDir).read()].filter(
+      e => e.kind === 'node.completed' && e.payload.nodeId === 'audit'
+    )
+  ).toHaveLength(1);
+});
+it('surfaces measured failures and stale source bytes instead of promoting a saved report', async () => {
+  const f = await checkedFixture('fail');
+  expect(await f.control(f.request)).toMatchObject({
+    ok: true,
+    result: { verification: { status: 'fail', deliveryReady: false } },
+  });
+  writeFileSync(join(f.projectDir, 'clip.mp4'), 'changed clip');
+  expect(await f.control(f.request)).toMatchObject({
+    ok: true,
+    result: { verification: { status: 'stale', deliveryReady: false } },
+  });
+});
+it('does not run an unrelated node as an automatic check', async () => {
+  const { readFileSync } = await import('node:fs');
+  const f = await checkedFixture();
+  const bp = join(f.projectDir, 'bundles/test/bundle.json');
+  const b = JSON.parse(readFileSync(bp, 'utf8'));
+  b.nodes.find((n: any) => n.id === 'audit').runner.tool = 'gpu.queue';
+  writeFileSync(bp, JSON.stringify(b));
+  expect(await f.control(f.request)).toMatchObject({
+    ok: true,
+    result: { verification: { status: 'unavailable', deliveryReady: false } },
+  });
+  expect(f.run).toHaveBeenCalledTimes(1);
+});
+it('does not trust a report with missing checks or criteria changed after it ran', async () => {
+  const { readFileSync } = await import('node:fs');
+  const f = await checkedFixture();
+  await f.control(f.request);
+  const reportPath = join(f.projectDir, 'audit.json');
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  report.checks = report.checks.filter((c: any) => c.id !== 'duration');
+  writeFileSync(reportPath, JSON.stringify(report));
+  expect(await f.control(f.request)).toMatchObject({
+    ok: true,
+    result: { verification: { status: 'unavailable', deliveryReady: false } },
+  });
+  const g = await checkedFixture();
+  await g.control(g.request);
+  const bp = join(g.projectDir, 'bundles/test/bundle.json');
+  const bundle = JSON.parse(readFileSync(bp, 'utf8'));
+  bundle.nodes.find((n: any) => n.id === 'audit').runner.config.segments[0].durationSec = 2;
+  writeFileSync(bp, JSON.stringify(bundle));
+  expect(await g.control(g.request)).toMatchObject({
+    ok: true,
+    result: { verification: { status: 'stale', deliveryReady: false } },
+  });
+});

@@ -1,3 +1,4 @@
+import { acquireWalkLock, isWalkLockResult } from './projectWalkLock.js';
 /**
  * writeNodeContent — override a node's output with caller-supplied
  * bytes, mark it user-completed, and cascade-invalidate downstream.
@@ -39,6 +40,7 @@ import { loadBundle } from './walker.js';
 import { parseBundleSource, resolveBundleDir } from './bundleSource.js';
 import { cascadeInvalidationKeys, type CascadeTarget } from './cascadeInvalidationKeys.js';
 import type { DagBundle, NodeDef } from './schema.js';
+import type { NodeDependency } from './eventLog/events.js';
 
 const HIGH_BLAST = 3;
 
@@ -49,8 +51,12 @@ export interface WriteNodeContentInput {
   /** Already-resolved bytes to write (text → Buffer.from(s, 'utf8')). */
   content: Buffer;
   reason?: string;
+  /** Validated upstream lineage supplied by production input control under the project lock. */
+  dependencies?: NodeDependency[];
   /** Required to proceed on a high-blast-radius write. */
   confirm?: boolean;
+  /** Read-only impact calculation, including low-impact edits. */
+  previewOnly?: boolean;
   /** Test/host seam — defaults to reading project.json's bundleSource. */
   loadBundleForProject?: (projectDir: string) => DagBundle;
 }
@@ -106,7 +112,7 @@ function cascadeDownstreamKeys(
   let cascade: CascadeTarget[] = [];
   try {
     const log = openEventLog(projectDir);
-    cascade = cascadeInvalidationKeys([...log.read()], target);
+    cascade = cascadeInvalidationKeys([...log.read()], target, { branchId: 'main' });
   } catch {
     cascade = [{ nodeId: target.nodeId, ...(target.itemId !== undefined ? { itemId: target.itemId } : {}) }];
   }
@@ -179,6 +185,14 @@ function writeProjectJson(projectDir: string, pj: ProjectJson): void {
 }
 
 export function writeNodeContent(input: WriteNodeContentInput): WriteNodeContentResult {
+  if (!existsSync(join(input.projectDir, 'project.json'))) return { ok: false, error: 'Project is unavailable.' };
+  const lock = acquireWalkLock(input.projectDir);
+  if (isWalkLockResult(lock)) return { ok: false, error: 'A project operation is already in progress.' };
+  try { return writeNodeContentUnderLock(input); } finally { lock.release(); }
+}
+
+/** Internal control adapter entry: caller must hold the project walk lock. */
+export function writeNodeContentUnderLock(input: WriteNodeContentInput): WriteNodeContentResult {
   const loadBundleFn = input.loadBundleForProject ?? loadBundleFromProject;
 
   // 1. Sanity checks.
@@ -242,7 +256,7 @@ export function writeNodeContent(input: WriteNodeContentInput): WriteNodeContent
     .map((n) => n.id);
   const isFanOutSourceWholeEdit = !itemId && fanOutCollections.length > 0;
   const highBlast = isFanOutSourceWholeEdit || downstreamCascade.length > HIGH_BLAST;
-  if (highBlast && !input.confirm) {
+  if (input.previewOnly || (highBlast && !input.confirm)) {
     const downstreamList = downstreamCascade
       .map((k) => (k.itemId !== undefined ? `${k.nodeId}:${k.itemId}` : k.nodeId))
       .slice(0, 20);
@@ -349,6 +363,7 @@ export function writeNodeContent(input: WriteNodeContentInput): WriteNodeContent
       nodeId: input.nodeId,
       ...(itemId ? { itemId } : {}),
       versionId: `user-${Date.now()}`,
+      ...(input.dependencies ? { dependencies: input.dependencies } : {}),
       outputPath,
       generation: {
         tool: 'user',

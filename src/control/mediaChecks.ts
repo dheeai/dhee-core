@@ -1,5 +1,11 @@
-import { createHash } from 'node:crypto';
+import { safePath } from './productionInputUpdate.js';
+import { createHash, randomUUID } from 'node:crypto';
 import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  renameSync,
   createReadStream,
   createWriteStream,
   realpathSync,
@@ -164,9 +170,9 @@ export async function checkProjectMedia(
       } catch {
         throw new Error('Media probe returned invalid JSON.');
       }
-      const video = data.streams?.find(s => s.codec_type === 'video');
-      const audio = data.streams?.find(s => s.codec_type === 'audio');
-      const duration = Number(data.format?.duration ?? video?.duration ?? audio?.duration);
+      const video = data.streams?.find(s => s['codec_type'] === 'video');
+      const audio = data.streams?.find(s => s['codec_type'] === 'audio');
+      const duration = Number(data.format?.['duration'] ?? video?.['duration'] ?? audio?.['duration']);
       if (Number.isFinite(duration) && duration > 0) {
         media.durationSec = duration;
         checks.push({
@@ -201,13 +207,13 @@ export async function checkProjectMedia(
           message: 'Expected audio is missing.',
         });
       if (video) {
-        const [n, d] = (typeof video.avg_frame_rate === 'string' ? video.avg_frame_rate : '0/0')
+        const [n, d] = (typeof video['avg_frame_rate'] === 'string' ? video['avg_frame_rate'] : '0/0')
           .split('/')
           .map(Number);
         const fps = n! / d!;
         media.video = {
-          width: Number(video.width),
-          height: Number(video.height),
+          width: Number(video['width']),
+          height: Number(video['height']),
           fps: Number.isFinite(fps) ? fps : null,
         };
         checks.push({
@@ -217,7 +223,7 @@ export async function checkProjectMedia(
         });
       }
       if (audio) {
-        media.audio = { channels: Number(audio.channels), sampleRate: Number(audio.sample_rate) };
+        media.audio = { channels: Number(audio['channels']), sampleRate: Number(audio['sample_rate']) };
         checks.push({
           code: 'audio-format',
           status: media.audio.channels > 0 && media.audio.sampleRate > 0 ? 'pass' : 'fail',
@@ -329,7 +335,7 @@ export async function checkProjectMedia(
       currentHash.sha256 !== sourceHash.sha256
     )
       throw new Error('Selected media changed during checks. Run checks again.');
-    return {
+    const report = {
       checkedAt: new Date().toISOString(),
       source: {
         projectDir,
@@ -365,8 +371,171 @@ export async function checkProjectMedia(
         scope: 'Selected media only; no assembly, export or creative approval.',
       },
     };
+    saveMediaCheck(req, report);
+    return report;
   } finally {
     if (scratch) rmSync(scratch, { recursive: true, force: true });
+    lock.release();
+  }
+}
+
+const ANALYZER_VERSION = 'media-check-v1';
+const savedReportSchema = z
+  .object({
+    checkedAt: z.string().datetime(),
+    source: z.object({
+      projectDir: z.string(),
+      branchId: z.string(),
+      nodeId: z.string(),
+      itemId: z.string().optional(),
+      versionId: z.string(),
+      outputPath: z.string(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      bytes: z.number().nonnegative(),
+    }),
+    technicalStatus: z.enum(['issues', 'unavailable', 'review', 'passed']),
+    checks: z.array(
+      z.object({
+        code: z.string(),
+        status: z.enum(['pass', 'fail', 'warning', 'unavailable']),
+        message: z.string(),
+      })
+    ),
+    media: z
+      .object({
+        durationSec: z.number().optional(),
+        video: z
+          .object({ width: z.number(), height: z.number(), fps: z.number().nullable() })
+          .optional(),
+        audio: z
+          .object({
+            channels: z.number(),
+            sampleRate: z.number(),
+            peakDb: z.number().nullable().optional(),
+            meanDb: z.number().nullable().optional(),
+          })
+          .optional(),
+        silenceIntervals: z
+          .array(z.object({ start: z.number(), end: z.number().optional() }))
+          .optional(),
+      })
+      .optional(),
+    creativeApproval: z.literal('required'),
+    manualChecks: z.array(z.string()),
+  })
+  .passthrough();
+function reportPath(req: z.infer<typeof mediaCheckSchema>) {
+  const key = createHash('sha256')
+    .update(JSON.stringify([req.branchId, req.nodeId, req.itemId ?? null]))
+    .digest('hex');
+  return safePath(req.projectDir, `.dhee/media-checks/${key}.json`);
+}
+function criteria(req: z.infer<typeof mediaCheckSchema>) {
+  return { expectedAudio: req.expectedAudio, expectedDurationSec: req.expectedDurationSec ?? null };
+}
+function saveMediaCheck(req: z.infer<typeof mediaCheckSchema>, report: unknown) {
+  const path = reportPath(req);
+  const dir = safePath(req.projectDir, '.dhee/media-checks');
+  mkdirSync(dir, { recursive: true });
+  const temporary = safePath(req.projectDir, `.dhee/media-checks/${randomUUID()}.tmp`);
+  try {
+    writeFileSync(
+      temporary,
+      JSON.stringify(
+        { analyzerVersion: ANALYZER_VERSION, criteria: criteria(req), report },
+        null,
+        2
+      ),
+      { flag: 'wx', mode: 0o600 }
+    );
+    renameSync(temporary, path);
+  } finally {
+    if (existsSync(temporary)) rmSync(temporary);
+  }
+}
+/** Last saved report for this exact branch/target; never grants delivery or creative approval. */
+export async function readSavedMediaCheck(
+  input: z.input<typeof mediaCheckSchema>,
+  signal?: AbortSignal
+) {
+  const req = mediaCheckSchema.parse(input);
+  req.projectDir = realpathSync(req.projectDir);
+  signal?.throwIfAborted();
+  const lock = acquireWalkLock(req.projectDir);
+  if (isWalkLockResult(lock))
+    throw Error('A project operation is in progress. Read saved checks after it finishes.');
+  try {
+    const path = reportPath(req);
+    if (!existsSync(path))
+      return { status: 'missing' as const, reason: 'No saved technical check for this target.' };
+    if (statSync(path).size > 2 * 1024 * 1024)
+      throw Error('Saved check exceeds the report size limit.');
+    const stored = z
+      .object({
+        analyzerVersion: z.string(),
+        criteria: z.object({
+          expectedAudio: z.boolean(),
+          expectedDurationSec: z.number().nullable(),
+        }),
+        report: savedReportSchema,
+      })
+      .parse(JSON.parse(readFileSync(path, 'utf8')));
+    const { report } = stored;
+    const stale = (reason: string) => ({ status: 'stale' as const, reason, report });
+    if (stored.analyzerVersion !== ANALYZER_VERSION)
+      return stale('Check implementation changed. Run checks again.');
+    if (JSON.stringify(stored.criteria) !== JSON.stringify(criteria(req)))
+      return stale('Check expectations changed. Run checks again.');
+    if (
+      report.source.projectDir !== req.projectDir ||
+      report.source.branchId !== req.branchId ||
+      report.source.nodeId !== req.nodeId ||
+      report.source.itemId !== req.itemId
+    )
+      return stale('Saved target identity differs from this project.');
+    const key = req.itemId === undefined ? req.nodeId : `${req.nodeId}:${req.itemId}`;
+    const state = projectWalkState([...openEventLog(req.projectDir).read()], {
+      branchId: req.branchId,
+    }).nodes[key];
+    if (
+      state?.status !== 'completed' ||
+      state.selectedVersionId !== report.source.versionId ||
+      state.outputPath !== report.source.outputPath
+    )
+      return stale('Selected media version changed or became incomplete.');
+    let actual;
+    try {
+      const abs = confined(req.projectDir, state.outputPath);
+      const before = statSync(abs);
+      actual = await digest(abs, signal);
+      const after = statSync(abs);
+      if (
+        confined(req.projectDir, state.outputPath) !== abs ||
+        before.ino !== after.ino ||
+        before.dev !== after.dev ||
+        before.size !== after.size ||
+        before.mtimeMs !== after.mtimeMs ||
+        before.ctimeMs !== after.ctimeMs
+      )
+        return stale('Media file changed while reading the saved check.');
+    } catch {
+      signal?.throwIfAborted();
+      return stale('Checked media is missing or unavailable.');
+    }
+    if (actual.sha256 !== report.source.sha256 || actual.bytes !== report.source.bytes)
+      return stale('Media bytes changed. Run checks again.');
+    signal?.throwIfAborted();
+    const after = projectWalkState([...openEventLog(req.projectDir).read()], {
+      branchId: req.branchId,
+    }).nodes[key];
+    if (
+      after?.status !== 'completed' ||
+      after.selectedVersionId !== state.selectedVersionId ||
+      after.outputPath !== state.outputPath
+    )
+      return stale('Selected media changed while reading the saved check.');
+    return { status: 'current' as const, report };
+  } finally {
     lock.release();
   }
 }

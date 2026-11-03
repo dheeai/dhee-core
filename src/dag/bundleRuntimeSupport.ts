@@ -83,8 +83,8 @@ export function bundleRuntimeSupport(bundle: BundleWithRuntimeSupport): BundleRu
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return inferred;
 
   const record = raw as Record<string, unknown>;
-  const modes = normalizeModes(record.modes);
-  const providers = normalizeProviders(record.providers);
+  const modes = normalizeModes(record['modes']);
+  const providers = normalizeProviders(record['providers']);
 
   return {
     modes: modes.length > 0 ? modes : inferred.modes,

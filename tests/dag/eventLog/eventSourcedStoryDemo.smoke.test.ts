@@ -13,8 +13,8 @@ describe('eventSourcedStoryDemo (smoke)', () => {
   it('runs to completion end-to-end without intervention; all three tests prove', () => {
     const repoRoot = join(__dirname, '..', '..', '..');
     const result = spawnSync(
-      'pnpm',
-      ['exec', 'tsx', 'scripts/eventSourcedStoryDemo.ts'],
+      process.execPath,
+      ['--import', 'tsx', 'scripts/eventSourcedStoryDemo.ts'],
       { cwd: repoRoot, encoding: 'utf-8', timeout: 60_000 },
     );
     expect(result.status, `stderr:\n${result.stderr}`).toBe(0);

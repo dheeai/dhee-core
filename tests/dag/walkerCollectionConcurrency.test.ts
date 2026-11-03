@@ -196,11 +196,11 @@ describe('walker collection concurrency', () => {
     expect(maxInFlight).toBe(1);
   });
 
-  it('stays serial for a non-llm.* tool, even with concurrency configured', async () => {
+  it('honors explicit concurrency for a non-llm runner', async () => {
     const bundle = makeBundle({ tool: 'comfy.test', itemCount: 5, concurrency: 5 });
     const result = await walkBundle({ projectDir, bundle });
 
     expect(result.ok).toBe(true);
-    expect(maxInFlight).toBe(1);
+    expect(maxInFlight).toBe(5);
   });
 });

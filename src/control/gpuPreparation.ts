@@ -120,17 +120,17 @@ export async function prepareGpuAttempt(
   ]);
   const fingerprint = digest(canonical(req));
   const initial = snapshot({ projectDir: req.projectDir, branchId: req.branchId });
-  const previous = initial.swaps.find(e => e.payload.configOverride?.attemptKey === key);
+  const previous = initial.swaps.find(e => e.payload.configOverride?.['attemptKey'] === key);
   const response = (event: SelectionEvent, active = true) => ({
     active,
     selectionId: event.id,
     attemptKey: key,
     workflow: req.workflow,
     workflowVersion: req.workflowVersion,
-    inputs: event.payload.configOverride?.inputs,
+    inputs: event.payload.configOverride?.['inputs'],
   });
   if (previous) {
-    if (previous.payload.configOverride?.preparationFingerprint !== fingerprint)
+    if (previous.payload.configOverride?.['preparationFingerprint'] !== fingerprint)
       throw new Error('This request id belongs to a different preparation.');
     return response(
       previous,
@@ -146,10 +146,10 @@ export async function prepareGpuAttempt(
   const sourceInputs = { ...inputs };
   let total = 0;
   for (const [name, schema] of Object.entries(workflow.inputs)) {
-    if (inputs[name] === undefined || !['file', 'file_list'].includes(String(schema.type)))
+    if (inputs[name] === undefined || !['file', 'file_list'].includes(String(schema['type'])))
       continue;
     const identities: unknown[] = [];
-    for (const file of schema.type === 'file_list'
+    for (const file of schema['type'] === 'file_list'
       ? (inputs[name] as string[])
       : [inputs[name] as string]) {
       if (/^up_[A-Za-z0-9_-]+$/.test(file)) {
@@ -192,7 +192,7 @@ export async function prepareGpuAttempt(
           bytes: info.size,
         });
     }
-    sourceInputs[name] = schema.type === 'file_list' ? identities : identities[0];
+    sourceInputs[name] = schema['type'] === 'file_list' ? identities : identities[0];
   }
   if (req.sceneIntent) assertSceneIntent(req.sceneIntent, sourceInputs);
   signal?.throwIfAborted();
@@ -200,9 +200,9 @@ export async function prepareGpuAttempt(
   if (isWalkLockResult(lock)) throw new Error('Stop the active run before preparing an attempt.');
   try {
     const current = snapshot({ projectDir: initial.projectDir, branchId: req.branchId });
-    const duplicate = current.swaps.find(e => e.payload.configOverride?.attemptKey === key);
+    const duplicate = current.swaps.find(e => e.payload.configOverride?.['attemptKey'] === key);
     if (duplicate) {
-      if (duplicate.payload.configOverride?.preparationFingerprint !== fingerprint)
+      if (duplicate.payload.configOverride?.['preparationFingerprint'] !== fingerprint)
         throw new Error('This request id belongs to a different preparation.');
       return response(
         duplicate,
@@ -221,9 +221,9 @@ export async function prepareGpuAttempt(
       );
     if (target.selectionId !== req.expectedSelectionId)
       throw new Error('Selection changed. Reload the target before saving.');
-    if (typeof target.selection?.attemptKey === 'string') {
+    if (typeof target.selection?.['attemptKey'] === 'string') {
       const prior = new QueueJobs(initial.projectDir).find(
-        JSON.stringify(['gpu.queue', req.nodeId, req.itemId ?? '', target.selection.attemptKey])
+        JSON.stringify(['gpu.queue', req.nodeId, req.itemId ?? '', target.selection['attemptKey']])
       );
       if (
         prior &&

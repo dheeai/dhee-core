@@ -1,5 +1,15 @@
 import { afterEach, it, expect, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -221,6 +231,107 @@ it('rejects a selection change during the final source hash', async () => {
     });
   try {
     await expect(checkProjectMedia(f.request)).rejects.toThrow(/changed during/);
+  } finally {
+    spy.mockRestore();
+  }
+});
+it('persists results and marks them stale when expectations, bytes or selected version change', async () => {
+  const f = fixture();
+  video(f.path);
+  const { readSavedMediaCheck } = await import('../../src/control/mediaChecks.js');
+  expect((await readSavedMediaCheck(f.request)).status).toBe('missing');
+  const req = { ...f.request, expectedAudio: true, expectedDurationSec: 1 };
+  const report = await checkProjectMedia(req);
+  expect(await readSavedMediaCheck(req)).toMatchObject({
+    status: 'current',
+    report: { source: JSON.parse(JSON.stringify(report.source)), technicalStatus: 'passed' },
+  });
+  expect((await readSavedMediaCheck({ ...req, expectedDurationSec: 4 })).status).toBe('stale');
+  openEventLog(f.projectDir).append({
+    kind: 'node.completed',
+    actor: 'test',
+    branchId: 'main',
+    payload: { nodeId: 'clip', versionId: 'v2', outputPath: 'clip.mp4' },
+  });
+  expect((await readSavedMediaCheck(req)).status).toBe('stale');
+  await checkProjectMedia(req);
+  writeFileSync(f.path, 'changed bytes');
+  expect((await readSavedMediaCheck(req)).status).toBe('stale');
+  expect((await readSavedMediaCheck({ ...req, branchId: 'other' })).status).toBe('missing');
+});
+it('rejects a saved check whose selection changes during its hash verification', async () => {
+  const f = fixture();
+  video(f.path);
+  await checkProjectMedia(f.request);
+  const { readSavedMediaCheck } = await import('../../src/control/mediaChecks.js');
+  const fs = await import('node:fs');
+  const real = (await vi.importActual<typeof import('node:fs')>('node:fs')).createReadStream;
+  const spy = vi
+    .spyOn(fs, 'createReadStream')
+    .mockImplementation((...args: Parameters<typeof real>) => {
+      const stream = real(...args);
+      stream.once('data', () =>
+        openEventLog(f.projectDir).append({
+          kind: 'node.invalidated',
+          actor: 'test',
+          branchId: 'main',
+          payload: { nodeId: 'clip', reason: 'changed during read' },
+        })
+      );
+      return stream;
+    });
+  try {
+    expect((await readSavedMediaCheck(f.request)).status).toBe('stale');
+  } finally {
+    spy.mockRestore();
+  }
+});
+it('refuses a report store symlink rather than writing outside the project', async () => {
+  const f = fixture();
+  video(f.path);
+  const outside = mkdtempSync(join(tmpdir(), 'media-store-'));
+  dirs.push(outside);
+  symlinkSync(outside, join(f.projectDir, '.dhee/media-checks'));
+  await expect(checkProjectMedia(f.request)).rejects.toThrow(/symlink/);
+  const { readSavedMediaCheck } = await import('../../src/control/mediaChecks.js');
+  await expect(readSavedMediaCheck(f.request)).rejects.toThrow(/symlink/);
+});
+it('rejects malformed persisted measurements before they reach the UI', async () => {
+  const f = fixture();
+  video(f.path);
+  await checkProjectMedia(f.request);
+  const { readSavedMediaCheck } = await import('../../src/control/mediaChecks.js');
+  const dir = join(f.projectDir, '.dhee/media-checks');
+  const path = join(dir, readdirSync(dir)[0]!);
+  const saved = JSON.parse(readFileSync(path, 'utf8'));
+  saved.report.media = { durationSec: 'bad' };
+  writeFileSync(path, JSON.stringify(saved));
+  await expect(readSavedMediaCheck(f.request)).rejects.toThrow();
+});
+it('detects an in-project media symlink retargeted while a saved report is verified', async () => {
+  const f = fixture();
+  video(f.path);
+  const original = join(f.projectDir, 'original.mp4');
+  renameSync(f.path, original);
+  symlinkSync(original, f.path);
+  await checkProjectMedia(f.request);
+  const replacement = join(f.projectDir, 'replacement.mp4');
+  writeFileSync(replacement, 'different bytes');
+  const { readSavedMediaCheck } = await import('../../src/control/mediaChecks.js');
+  const fs = await import('node:fs');
+  const real = (await vi.importActual<typeof import('node:fs')>('node:fs')).createReadStream;
+  const spy = vi
+    .spyOn(fs, 'createReadStream')
+    .mockImplementation((...args: Parameters<typeof real>) => {
+      const stream = real(...args);
+      stream.once('data', () => {
+        unlinkSync(f.path);
+        symlinkSync(replacement, f.path);
+      });
+      return stream;
+    });
+  try {
+    expect((await readSavedMediaCheck(f.request)).status).toBe('stale');
   } finally {
     spy.mockRestore();
   }

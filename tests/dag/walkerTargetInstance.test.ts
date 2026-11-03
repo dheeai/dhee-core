@@ -249,3 +249,47 @@ it('accepts a pinned bundle-default runner without a swap', async () => {
     ).ok
   ).toBe(true);
 });
+it('runs an exact post-assembly check outside the video goal without rerunning sources', async () => {
+  await run();
+  const extended: DagBundle = {
+    ...bundle,
+    nodes: [
+      ...bundle.nodes,
+      {
+        id: 'audit',
+        kind: 'stage',
+        inputs: [{ from: 'final' }],
+        outputs: { format: 'json', pattern: 'audit.json' },
+        runner: { tool: 'fixture.audit', config: {} },
+      },
+    ],
+  };
+  getGlobalRegistry().register(
+    { tool: 'fixture.audit', version: '1', engineCompat: '>=0.1.0', credentials: [] },
+    {
+      describe: () => ({
+        id: 'fixture.audit',
+        displayName: 'audit',
+        description: '',
+        capabilities: [],
+        modalities: { input: [], output: [] },
+        configSchema: {},
+      }),
+      run: async () => {
+        ran.push('audit:');
+        writeFileSync(join(projectDir, 'audit.json'), '{}');
+        return { ok: true, outputPath: 'audit.json' };
+      },
+    }
+  );
+  ran = [];
+  const result = await run({
+    bundle: extended,
+    targetInstance: { nodeId: 'audit', selectionId: null, expectedTool: 'fixture.audit' },
+  });
+  expect(result, JSON.stringify(result)).toMatchObject({
+    ok: true,
+    selectedOutput: { nodeId: 'audit', outputRel: 'audit.json' },
+  });
+  expect(ran).toEqual(['audit:']);
+});

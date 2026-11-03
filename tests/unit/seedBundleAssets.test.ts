@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe('seedBundleAssets', () => {
-  it('copies the bundle inputs/ files into the project (binary-safe)', () => {
+  it('copies binary talent assets without seeding a sample brief', () => {
     const bundleDir = join(tmp, 'bundle');
     mkdirSync(join(bundleDir, 'inputs'), { recursive: true });
     writeFileSync(join(bundleDir, 'inputs', 'character.png'), PNG_BYTES);
@@ -32,10 +32,10 @@ describe('seedBundleAssets', () => {
     mkdirSync(projectDir, { recursive: true });
 
     const seeded = seedBundleAssets(bundleDir, projectDir).sort();
-    expect(seeded).toEqual(['character.png', 'story.md', 'voice_ref.wav']);
+    expect(seeded).toEqual(['character.png', 'voice_ref.wav']);
     // binary intact (byte-for-byte)
     expect(readFileSync(join(projectDir, 'inputs', 'character.png'))).toEqual(PNG_BYTES);
-    expect(readFileSync(join(projectDir, 'inputs', 'story.md'), 'utf8')).toBe('default brief');
+    expect(existsSync(join(projectDir, 'inputs', 'story.md'))).toBe(false);
   });
 
   it('is a no-op when the bundle has no inputs/ dir', () => {

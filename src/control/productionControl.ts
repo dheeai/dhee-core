@@ -1,5 +1,28 @@
+import { verifyAfterAssembly } from './assemblyVerification.js';
+import {
+  versionListSchema,
+  artifactReadSchema,
+  versionRestorePreviewSchema,
+  versionRestoreSchema,
+  listProductionVersions,
+  readProductionArtifact,
+  restoreProductionVersion,
+} from './productionVersions.js';
+import {
+  inputPreviewSchema,
+  inputWriteSchema,
+  updateProductionInput,
+} from './productionInputUpdate.js';
+import {
+  bundleListSchema,
+  bundleDescribeSchema,
+  projectCreateSchema,
+  listProductionBundles,
+  describeProductionBundle,
+  createProductionProject,
+} from './productionIntake.js';
 import { sceneIntentSchema, checkSceneIntent } from './sceneIntent.js';
-import { mediaCheckSchema, checkProjectMedia } from './mediaChecks.js';
+import { mediaCheckSchema, checkProjectMedia, readSavedMediaCheck } from './mediaChecks.js';
 import {
   gpuTargetsSchema,
   gpuPreparationSchema,
@@ -32,8 +55,18 @@ const gate = z.enum(['storyboard', 'references', 'rough-cut']);
 const id = z.string().regex(/^[a-f0-9]{64}$/);
 const recovery = { ...project, id, jobId: z.string().trim().min(1).max(256) };
 export const productionRequestSchema = z.discriminatedUnion('action', [
+  versionListSchema,
+  artifactReadSchema,
+  versionRestorePreviewSchema,
+  versionRestoreSchema,
+  inputPreviewSchema,
+  inputWriteSchema,
+  bundleListSchema,
+  bundleDescribeSchema,
+  projectCreateSchema,
   z.object({ action: z.literal('scene.check'), sceneIntent: sceneIntentSchema }).strict(),
   mediaCheckSchema.extend({ action: z.literal('media.check') }),
+  mediaCheckSchema.extend({ action: z.literal('media.read') }),
   gpuTargetsSchema.extend({ action: z.literal('assembly.targets') }),
   gpuPreparationSchema
     .pick({ projectDir: true, branchId: true, nodeId: true, itemId: true })
@@ -114,7 +147,7 @@ export function summarizeQueueJob(record: QueueJobRecord) {
     jobId: record.jobId,
     state: record.job?.state,
     cancelRequested: record.cancelRequested,
-    error: record.error || record.job?.error || undefined,
+    error: record.error || record.job?.['error'] || undefined,
     files: record.files?.map(file => ({ path: file.path, sha256: file.sha256, bytes: file.bytes })),
   };
 }
@@ -123,6 +156,11 @@ export function createProductionControl(deps: Dependencies = {}) {
     try {
       options.signal?.throwIfAborted();
       const req = productionRequestSchema.parse(input);
+      if (req.action === 'bundle.list') return { ok: true, result: listProductionBundles() };
+      if (req.action === 'bundle.describe')
+        return { ok: true, result: describeProductionBundle(req.bundleId) };
+      if (req.action === 'project.create')
+        return { ok: true, result: createProductionProject(req) };
       if (req.action === 'gpu.catalog') {
         const endpoint = req.endpoint ?? process.env['DHEE_GPU_QUEUE_URL'] ?? '';
         const client = deps.catalog?.(endpoint) ?? new GpuQueueClient(endpoint);
@@ -133,6 +171,21 @@ export function createProductionControl(deps: Dependencies = {}) {
       const projectDir = realpathSync(req.projectDir);
       if (!statSync(join(projectDir, 'project.json')).isFile())
         throw new Error('Project is unavailable.');
+      if (req.action === 'version.list')
+        return { ok: true, result: listProductionVersions({ ...req, projectDir }) };
+      if (req.action === 'artifact.read')
+        return { ok: true, result: readProductionArtifact({ ...req, projectDir }) };
+      if (req.action === 'version.restorePreview' || req.action === 'version.restore')
+        return { ok: true, result: restoreProductionVersion({ ...req, projectDir }) };
+      if (req.action === 'input.preview' || req.action === 'input.write')
+        return { ok: true, result: updateProductionInput(req) };
+      if (req.action === 'media.read') {
+        const { action: _action, ...input } = req;
+        return {
+          ok: true,
+          result: await readSavedMediaCheck({ ...input, projectDir }, options.signal),
+        };
+      }
       if (req.action === 'media.check') {
         const { action: _action, ...payload } = req;
         return { ok: true, result: await checkProjectMedia(payload, options.signal) };
@@ -274,9 +327,11 @@ export function createProductionControl(deps: Dependencies = {}) {
           signal: options.signal,
           log: options.log ?? (() => {}),
         });
-        return result.ok
-          ? { ok: true, result }
-          : { ok: false, error: result.error ?? 'Assembly failed.' };
+        if (!result.ok) return { ok: false, error: result.error ?? 'Assembly failed.' };
+        const verification = result.selectedOutput || result.gatedAfter === 'review:rough-cut'
+          ? await verifyAfterAssembly(req, deps.run ?? runProjectViaBundle, options)
+          : { status: 'not-run', deliveryReady: false, reason: 'Assembly has not produced the selected output yet.' };
+        return { ok: true, result: { ...result, verification, deliveryReady: false } };
       }
       if (req.action === 'gpu.run') {
         const target = listGpuTargets({ projectDir, branchId: req.branchId }).targets.find(
@@ -286,7 +341,7 @@ export function createProductionControl(deps: Dependencies = {}) {
           !target ||
           target.unsupported ||
           target.tool !== 'gpu.queue' ||
-          !target.selection?.preparationFingerprint ||
+          !target.selection?.['preparationFingerprint'] ||
           target.selectionId !== req.expectedSelectionId
         )
           throw new Error(

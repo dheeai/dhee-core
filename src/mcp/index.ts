@@ -7,6 +7,15 @@ import {
 } from '../control/productionControl.js';
 
 export const productionActions = [
+  'version.list',
+  'artifact.read',
+  'version.restorePreview',
+  'version.restore',
+  'input.preview',
+  'input.write',
+  'bundle.list',
+  'bundle.describe',
+  'project.create',
   'scene.check',
   'gpu.catalog',
   'gpu.jobs',
@@ -18,6 +27,7 @@ export const productionActions = [
   'assembly.targets',
   'assembly.run',
   'media.check',
+  'media.read',
   'project.status',
   'review.enable',
   'review.read',

@@ -192,8 +192,10 @@ test('tool discovery describes exact execution and human review inputs', async (
     assert.ok(variants, 'action-specific schemas');
     const action = v => v.properties.action.const || v.properties.action.enum[0];
     const byAction = Object.fromEntries(variants.map(v => [action(v), v]));
-    assert.equal(Object.keys(byAction).length, 16);
+    assert.equal(Object.keys(byAction).length, 26);
     for (const [name, fields] of Object.entries({
+      'version.restore': ['nodeId', 'versionId', 'expectedFingerprint', 'humanAcknowledged'],
+      'artifact.read': ['nodeId', 'versionId', 'branchId'],
       'gpu.run': ['expectedSelectionId', 'nodeId'],
       'gpu.jobs': ['operation'],
       'review.decide': ['gate', 'expectedFingerprint', 'decision', 'humanAcknowledged'],

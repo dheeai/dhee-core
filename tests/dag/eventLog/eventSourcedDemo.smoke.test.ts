@@ -14,8 +14,8 @@ describe('eventSourcedDemo (smoke)', () => {
   it('runs to completion and proves all four capabilities', () => {
     const repoRoot = join(__dirname, '..', '..', '..');
     const result = spawnSync(
-      'pnpm',
-      ['exec', 'tsx', 'scripts/eventSourcedDemo.ts'],
+      process.execPath,
+      ['--import', 'tsx', 'scripts/eventSourcedDemo.ts'],
       {
         cwd: repoRoot,
         encoding: 'utf-8',

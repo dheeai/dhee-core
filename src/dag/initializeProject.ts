@@ -60,7 +60,8 @@ export interface InitializeProjectParams {
   /** Optional human-readable description. */
   description?: string;
   /**
-   * Caller-supplied values keyed by `bundle.inputs[].id`. File-kind go
+   * Caller-supplied values keyed by `bundle.inputs[].id`. Internal callers may
+   * supply Buffer snapshots for file inputs; those bytes are preserved. File-kind go
    * to disk; project-kind go to project.json top-level. Missing
    * project-kind inputs fall back to `decl.default`. Missing required
    * inputs return an error.
@@ -446,7 +447,7 @@ function applyBundleInputs(
         }
         continue;
       }
-      const content = typeof provided === 'string' ? provided : JSON.stringify(provided, null, 2);
+      const content = Buffer.isBuffer(provided) || typeof provided === 'string' ? provided : JSON.stringify(provided, null, 2);
       const absPath = join(projectDir, decl.path);
       mkdirSync(dirname(absPath), { recursive: true });
       writeFileSync(absPath, content, 'utf8');

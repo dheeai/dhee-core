@@ -2,14 +2,10 @@
  * `ffmpeg.concat` runner — concatenates N input videos into one mp4 and
  * applies the dhee.studio watermark overlay.
  *
- * Strategy:
- *   1. Concat sources with the ffmpeg concat demuxer (`-c copy`, no
- *      re-encode) into a temp file. Fast when the sources already share
- *      codec/resolution/fps (true for all LTX Director outputs).
- *   2. If a watermark PNG is found via `resolveWatermarkPath` and the
- *      override `dhee_WATERMARK=off` is not set, re-encode the temp
- *      through the watermark overlay filter into the final output.
- *      Otherwise the concat output IS the final.
+ * Hard cuts with audio decode each track separately and bound it to the video
+ * duration before concatenation, avoiding cumulative AAC encoder padding.
+ * Video-only cuts retain the concat-demuxer copy path. Optional watermarking
+ * happens afterward without re-encoding audio. Crossfade behavior is separate.
  *
  * Subtitle burn-in was REMOVED. It was the only fragile step in the
  * re-encode pass — drawtext needs a system font and careful filtergraph
@@ -296,6 +292,66 @@ async function runFfmpegConcat(ctx: RunnerContext): Promise<RunnerResult> {
     return { ok: true, outputPath: cfg.outputPath, metadata: { mode: `xfade:${transition}+reencode`, inputCount: cfg.inputs.length, watermarked: true } };
   }
 
+  // AAC packet copying carries encoder priming/padding across joins. Decode each
+  // audio track on its own timeline and bound it to its video before concat.
+  const media = cfg.inputs.map(path => {
+    try {
+      const probe = spawnSync(ffprobeBin(), ['-v', 'error', '-show_streams', '-of', 'json', path], { encoding: 'utf8' });
+      if (probe.status !== 0) return null;
+      return JSON.parse(probe.stdout) as { streams: Array<{ codec_type: string; duration?: string; start_time?: string; width?: number; height?: number; avg_frame_rate?: string; channels?: number; sample_rate?: string }> };
+    } catch { return null; }
+  });
+  if (media.some(m => !m)) return { ok: false, error: 'ffmpeg.concat: cannot inspect input streams' };
+  const hasAudio = media.map(m => m!.streams.some(s => s.codec_type === 'audio'));
+  if (hasAudio.some(Boolean)) {
+    if (!hasAudio.every(Boolean)) return { ok: false, error: 'ffmpeg.concat: mixed audio/silent clips require explicit silent tracks before assembly' };
+    const videos = media.map(m => m!.streams.filter(s => s.codec_type === 'video'));
+    const audios = media.map(m => m!.streams.filter(s => s.codec_type === 'audio'));
+    if (videos.some(v => v.length !== 1) || audios.some(a => a.length !== 1))
+      return { ok: false, error: 'ffmpeg.concat: select exactly one video and audio stream per clip' };
+    const durations = videos.map(v => Number(v[0]!.duration));
+    if (durations.some(d => !Number.isFinite(d) || d <= 0) ||
+        videos.some(v => Number(v[0]!.start_time ?? 0) !== 0) ||
+        audios.some(a => Number(a[0]!.start_time ?? 0) !== 0))
+      return { ok: false, error: 'ffmpeg.concat: normalize clip timestamps and finite video durations before assembly' };
+    if (videos.some(v => v[0]!.width !== videos[0]![0]!.width || v[0]!.height !== videos[0]![0]!.height))
+      return { ok: false, error: 'ffmpeg.concat: normalize clip dimensions before hard-cut assembly' };
+    const fps = videos.map(v => {
+      const [num, den] = (v[0]!.avg_frame_rate ?? '').split('/').map(Number);
+      return num! / den!;
+    });
+    if (fps.some(f => !Number.isFinite(f) || f <= 0 || Math.abs(f - fps[0]!) > 0.000001))
+      return { ok: false, error: 'ffmpeg.concat: normalize clip frame rates before hard-cut assembly' };
+    const rate = Number(audios[0]![0]!.sample_rate);
+    const channels = audios[0]![0]!.channels;
+    if (!Number.isInteger(rate) || rate <= 0 || ![1, 2].includes(channels ?? 0))
+      return { ok: false, error: 'ffmpeg.concat: normalize audio to mono or stereo with a valid sample rate' };
+    const layout = channels === 1 ? 'mono' : 'stereo';
+    const filters = durations.flatMap((duration, i) => [
+      `[${i}:v:0]setpts=PTS-STARTPTS,setsar=1[v${i}]`,
+      `[${i}:a:0]aresample=${rate},aformat=channel_layouts=${layout},apad,atrim=end_sample=${Math.round(duration * rate)},asetpts=N/SR/TB[a${i}]`,
+    ]);
+    filters.push(`${durations.map((_, i) => `[v${i}][a${i}]`).join('')}concat=n=${durations.length}:v=1:a=1[vout][aout]`);
+    const target = needsReencode ? `${outputAbs}.preview.tmp.mp4` : outputAbs;
+    const result = await runFFmpeg(['-y', ...cfg.inputs.flatMap(path => ['-i', path]),
+      '-filter_complex', filters.join(';'), '-map', '[vout]', '-map', '[aout]',
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', '-vsync', 'vfr',
+      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', target]);
+    if (!result.ok) {
+      try { if (existsSync(target)) unlinkSync(target); } catch { /* ignore */ }
+      return { ok: false, error: `ffmpeg.concat: decoded audio assembly failed — ${result.stderr.slice(-500)}` };
+    }
+    if (needsReencode) {
+      const marked = await reencodePass(ctx, target, outputAbs, watermarkPath);
+      try { unlinkSync(target); } catch { /* ignore */ }
+      if (!marked.ok) return { ok: false, error: `ffmpeg.concat: watermark failed — ${(marked.stderr ?? '').slice(-500)}` };
+    }
+    return { ok: true, outputPath: cfg.outputPath, metadata: {
+      mode: 'decoded_timeline_concat', inputCount: cfg.inputs.length, watermarked: needsReencode,
+      audioTiming: 'decoded samples bounded to video duration', clipDurationsSec: durations, sampleRate: rate,
+    } };
+  }
+
   // ── N-input path: concat demuxer → temp → optional watermark pass ──
   const listFile = join(tmpdir(), `dag_concat_${Date.now()}.txt`);
   const listContent = cfg.inputs.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
@@ -343,7 +399,7 @@ function describe(): RunnerDescription {
   return {
     id: 'ffmpeg.concat',
     displayName: 'FFmpeg concat + watermark',
-    description: 'Concatenates N input videos into one mp4 (concat demuxer, no re-encode) and applies the dhee.studio watermark overlay in a second pass when an asset is present.',
+    description: 'Concatenates clips with decoded audio aligned to each video duration; video-only clips use packet copy. Adds the dhee.studio watermark when configured.',
     capabilities: ['video_concat', 'video_watermark'],
     modalities: { input: ['video'], output: ['video'] },
     configSchema: {
