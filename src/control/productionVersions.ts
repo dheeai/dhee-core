@@ -147,14 +147,20 @@ function candidateFor(req: z.infer<typeof artifactReadSchema>) {
   if (!candidate.available) throw Error(candidate.reason ?? 'Artifact is unavailable.');
   return candidate;
 }
-export function readProductionArtifact(req: z.infer<typeof artifactReadSchema>) {
+export function readProductionArtifact(
+  req: z.infer<typeof artifactReadSchema>,
+  purpose: 'preview' | 'assembly-verification' = 'preview'
+) {
+  // Internal audit reads keep the same selected-version, confined-path and hash checks.
+  // Public artifact.read remains a 64-KiB preview; it cannot set this purpose.
+  const maxInlineBytes = purpose === 'assembly-verification' ? 8 * 1024 * 1024 : 65536;
   const candidate = candidateFor(req);
   const isText = ['.md', '.json', '.txt', '.srt', '.vtt', '.csv'].includes(
     extname(candidate.path).toLowerCase()
   );
   return {
     ...candidate,
-    ...(isText && candidate.bytes! <= 65536
+    ...(isText && candidate.bytes! <= maxInlineBytes
       ? {
           text: readReference({
             kind: 'localFile',

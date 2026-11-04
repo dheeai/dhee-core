@@ -1,4 +1,5 @@
 /** Orchestrate the Desktop-owned checker without adding a second media implementation. */
+import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -17,6 +18,7 @@ const criteriaSchema = z
       .array(
         z
           .object({
+            visualRequirements: z.array(z.string().trim().min(1).max(500)).min(1).max(10).optional(),
             videoInput: z.string().min(1),
             durationSec: z.number().finite().positive().max(120),
             audioInput: z.string().min(1).optional(),
@@ -38,6 +40,7 @@ const findingSchema = z.object({
 });
 const reportSchema = z.object({
   analyzerVersion: z.number().int().positive(),
+  visualReviewConfigSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   status: z.enum(['fail', 'review']),
   deliveryReady: z.literal(false),
   criteria: criteriaSchema,
@@ -121,8 +124,14 @@ export async function verifyAfterAssembly(
       const base = { projectDir: req.projectDir, branchId: req.branchId, nodeId: id };
       if (listProductionVersions({ ...base, action: 'version.list' }).status !== 'completed')
         throw Error('A verification source is incomplete.');
-      return readProductionArtifact({ ...base, action: 'artifact.read' });
+      return readProductionArtifact({ ...base, action: 'artifact.read' }, id === nodeId ? 'assembly-verification' : 'preview');
     };
+    // Wire contract shared with Desktop: normalized endpoint + model, never credentials.
+    const reviewConfigHash = () => createHash('sha256').update(JSON.stringify([
+      process.env['DHEE_REVIEW_VLM_BASE_URL']?.trim().replace(/\/$/, '') ?? '',
+      process.env['DHEE_REVIEW_VLM_MODEL']?.trim() ?? '',
+    ])).digest('hex');
+    const configBefore = reviewConfigHash();
     const before = Object.fromEntries(keys.map(key => [key, read(key)]));
     options.signal?.throwIfAborted();
     const executed = await run({
@@ -143,10 +152,13 @@ export async function verifyAfterAssembly(
     if (!('text' in artifact) || typeof artifact.text !== 'string')
       throw Error('Verification report is missing or too large.');
     const report = reportSchema.parse(JSON.parse(artifact.text));
-    if (report.analyzerVersion !== 2) throw Error('Stale: verification analyzer changed; rerun with a fresh report path.');
+    if (report.analyzerVersion !== 3) throw Error('Stale: verification analyzer changed; rerun with a fresh report path.');
     const stale = (message: string): never => {
       throw Error(`Stale: ${message}`);
     };
+    if (criteria.segments.some(s => s.visualRequirements?.length) &&
+      (report.visualReviewConfigSha256 !== configBefore || reviewConfigHash() !== configBefore))
+      stale('visual review configuration changed; rerun with a fresh report path.');
     if (canonical(report.criteria) !== canonical(criteria))
       stale('saved check criteria changed; rerun verification.');
     if (Object.keys(report.inputs).sort().join('\n') !== [...keys].sort().join('\n'))

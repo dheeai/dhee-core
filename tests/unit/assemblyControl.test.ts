@@ -374,7 +374,7 @@ async function checkedFixture(checkStatus: 'pass' | 'fail' = 'pass') {
       writeFileSync(
         join(projectDir, 'audit.json'),
         JSON.stringify({
-          analyzerVersion: 2,
+          analyzerVersion: 3,
           status: checkStatus === 'fail' ? 'fail' : 'review',
           deliveryReady: false,
           inputs,
@@ -480,4 +480,69 @@ it('does not trust a report with missing checks or criteria changed after it ran
     ok: true,
     result: { verification: { status: 'stale', deliveryReady: false } },
   });
+});
+it('marks analyzer-v2 reports stale after the visual-review upgrade', async () => {
+  const { readFileSync } = await import('node:fs');
+  const f = await checkedFixture();
+  await f.control(f.request);
+  const path = join(f.projectDir, 'audit.json');
+  const report = JSON.parse(readFileSync(path, 'utf8'));
+  report.analyzerVersion = 2;
+  writeFileSync(path, JSON.stringify(report));
+  expect(await f.control(f.request)).toMatchObject({ok:true,result:{verification:{status:'stale',deliveryReady:false}}});
+});
+it('invalidates saved review when scene requirements are added', async () => {
+  const { readFileSync } = await import('node:fs');
+  const f = await checkedFixture();
+  await f.control(f.request);
+  const path = join(f.projectDir, 'bundles/test/bundle.json');
+  const bundle = JSON.parse(readFileSync(path, 'utf8'));
+  bundle.nodes.find((n:any)=>n.id==='audit').runner.config.segments[0].visualRequirements=['Doctor stays seated.'];
+  writeFileSync(path, JSON.stringify(bundle));
+  expect(await f.control(f.request)).toMatchObject({ok:true,result:{verification:{status:'stale',deliveryReady:false}}});
+});
+it('reads detailed assembly reports beyond the ordinary text-preview limit', async () => {
+  const { readFileSync } = await import('node:fs');
+  const f = await checkedFixture();
+  await f.control(f.request);
+  const path = join(f.projectDir, 'audit.json');
+  const report = JSON.parse(readFileSync(path, 'utf8'));
+  // Detailed model evidence lives in the report, not in the compact MCP response.
+  report.visualReviews = [{ evidence: 'Detailed sampled evidence. '.repeat(4000) }];
+  writeFileSync(path, JSON.stringify(report));
+  expect(await f.control(f.request)).toMatchObject({ok:true,result:{verification:{status:'review',deliveryReady:false}}});
+});
+
+it('keeps ordinary report previews at 64 KiB and bounds audit reads at 8 MiB', async () => {
+ const {readFileSync}=await import('node:fs');
+ const f=await checkedFixture();await f.control(f.request);
+ const path=join(f.projectDir,'audit.json');const report=JSON.parse(readFileSync(path,'utf8'));
+ report.visualReviews=[{evidence:'x'.repeat(70000)}];writeFileSync(path,JSON.stringify(report));
+ expect(await f.control({action:'artifact.read',projectDir:f.projectDir,nodeId:'audit'})).toMatchObject({ok:true,result:{inline:false}});
+ report.visualReviews=[{evidence:'x'.repeat(8*1024*1024)}];writeFileSync(path,JSON.stringify(report));
+ expect(await f.control(f.request)).toMatchObject({ok:true,result:{verification:{status:'unavailable',deliveryReady:false}}});
+});
+
+it('invalidates a visual review when its model changes without changing media', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  vi.stubEnv('DHEE_REVIEW_VLM_BASE_URL', 'http://vision.invalid/v1');
+  vi.stubEnv('DHEE_REVIEW_VLM_MODEL', 'model-a');
+  try {
+    const f = await checkedFixture();
+    const bundlePath = join(f.projectDir, 'bundles/test/bundle.json');
+    const bundle = JSON.parse(readFileSync(bundlePath, 'utf8'));
+    const criteria = bundle.nodes.find((n: any) => n.id === 'audit').runner.config;
+    criteria.segments[0].visualRequirements = ['Doctor remains seated.'];
+    writeFileSync(bundlePath, JSON.stringify(bundle));
+    await f.control(f.request);
+    const path = join(f.projectDir, 'audit.json');
+    const report = JSON.parse(readFileSync(path, 'utf8'));
+    report.criteria = criteria;
+    report.visualReviewConfigSha256 = createHash('sha256').update(JSON.stringify(['http://vision.invalid/v1', 'model-a'])).digest('hex');
+    writeFileSync(path, JSON.stringify(report));
+    expect(await f.control(f.request)).toMatchObject({ok:true,result:{verification:{status:'review'}}});
+    vi.stubEnv('DHEE_REVIEW_VLM_MODEL', 'model-b');
+    expect(await f.control(f.request)).toMatchObject({ok:true,result:{verification:{status:'stale',reason:expect.stringMatching(/configuration/),deliveryReady:false}}});
+  } finally { vi.unstubAllEnvs(); }
 });
